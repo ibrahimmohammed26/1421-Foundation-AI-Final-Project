@@ -1,0 +1,435 @@
+from playwright.sync_api import sync_playwright
+from fpdf import FPDF
+import os
+import time
+from io import BytesIO
+from PIL import Image
+
+
+
+
+def scrape_facebook_section(page_url, section_name):
+   """
+   Scrapes Facebook sections with your exact URL structure
+   """
+   print(f"Scraping: {section_name}")
+
+
+   with sync_playwright() as p:
+       browser = p.chromium.launch(headless=True)
+       page = browser.new_page()
+
+
+       try:
+           # Navigate with longer timeout for complex sections
+           page.goto(page_url, wait_until="networkidle", timeout=45000)
+           page.wait_for_timeout(8000)
+
+
+           # Special handling for different section types
+           if "photo" in section_name.lower():
+               # Scroll more for photos
+               for i in range(6):
+                   page.mouse.wheel(0, 1000)
+                   page.wait_for_timeout(2500)
+           else:
+               # Standard scrolling for other sections
+               for i in range(3):
+                   page.mouse.wheel(0, 800)
+                   page.wait_for_timeout(2000)
+
+
+           # Get all text content and links
+           content_text = get_all_page_text(page)
+           links = extract_links(page)
+
+
+           # Download unique images using browser context
+           images_data = download_images_from_page(page, section_name)
+
+
+           browser.close()
+
+
+           # Create text/data PDF in section folder
+           create_data_pdf(section_name, content_text, links, page_url)
+
+
+       except Exception as e:
+           print(f"Error scraping {section_name}: {e}")
+           browser.close()
+           create_data_pdf(section_name, f"Section processed with limitations. Error: {str(e)}", [], page_url)
+
+
+
+
+def get_all_page_text(page):
+   """Extract all text content with better selectors"""
+   try:
+       page.wait_for_timeout(5000)
+
+
+       content_selectors = [
+           'body',
+           '[role="main"]',
+           'div[data-pagelet]',
+           'div[class*="x1yztbdb"]',
+           'div[class*="x1n2onr6"]',
+           'article',
+           '[role="article"]'
+       ]
+
+
+       all_text = ""
+       seen_text = set()  # Avoid duplicates
+
+
+       for selector in content_selectors:
+           try:
+               elements = page.query_selector_all(selector)
+               for element in elements[:5]:
+                   text = element.inner_text()
+                   if text and len(text.strip()) > 20:
+                       # Only add if not duplicate
+                       text_hash = hash(text[:100])  # Use first 100 chars as identifier
+                       if text_hash not in seen_text:
+                           all_text += text + "\n\n"
+                           seen_text.add(text_hash)
+           except:
+               continue
+
+
+       return all_text.strip() if all_text else "Content extraction completed - limited text available due to Facebook's dynamic loading"
+
+
+   except Exception as e:
+       return f"Text extraction completed: {str(e)}"
+
+
+
+
+def extract_links(page):
+   """Extract all relevant links from the page"""
+   links = []
+   try:
+       # Get all links
+       link_elements = page.query_selector_all('a[href]')
+       seen_urls = set()
+
+
+       for link in link_elements:
+           try:
+               href = link.get_attribute('href')
+               text = link.inner_text().strip()
+
+
+               # Filter meaningful links
+               if (href and text and
+                       len(text) > 3 and
+                       len(text) < 100 and
+                       href not in seen_urls and
+                       'facebook.com' in href):
+
+
+                   links.append({
+                       'text': text[:80],
+                       'url': href[:150]
+                   })
+                   seen_urls.add(href)
+
+
+                   if len(links) >= 30:  # Limit
+                       break
+           except:
+               continue
+
+
+   except Exception as e:
+       print(f"Link extraction note: {e}")
+
+
+   return links
+
+
+
+
+def download_images_from_page(page, section_name):
+   """Download unique images using Playwright's browser context"""
+   images_data = []
+   output_dir = "facebook_data_review"
+
+
+   # Create section-specific folder structure
+   section_folder = os.path.join(output_dir, section_name.replace('/', '_'))
+   img_dir = os.path.join(section_folder, "images")
+
+
+   if not os.path.exists(img_dir):
+       os.makedirs(img_dir)
+
+
+   try:
+       # More specific selectors for actual content images
+       img_selectors = [
+           'img[src*="scontent"]',
+           'img[src*="fbcdn"]',
+       ]
+
+
+       found_images = []
+       seen_urls = set()  # Track URLs to avoid duplicates
+
+
+       for selector in img_selectors:
+           img_elements = page.query_selector_all(selector)
+           for img in img_elements:
+               try:
+                   src = img.get_attribute('src')
+                   alt = img.get_attribute('alt') or 'Image'
+
+
+                   # Skip if already seen
+                   if src in seen_urls:
+                       continue
+
+
+                   # Filter criteria
+                   if src and 'http' in src:
+                       # Check image dimensions
+                       bbox = img.bounding_box()
+                       if bbox and bbox['width'] > 80 and bbox['height'] > 80:
+                           # Additional filters to remove UI elements
+                           if (not any(x in src.lower() for x in ['profile', 'static', 'emoji', 'icon']) and
+                                   not any(x in alt.lower() for x in ['profile picture', 'icon'])):
+                               found_images.append({
+                                   'url': src,
+                                   'alt': alt,
+                                   'width': bbox['width'],
+                                   'height': bbox['height']
+                               })
+                               seen_urls.add(src)
+               except:
+                   continue
+
+
+       print(f"  Found {len(found_images)} unique images")
+
+
+       # Download images
+       for i, img_info in enumerate(found_images[:20]):  # Limit to 20
+           try:
+               response = page.request.get(img_info['url'])
+
+
+               if response.status == 200:
+                   img_data = response.body()
+                   img_path = os.path.join(img_dir, f"image_{i + 1}.jpg")
+
+
+                   try:
+                       image = Image.open(BytesIO(img_data))
+
+
+                       # Convert to RGB
+                       if image.mode in ('RGBA', 'LA', 'P'):
+                           background = Image.new('RGB', image.size, (255, 255, 255))
+                           if image.mode == 'P':
+                               image = image.convert('RGBA')
+                           if image.mode in ('RGBA', 'LA'):
+                               background.paste(image, mask=image.split()[-1])
+                           else:
+                               background.paste(image)
+                           image = background
+
+
+                       # Resize if too large
+                       max_size = (1200, 1200)
+                       image.thumbnail(max_size, Image.Resampling.LANCZOS)
+
+
+                       # Skip very small images (likely UI elements)
+                       if image.size[0] > 100 and image.size[1] > 100:
+                           image.save(img_path, 'JPEG', quality=85)
+                           images_data.append({
+                               'path': img_path,
+                               'description': img_info['alt'][:80],
+                               'size': image.size
+                           })
+                           print(f"  ✓ Downloaded image {i + 1}")
+
+
+                   except Exception as e:
+                       print(f"  ✗ Failed to process image {i + 1}: {e}")
+
+
+           except Exception as e:
+               print(f"  ✗ Failed to download image {i + 1}: {e}")
+
+
+           time.sleep(0.3)
+
+
+   except Exception as e:
+       print(f"Image download error: {e}")
+
+
+   return images_data
+
+
+
+
+def create_data_pdf(section_name, content_text, links, page_url):
+   """Create PDF with text content and links in section folder"""
+   output_dir = "facebook_data_review"
+
+
+   # Create section-specific folder
+   section_folder = os.path.join(output_dir, section_name.replace('/', '_'))
+   data_dir = os.path.join(section_folder, "data")
+
+
+   if not os.path.exists(data_dir):
+       os.makedirs(data_dir)
+
+
+   pdf = FPDF()
+   pdf.add_page()
+
+
+   # Header
+   pdf.set_font('Arial', 'B', 16)
+   pdf.cell(200, 10, txt="FACEBOOK DATA EXTRACTION", ln=True, align='C')
+   pdf.ln(5)
+
+
+   # Section Info
+   pdf.set_font('Arial', 'B', 14)
+   pdf.cell(200, 10, txt=f"Section: {section_name.replace('/', ' - ').title()}", ln=True)
+   pdf.ln(5)
+
+
+   # Metadata
+   pdf.set_font('Arial', '', 10)
+   pdf.cell(200, 8, txt=f"URL: {page_url}", ln=True)
+   pdf.cell(200, 8, txt=f"Date: {time.strftime('%Y-%m-%d %H:%M')}", ln=True)
+   pdf.ln(10)
+
+
+   # Stats
+   pdf.set_font('Arial', 'B', 12)
+   pdf.cell(200, 10, txt="Extraction Summary:", ln=True)
+   pdf.set_font('Arial', '', 10)
+   pdf.cell(200, 8, txt=f"Text Content: {len(content_text)} characters", ln=True)
+   pdf.cell(200, 8, txt=f"Links Found: {len(links)}", ln=True)
+   pdf.ln(15)
+
+
+   # Text Content Section
+   if content_text and len(content_text.strip()) > 10:
+       pdf.add_page()
+       pdf.set_font('Arial', 'B', 14)
+       pdf.cell(200, 10, txt="EXTRACTED TEXT CONTENT", ln=True)
+       pdf.ln(8)
+
+
+       pdf.set_font('Arial', '', 9)
+       lines = content_text.split('\n')
+       line_count = 0
+
+
+       for line in lines:
+           if line_count > 300:
+               pdf.multi_cell(0, 5, txt="[Content truncated - see full extraction]")
+               break
+
+
+           clean_line = line.strip()
+           if clean_line and len(clean_line) > 2:
+               try:
+                   safe_text = clean_line.encode('latin-1', 'replace').decode('latin-1')
+                   pdf.multi_cell(0, 4, txt=safe_text)
+                   pdf.ln(1)
+                   line_count += 1
+               except:
+                   continue
+
+
+   # Links Section
+   if links:
+       pdf.add_page()
+       pdf.set_font('Arial', 'B', 14)
+       pdf.cell(200, 10, txt="EXTRACTED LINKS", ln=True)
+       pdf.ln(8)
+
+
+       pdf.set_font('Arial', '', 9)
+       for i, link in enumerate(links[:50], 1):
+           pdf.set_font('Arial', 'B', 9)
+           pdf.multi_cell(0, 5, txt=f"{i}. {link['text']}")
+           pdf.set_font('Arial', '', 8)
+           pdf.multi_cell(0, 4, txt=f"   URL: {link['url']}")
+           pdf.ln(2)
+
+
+           if pdf.get_y() > 270:
+               pdf.add_page()
+
+
+   # Save PDF in data folder
+   filename = os.path.join(data_dir, f"{section_name.replace('/', '_')}_DATA.pdf")
+   pdf.output(filename)
+   print(f"✓ Data PDF ready: {filename}")
+
+
+
+
+def main():
+   """Scrape all specified Facebook sections"""
+   sections = {
+       "main": "https://www.facebook.com/1421foundation",
+       "about": "https://www.facebook.com/1421foundation/about",
+       "about/category": "https://www.facebook.com/1421foundation/directory_category",
+       "about/details": "https://www.facebook.com/1421foundation/directory_basic_info",
+       "about/links": "https://www.facebook.com/1421foundation/directory_links",
+       "about/contact info": "https://www.facebook.com/1421foundation/directory_contact_info",
+       "about/privacyandlegalinfo": "https://www.facebook.com/1421foundation/directory_privacy_and_legal_info",
+       "followers": "https://www.facebook.com/1421foundation/followers",
+       "following": "https://www.facebook.com/1421foundation/following",
+       "photos": "https://www.facebook.com/1421foundation/photos_by",
+       "photos/taggedphotos": "https://www.facebook.com/1421foundation/photos_of",
+       "photos/photoalbums": "https://www.facebook.com/1421foundation/photos_albums",
+       "mentions": "https://www.facebook.com/1421foundation/mentions",
+       "more/check-ins": "https://www.facebook.com/1421foundation/map"
+   }
+
+
+   print("Starting Facebook Data Extraction...")
+   print("=" * 60)
+   print(f"Processing {len(sections)} sections")
+   print("=" * 60)
+
+
+   # Process each section
+   for section_name, url in sections.items():
+       scrape_facebook_section(url, section_name)
+       time.sleep(3)
+
+
+   print("=" * 60)
+   print("✓ All sections completed!")
+   print("\nOUTPUT STRUCTURE:")
+   print("  facebook_data_review/")
+   print("    ├── [section_name]/")
+   print("    │   ├── data/")
+   print("    │   │   └── [section_name]_DATA.pdf")
+   print("    │   └── images/")
+   print("    │       ├── image_1.jpg")
+   print("    │       ├── image_2.jpg")
+   print("    │       └── ...")
+   print("\nEach section has its own folder with 'data' and 'images' subfolders!")
+
+
+
+
+if __name__ == "__main__":
+   main()
