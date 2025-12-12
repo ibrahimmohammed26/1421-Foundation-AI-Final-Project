@@ -1,0 +1,1545 @@
+from playwright.sync_api import sync_playwright
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as ReportLabImage, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib import colors
+import os
+import time
+from io import BytesIO
+from PIL import Image as PILImage
+import html
+import re
+
+import requests
+from datetime import datetime
+import urllib.parse
+import zipfile
+
+
+def scrape_facebook_posts(post_urls, main_folder="facebook_posts_collection"):
+    """
+    Scrape multiple Facebook posts and save each in its own folder
+    """
+    print(f"🚀 Starting Facebook Posts Scraper")
+    print(f"📊 Processing {len(post_urls)} posts")
+    print("=" * 60)
+
+    # Create main folder
+    os.makedirs(main_folder, exist_ok=True)
+
+    # Track successes and failures
+    successful_posts = 0
+    failed_posts = []  # Will store (post_number, url, error_message)
+
+    # Create error log file
+    error_log_path = os.path.join(main_folder, "scraping_errors.txt")
+
+    # Process posts in the EXACT order given
+    for i, post_url in enumerate(post_urls, 1):
+        print(f"\n📱 Processing Post {i}/{len(post_urls)}")
+        print(f"   URL: {post_url[:80]}...")
+
+        # Create folder for this post
+        post_folder = os.path.join(main_folder, f"post_{i}")
+
+        try:
+            post_success, error_message = scrape_single_post_with_links(post_url, i, post_folder)
+
+            if post_success:
+                successful_posts += 1
+                print(f"   ✅ Post {i} completed successfully!")
+            else:
+                failed_posts.append((i, post_url, error_message))
+                print(f"   ❌ Post {i} failed: {error_message}")
+
+                # Log error to file
+                with open(error_log_path, 'a', encoding='utf-8') as error_file:
+                    error_file.write(f"Post {i}: {post_url}\n")
+                    error_file.write(f"Error: {error_message}\n")
+                    error_file.write("-" * 50 + "\n")
+
+        except Exception as e:
+            error_msg = f"Unexpected error: {str(e)}"
+            failed_posts.append((i, post_url, error_msg))
+            print(f"   💥 Post {i} crashed: {error_msg}")
+
+            # Log error to file
+            with open(error_log_path, 'a', encoding='utf-8') as error_file:
+                error_file.write(f"Post {i}: {post_url}\n")
+                error_file.write(f"CRASH: {error_msg}\n")
+                error_file.write("-" * 50 + "\n")
+
+    print("\n" + "=" * 60)
+    print(f"📊 SCRAPING COMPLETE!")
+    print(f"   Successful: {successful_posts}/{len(post_urls)} posts")
+    print(f"   Failed: {len(failed_posts)}/{len(post_urls)} posts")
+    print(f"   Success rate: {(successful_posts / len(post_urls)) * 100:.1f}%")
+    print(f"   Main folder: {os.path.abspath(main_folder)}")
+
+    # Create zip file of results
+    zip_path = create_zip_file(main_folder)
+    print(f"   Zip file created: {zip_path}")
+
+    # Show detailed error report if there are failures
+    if failed_posts:
+        print(f"\n❌ FAILED POSTS DETAILS ({len(failed_posts)} posts):")
+        print("=" * 50)
+
+        # Group errors by type for better analysis
+        error_types = {}
+        for post_num, url, error_msg in failed_posts:
+            # Extract error type (first line or key words)
+            error_type = "Unknown Error"
+            if "timeout" in error_msg.lower():
+                error_type = "Timeout Error"
+            elif "login" in error_msg.lower():
+                error_type = "Login/Blocked Error"
+            elif "network" in error_msg.lower():
+                error_type = "Network Error"
+            elif "not found" in error_msg.lower() or "404" in error_msg:
+                error_type = "Page Not Found"
+            elif "denied" in error_msg.lower() or "access" in error_msg.lower():
+                error_type = "Access Denied"
+            else:
+                error_type = "Other Error"
+
+            if error_type not in error_types:
+                error_types[error_type] = []
+            error_types[error_type].append((post_num, url, error_msg))
+
+        # Print error summary by type
+        print("\n📊 ERROR BREAKDOWN BY TYPE:")
+        for error_type, posts in error_types.items():
+            print(f"   {error_type}: {len(posts)} posts")
+
+        print("\n📋 DETAILED FAILED POST LIST:")
+        for error_type, posts in error_types.items():
+            print(f"\n   {error_type.upper()}:")
+            for post_num, url, error_msg in posts[:10]:  # Show first 10 of each type
+                print(f"     • Post {post_num}: {url[:60]}...")
+                if len(posts) > 10 and posts.index((post_num, url, error_msg)) == 9:
+                    print(f"       ... and {len(posts) - 10} more")
+                    break
+
+        print(f"\n📄 Full error details saved to: {error_log_path}")
+
+    print("\n📁 Folder structure:")
+    print(f"   {main_folder}/")
+    print("   ├── post_1/ (First URL in your list)")
+    print("   │   ├── data/post_1.pdf")
+    print("   │   ├── images/ (post images)")
+    print("   │   └── linked_pages/ (scraped linked pages as PDFs only)")
+    print("   ├── post_2/ (Second URL in your list)")
+    print("   │   ├── data/post_2.pdf")
+    print("   │   ├── images/")
+    print("   │   └── linked_pages/")
+    print("   └── ...")
+    print("=" * 60)
+
+    # Return both successful count and failed posts list
+    return successful_posts, failed_posts, zip_path
+
+
+def create_zip_file(main_folder):
+    """Create a zip file of all scraped posts"""
+    try:
+        zip_path = f"{main_folder}.zip"
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for root, dirs, files in os.walk(main_folder):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    # Create relative path for zip
+                    arcname = os.path.relpath(file_path, os.path.dirname(main_folder))
+                    zipf.write(file_path, arcname)
+        return zip_path
+    except Exception as e:
+        print(f"   ⚠️ Could not create zip file: {e}")
+        return None
+
+
+def scrape_single_post_with_links(post_url, post_number, post_folder):
+    """
+    Scrape a single Facebook post and any linked pages it contains
+    Returns: (success: bool, error_message: str)
+    """
+    error_message = ""
+
+    try:
+        # Create subfolders
+        data_dir = os.path.join(post_folder, "data")
+        images_dir = os.path.join(post_folder, "images")
+        linked_pages_dir = os.path.join(post_folder, "linked_pages")
+        os.makedirs(data_dir, exist_ok=True)
+        os.makedirs(images_dir, exist_ok=True)
+        os.makedirs(linked_pages_dir, exist_ok=True)
+
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(
+                viewport={'width': 1920, 'height': 1080},
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            )
+            page = context.new_page()
+
+            try:
+                # Navigate to post
+                print(f"   🌐 Loading Facebook post...")
+                page.goto(post_url, wait_until="domcontentloaded", timeout=45000)
+                page.wait_for_timeout(3000)
+
+                # Check if we're blocked by login
+                if "login" in page.url.lower():
+                    error_message = "Login page detected - post may be private"
+                    print(f"   ⚠️  {error_message}")
+                    browser.close()
+                    return False, error_message
+
+                # Scroll to load content
+                print(f"   📜 Loading content...")
+                for _ in range(3):
+                    page.evaluate("window.scrollBy(0, 800)")
+                    page.wait_for_timeout(1500)
+
+                # Extract post data
+                print(f"   🔍 Extracting data...")
+                post_data = extract_post_data_simple(page, post_url)
+
+                # Download images from post
+                print(f"   🖼️  Downloading post images...")
+                images = download_images(page, images_dir)
+                post_data['images'] = images
+
+                # Get external links
+                external_links = post_data.get('external_links', [])
+
+                # Scrape linked pages if found
+                linked_pages_data = []
+                if external_links:
+                    print(f"   🔗 Found {len(external_links)} external links")
+
+                    # Limit to 5 links maximum per post
+                    links_to_scrape = external_links[:5]
+
+                    for i, link in enumerate(links_to_scrape, 1):
+                        try:
+                            link_url = link['url']
+                            print(f"      Link {i}/{len(links_to_scrape)}: {link['domain']}")
+
+                            # Create folder for this linked page
+                            link_folder = os.path.join(linked_pages_dir, f"link_{i}")
+                            os.makedirs(link_folder, exist_ok=True)
+
+                            # Scrape the linked page
+                            link_success, link_data = scrape_linked_page(
+                                context,
+                                link_url,
+                                link_folder,
+                                i
+                            )
+
+                            if link_success:
+                                linked_pages_data.append({
+                                    'number': i,
+                                    'original_url': link_url,
+                                    'title': link_data.get('title', '')[:100],
+                                    'content': link_data.get('content', '')[:300],
+                                    'folder': f"linked_pages/link_{i}.pdf"
+                                })
+                                print(f"      ✓ Link {i} scraped successfully")
+                            else:
+                                print(f"      ⚠️ Link {i} failed to scrape")
+
+                        except Exception as e:
+                            print(f"      ⚠️ Error scraping link {i}: {str(e)[:80]}")
+                            continue
+                else:
+                    print(f"   ℹ️  No external links found in this post")
+
+                # Create PDF
+                print(f"   📄 Creating PDF...")
+                pdf_path = os.path.join(data_dir, f"post_{post_number}.pdf")
+                create_post_pdf_simple(
+                    post_data,
+                    pdf_path,
+                    images,
+                    post_number,
+                    linked_pages_data
+                )
+
+                browser.close()
+                return True, ""  # Success
+
+            except Exception as e:
+                error_message = str(e)[:200]
+                browser.close()
+                return False, error_message
+
+    except Exception as e:
+        error_message = f"Fatal error: {str(e)[:200]}"
+        return False, error_message
+
+
+def scrape_linked_page(context, url, links_folder, link_number):
+    """
+    Scrape a linked page and save as PDF directly in links folder
+    Returns: (success: bool, data: dict)
+    """
+    data = {
+        'url': url,
+        'title': '',
+        'content': ''
+    }
+
+    try:
+        print(f"         Opening: {url[:60]}...")
+
+        # Open new page for the linked page
+        page = context.new_page()
+
+        try:
+            # Navigate to linked page with shorter timeout
+            page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            page.wait_for_timeout(2000)
+
+            # Get page title
+            data['title'] = page.title()
+            print(f"         Title: {data['title'][:50]}...")
+
+            # Extract main content - try multiple strategies
+            content_text = ""
+
+            # Strategy 1: Try common content containers
+            content_selectors = [
+                'article',
+                'main',
+                'div[role="main"]',
+                'div.post-content',
+                'div.entry-content',
+                'div.article-content',
+                'div[class*="content"]'
+            ]
+
+            for selector in content_selectors:
+                try:
+                    element = page.query_selector(selector)
+                    if element:
+                        text = element.inner_text().strip()
+                        if len(text) > 100:
+                            content_text = text
+                            break
+                except:
+                    continue
+
+            # Strategy 2: If no content found, get all paragraph text
+            if not content_text:
+                try:
+                    paragraphs = page.query_selector_all('p')
+                    texts = []
+                    for p in paragraphs[:20]:  # Limit to first 20 paragraphs
+                        text = p.inner_text().strip()
+                        if len(text) > 30:  # Skip short paragraphs
+                            texts.append(text)
+                    content_text = '\n\n'.join(texts)
+                except:
+                    pass
+
+            data['content'] = clean_text(content_text[:3000])
+            print(f"         Content: {len(data['content'])} chars")
+
+            # Create PDF directly in links folder
+            pdf_path = os.path.join(links_folder, f"link_{link_number}.pdf")
+            create_linked_page_pdf_simple(data, pdf_path, link_number, url)
+            print(f"         ✓ PDF created: link_{link_number}.pdf")
+
+            page.close()
+            return True, data
+
+        except Exception as e:
+            print(f"         ⚠️ Error loading page: {str(e)[:100]}")
+            page.close()
+            return False, data
+
+    except Exception as e:
+        print(f"         ⚠️ Fatal error: {str(e)[:100]}")
+        return False, data
+
+
+def extract_post_data_simple(page, post_url):
+    """Extract data from a Facebook post with better link detection"""
+    data = {
+        'url': post_url,
+        'title': '',
+        'content': '',
+        'author': '',
+        'external_links': []
+    }
+
+    try:
+        # Get page title
+        data['title'] = page.title()
+
+        # Extract post content - focus on the main post area
+        print(f"      Extracting content...")
+
+        # Try to find the main post content container
+        content_selectors = [
+            'div[data-ad-preview="message"]',
+            'div[class*="userContent"]',
+            'div[data-testid="post_message"]',
+            '[role="article"] div[dir="auto"]',
+        ]
+
+        content_element = None
+        for selector in content_selectors:
+            try:
+                element = page.query_selector(selector)
+                if element:
+                    text = element.inner_text().strip()
+                    if len(text) > 20:
+                        content_element = element
+                        data['content'] = clean_text(text[:4000])
+                        print(f"         Found content: {len(text)} chars")
+                        break
+            except:
+                continue
+
+        # Extract author name
+        print(f"      Extracting author...")
+        author_selectors = [
+            'a[role="link"] strong',
+            'h2 a span',
+            'a.actor-link',
+            '[role="article"] a[href*="/"] strong'
+        ]
+
+        for selector in author_selectors:
+            try:
+                element = page.query_selector(selector)
+                if element:
+                    author = element.inner_text().strip()
+                    if author and len(author) < 100:
+                        data['author'] = clean_text(author)
+                        print(f"         Found author: {author}")
+                        break
+            except:
+                continue
+
+        # Extract ALL external links from the post
+        print(f"      Extracting external links...")
+
+        # Find all links in the post
+        all_links = page.query_selector_all('a[href]')
+        seen_urls = set()
+
+        for link_element in all_links:
+            try:
+                href = link_element.get_attribute('href')
+
+                if not href:
+                    continue
+
+                # Decode Facebook's link wrapper if present
+                # Facebook wraps external links like: https://l.facebook.com/l.php?u=ACTUAL_URL
+                actual_url = href
+                if 'l.facebook.com/l.php' in href or 'l.facebook.com/l/' in href:
+                    try:
+                        from urllib.parse import urlparse, parse_qs
+                        parsed = urlparse(href)
+                        if 'u' in parse_qs(parsed.query):
+                            actual_url = parse_qs(parsed.query)['u'][0]
+                            print(f"         Decoded FB wrapper: {actual_url[:60]}...")
+                    except:
+                        pass
+
+                # Check if it's an external link (not Facebook/Instagram/WhatsApp)
+                is_external = (
+                        actual_url.startswith('http') and
+                        'facebook.com' not in actual_url.lower() and
+                        'fb.com' not in actual_url.lower() and
+                        'fb.me' not in actual_url.lower() and
+                        'instagram.com' not in actual_url.lower() and
+                        'whatsapp.com' not in actual_url.lower() and
+                        actual_url not in seen_urls
+                )
+
+                if is_external:
+                    # Get link text
+                    link_text = link_element.inner_text().strip()
+                    if not link_text:
+                        link_text = "External Link"
+
+                    # Get domain for categorization
+                    try:
+                        from urllib.parse import urlparse
+                        domain = urlparse(actual_url).netloc
+                    except:
+                        domain = ""
+
+                    data['external_links'].append({
+                        'text': clean_text(link_text[:150]),
+                        'url': actual_url[:500],
+                        'domain': domain
+                    })
+
+                    seen_urls.add(actual_url)
+                    print(f"         ✓ Found external link: {domain}")
+
+            except Exception as e:
+                continue
+
+        print(f"      Extracted: {len(data['content'])} chars, {len(data['external_links'])} external links")
+
+    except Exception as e:
+        print(f"      ⚠️ Error in extraction: {e}")
+
+    return data
+
+
+def extract_content_with_links(html_content):
+    """Extract content preserving links inline"""
+    try:
+        # Remove scripts and styles
+        html_content = re.sub(r'<script.*?</script>', '', html_content, flags=re.DOTALL)
+        html_content = re.sub(r'<style.*?</style>', '', html_content, flags=re.DOTALL)
+
+        # Replace links with text + URL in parentheses
+        def replace_link(match):
+            link_text = match.group(2) or match.group(1)
+            link_url = match.group(3)
+
+            # Clean the link text
+            link_text = re.sub(r'<[^>]+>', '', link_text)
+            link_text = clean_text(link_text)
+
+            if link_text and link_url:
+                # Check if it's an external link
+                if any(x in link_url.lower() for x in ['http://', 'https://', 'www.']):
+                    return f"{link_text} [EXTERNAL LINK: {link_url}]"
+                return f"{link_text} [LINK: {link_url}]"
+            return link_text or ""
+
+        # Pattern for links
+        link_pattern = r'<a\s+(?:[^>]*?\s+)?href="([^"]*)"[^>]*>(.*?)</a>'
+        content = re.sub(link_pattern, replace_link, html_content, flags=re.DOTALL | re.IGNORECASE)
+
+        # Remove remaining HTML tags
+        content = re.sub(r'<[^>]+>', ' ', content)
+
+        # Clean up whitespace
+        content = re.sub(r'\s+', ' ', content)
+        content = clean_text(content)
+
+        return content[:6000]
+
+    except Exception as e:
+        print(f"      ⚠️ Error extracting content with links: {e}")
+        return ""
+
+
+def extract_external_links(html_content):
+    """Extract external links from HTML content"""
+    external_links = []
+
+    try:
+        # Find all links in the content
+        link_pattern = r'<a\s+(?:[^>]*?\s+)?href="([^"]*)"[^>]*>(.*?)</a>'
+        matches = list(re.finditer(link_pattern, html_content, re.DOTALL | re.IGNORECASE))
+
+        for match in matches:
+            link_url = match.group(1)
+            link_text = match.group(2)
+
+            # Clean link text
+            link_text = re.sub(r'<[^>]+>', '', link_text)
+            link_text = clean_text(link_text.strip())
+
+            # Check if it's an external link (not Facebook)
+            if (link_text and link_url and
+                    'facebook.com' not in link_url and
+                    'fb.com' not in link_url and
+                    any(x in link_url.lower() for x in ['http://', 'https://', 'www.'])):
+
+                # Extract domain
+                domain = ""
+                try:
+                    parsed_url = urllib.parse.urlparse(link_url)
+                    domain = parsed_url.netloc
+                except:
+                    pass
+
+                external_links.append({
+                    'text': link_text[:100],
+                    'url': link_url[:300],
+                    'domain': domain
+                })
+
+    except Exception as e:
+        print(f"      ⚠️ Error extracting external links: {e}")
+
+    return external_links
+
+
+def extract_links_with_context(html_content):
+    """Extract links with their surrounding context"""
+    links = []
+
+    try:
+        # Find all links in the content
+        link_pattern = r'<a\s+(?:[^>]*?\s+)?href="([^"]*)"[^>]*>(.*?)</a>'
+        matches = list(re.finditer(link_pattern, html_content, re.DOTALL | re.IGNORECASE))
+
+        for match in matches:
+            link_url = match.group(1)
+            link_text = match.group(2)
+
+            # Clean link text
+            link_text = re.sub(r'<[^>]+>', '', link_text)
+            link_text = clean_text(link_text.strip())
+
+            if link_text and link_url:
+                # Get context (50 chars before and after)
+                start = max(0, match.start() - 50)
+                end = min(len(html_content), match.end() + 50)
+                context_html = html_content[start:end]
+                context_text = re.sub(r'<[^>]+>', ' ', context_html)
+                context_text = clean_text(context_text.strip())
+
+                links.append({
+                    'text': link_text[:80],
+                    'url': link_url[:200],
+                    'context': context_text[:150]
+                })
+
+    except Exception as e:
+        print(f"      ⚠️ Error extracting links with context: {e}")
+
+    return links
+
+
+def download_images(page, images_dir):
+    """Download images from the post"""
+    images = []
+
+    try:
+        # Facebook image selectors
+        img_selectors = [
+            'img[src*="scontent"]',
+            'img[src*="fbcdn"]',
+            'div[role="article"] img',
+            'div[data-pagelet="FeedUnit"] img',
+            'img[class*="x1ey2m1c"]',
+            'img[class*="x5yr21d"]',
+            'img[class*="x1lq5wgf"]',
+            'img[class*="xpdipgo"]'
+        ]
+
+        found_urls = set()
+
+        for selector in img_selectors:
+            img_elements = page.query_selector_all(selector)
+            for img in img_elements[:20]:
+                try:
+                    src = img.get_attribute('src')
+
+                    if not src or src in found_urls:
+                        continue
+
+                    # Skip non-content images
+                    if any(x in src.lower() for x in
+                           ['profile', 'static', 'emoji', 'icon', 'svg', 'gif', 'sticker', 'placeholder']):
+                        continue
+
+                    # Check image size if possible
+                    try:
+                        bbox = img.bounding_box()
+                        if bbox and (bbox['width'] < 50 or bbox['height'] < 50):
+                            continue  # Skip tiny images
+                    except:
+                        pass
+
+                    # Download image
+                    response = page.request.get(src)
+                    if response.status == 200:
+                        img_data = response.body()
+
+                        # Create unique filename
+                        img_filename = f"image_{len(images) + 1}.jpg"
+                        img_path = os.path.join(images_dir, img_filename)
+
+                        # Save image
+                        with open(img_path, 'wb') as f:
+                            f.write(img_data)
+
+                        # Get image dimensions for PDF
+                        try:
+                            pil_img = PILImage.open(BytesIO(img_data))
+                            images.append({
+                                'path': img_path,
+                                'filename': img_filename,
+                                'width': pil_img.width,
+                                'height': pil_img.height
+                            })
+                            print(f"      ✓ Downloaded image {len(images)}")
+                        except:
+                            # Still record even if we can't open it
+                            images.append({
+                                'path': img_path,
+                                'filename': img_filename,
+                                'width': 0,
+                                'height': 0
+                            })
+
+                        found_urls.add(src)
+
+                except Exception as e:
+                    continue
+
+    except Exception as e:
+        print(f"      ⚠️ Image download error: {e}")
+
+    return images
+
+
+def clean_text(text):
+    """Clean text for safe display"""
+    if not text:
+        return ""
+
+    # Replace problematic Unicode characters with safe alternatives
+    replacements = {
+        '\u2022': '•',
+        '\u2013': '-',
+        '\u2014': '-',
+        '\u2018': "'",
+        '\u2019': "'",
+        '\u201c': '"',
+        '\u201d': '"',
+        '\u00a0': ' ',
+        '\u200b': '',  # Zero-width space
+        '\ufffd': '',  # Replacement character
+        '\u2026': '...',  # Ellipsis
+        '\u00a9': '(c)',
+        '\u00ae': '(R)',
+        '\u2122': '(TM)',
+    }
+
+    cleaned = text
+    for char, replacement in replacements.items():
+        cleaned = cleaned.replace(char, replacement)
+
+    # Remove excessive whitespace
+    cleaned = re.sub(r'\s+', ' ', cleaned)
+
+    return cleaned.strip()
+
+
+def create_post_pdf_simple(post_data, pdf_path, images, post_number, linked_pages_data=None):
+    """Create PDF for a single post with simple formatting (no date, reactions, comments)"""
+    # Create PDF document
+    doc = SimpleDocTemplate(
+        pdf_path,
+        pagesize=letter,
+        rightMargin=72,
+        leftMargin=72,
+        topMargin=72,
+        bottomMargin=72
+    )
+
+    # Container for PDF elements
+    elements = []
+
+    # Define styles
+    styles = getSampleStyleSheet()
+
+    # Custom styles
+    title_style = ParagraphStyle(
+        'TitleStyle',
+        parent=styles['Title'],
+        fontSize=16,
+        spaceAfter=12,
+        textColor=colors.HexColor('#1A365D')
+    )
+
+    header_style = ParagraphStyle(
+        'HeaderStyle',
+        parent=styles['Heading2'],
+        fontSize=12,
+        spaceAfter=6,
+        textColor=colors.HexColor('#2D3748')
+    )
+
+    normal_style = ParagraphStyle(
+        'NormalStyle',
+        parent=styles['Normal'],
+        fontSize=10,
+        spaceAfter=6
+    )
+
+    link_style = ParagraphStyle(
+        'LinkStyle',
+        parent=styles['Normal'],
+        fontSize=9,
+        textColor=colors.HexColor('#1A56DB'),
+        spaceAfter=4
+    )
+
+    external_link_style = ParagraphStyle(
+        'ExternalLinkStyle',
+        parent=styles['Normal'],
+        fontSize=9,
+        textColor=colors.HexColor('#057A55'),
+        spaceAfter=4
+    )
+
+    small_style = ParagraphStyle(
+        'SmallStyle',
+        parent=styles['Normal'],
+        fontSize=8,
+        textColor=colors.HexColor('#718096')
+    )
+
+    metadata_style = ParagraphStyle(
+        'MetadataStyle',
+        parent=styles['Normal'],
+        fontSize=9,
+        textColor=colors.HexColor('#4B5563'),
+        spaceAfter=3
+    )
+
+    # Add main title with post number
+    elements.append(Paragraph(f"Facebook Post #{post_number}", title_style))
+
+    # Add post number info
+    elements.append(Paragraph(f"<i>Post {post_number} in the provided list</i>", small_style))
+
+    elements.append(Spacer(1, 0.2 * inch))
+
+    # Add simple post metadata table - ONLY URL and Author
+    metadata = [
+        ["<b>Post URL:</b>", post_data['url']],
+    ]
+
+    if post_data['author']:
+        metadata.append(["<b>Author:</b>", post_data['author']])
+
+    metadata_table = Table(metadata, colWidths=[1.5 * inch, 4 * inch])
+    metadata_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#E2E8F0')),
+        ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+        ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
+        ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+    ]))
+
+    elements.append(metadata_table)
+    elements.append(Spacer(1, 0.3 * inch))
+
+    # Add content section with embedded links
+    elements.append(Paragraph("<b>Post Content:</b>", header_style))
+
+    if post_data.get('content'):
+        # Process content to format links nicely
+        content_with_links = post_data['content']
+
+        # Split content into paragraphs
+        paragraphs = content_with_links.split('\n')
+        line_count = 0
+
+        for para in paragraphs:
+            para = para.strip()
+            if para:
+                # Check if paragraph contains a link marker
+                if '[EXTERNAL LINK:' in para:
+                    # Split by external link markers
+                    parts = re.split(r'(\[EXTERNAL LINK:[^\]]+\])', para)
+                    for part in parts:
+                        if part.startswith('[EXTERNAL LINK:'):
+                            # Extract URL from link marker
+                            link_match = re.search(r'\[EXTERNAL LINK:\s*([^\]]+)\]', part)
+                            if link_match:
+                                url = link_match.group(1)
+                                # Create external link indicator
+                                link_text = f"<link href='{url}' color='green'><u>🌐 External Link</u></link>"
+                                elements.append(Paragraph(link_text, external_link_style))
+                                elements.append(Paragraph(f"URL: {url[:120]}", small_style))
+                                elements.append(Spacer(1, 0.05 * inch))
+                        elif part.startswith('[LINK:'):
+                            # Extract URL from link marker
+                            link_match = re.search(r'\[LINK:\s*([^\]]+)\]', part)
+                            if link_match:
+                                url = link_match.group(1)
+                                # Create clickable link in PDF
+                                link_text = f"<link href='{url}' color='blue'><u>🔗 Link</u></link>"
+                                elements.append(Paragraph(link_text, link_style))
+                                elements.append(Paragraph(f"URL: {url[:100]}", small_style))
+                                elements.append(Spacer(1, 0.05 * inch))
+                        elif part.strip():
+                            safe_part = html.escape(part)
+                            elements.append(Paragraph(safe_part, normal_style))
+                elif '[LINK:' in para:
+                    # Split by internal link markers
+                    parts = re.split(r'(\[LINK:[^\]]+\])', para)
+                    for part in parts:
+                        if part.startswith('[LINK:'):
+                            link_match = re.search(r'\[LINK:\s*([^\]]+)\]', part)
+                            if link_match:
+                                url = link_match.group(1)
+                                link_text = f"<link href='{url}' color='blue'><u>🔗 Link</u></link>"
+                                elements.append(Paragraph(link_text, link_style))
+                                elements.append(Paragraph(f"URL: {url[:100]}", small_style))
+                                elements.append(Spacer(1, 0.05 * inch))
+                        elif part.strip():
+                            safe_part = html.escape(part)
+                            elements.append(Paragraph(safe_part, normal_style))
+                else:
+                    safe_para = html.escape(para)
+                    elements.append(Paragraph(safe_para, normal_style))
+
+                elements.append(Spacer(1, 0.05 * inch))
+                line_count += 1
+
+                # Limit content in PDF to prevent huge files
+                if line_count > 50:
+                    elements.append(Paragraph("[Content truncated - see images for full post]", small_style))
+                    break
+    else:
+        elements.append(Paragraph("No text content extracted from this post", normal_style))
+
+    elements.append(Spacer(1, 0.2 * inch))
+
+    # Add linked pages section if we scraped any
+    if linked_pages_data:
+        elements.append(Paragraph(f"<b>Linked Pages Scraped ({len(linked_pages_data)}):</b>", header_style))
+
+        for i, link_data in enumerate(linked_pages_data, 1):
+            elements.append(Paragraph(f"<b>Linked Page {i}:</b>", normal_style))
+            elements.append(Paragraph(f"URL: {link_data['original_url'][:100]}", link_style))
+
+            if link_data.get('title'):
+                elements.append(Paragraph(f"Title: {link_data['title'][:80]}", metadata_style))
+
+            if link_data.get('content'):
+                content_preview = link_data['content'][:200] + "..." if len(link_data['content']) > 200 else link_data[
+                    'content']
+                elements.append(Paragraph(f"Content Preview: {content_preview}", small_style))
+
+            elements.append(Paragraph(f"Saved in: {link_data['folder']}", small_style))
+            elements.append(Spacer(1, 0.1 * inch))
+
+    # Add external links section if there are external links
+    elif post_data.get('external_links') and len(post_data['external_links']) > 0:
+        elements.append(Paragraph(f"<b>External Links Found ({len(post_data['external_links'])}):</b>", header_style))
+
+        for i, link in enumerate(post_data['external_links'][:5], 1):  # Limit to 5 links
+            elements.append(Paragraph(f"<b>Link {i}:</b>", metadata_style))
+
+            if link['text']:
+                elements.append(Paragraph(f"Text: {link['text']}", metadata_style))
+
+            elements.append(Paragraph(f"URL: {link['url'][:120]}", external_link_style))
+
+            if link.get('context'):
+                elements.append(Paragraph(f"Context: {link['context']}", small_style))
+
+            elements.append(Spacer(1, 0.1 * inch))
+
+    elements.append(Spacer(1, 0.2 * inch))
+
+    # Add images section if there are images
+    if images:
+        elements.append(Paragraph(f"<b>Post Images ({len(images)}):</b>", header_style))
+
+        for i, img in enumerate(images, 1):
+            try:
+                # Add image info
+                img_info = f"Image {i}: {img['filename']}"
+                elements.append(Paragraph(img_info, normal_style))
+
+                if img['width'] > 0 and img['height'] > 0:
+                    size_info = f"Size: {img['width']} × {img['height']} pixels"
+                    elements.append(Paragraph(size_info, small_style))
+
+                # Try to add the image to PDF (limit to 3 images in PDF)
+                if i <= 3:
+                    try:
+                        # Resize image if too large
+                        max_width = 5 * inch
+                        max_height = 3 * inch
+
+                        width = img['width'] / 72  # Convert pixels to inches (approx)
+                        height = img['height'] / 72
+
+                        # Calculate scaling
+                        if width > 0 and height > 0:
+                            scale = min(max_width / width, max_height / height, 1.0)
+
+                            pdf_img = ReportLabImage(img['path'],
+                                                     width=width * scale,
+                                                     height=height * scale)
+                            elements.append(pdf_img)
+                            elements.append(Spacer(1, 0.1 * inch))
+                        else:
+                            elements.append(Paragraph("[Image could not be processed]", small_style))
+
+                    except Exception as e:
+                        elements.append(Paragraph("[Image could not be embedded in PDF]", small_style))
+
+                elements.append(Spacer(1, 0.05 * inch))
+
+            except Exception as e:
+                continue
+    else:
+        elements.append(Paragraph("No images extracted from this post", small_style))
+
+    # Add footer
+    elements.append(Spacer(1, 0.3 * inch))
+    elements.append(Paragraph("Generated by Facebook Post Scraper", small_style))
+    elements.append(Paragraph(f"Post #{post_number} in the exact order from your list", small_style))
+    if linked_pages_data:
+        elements.append(Paragraph(f"Linked pages saved as PDFs in 'linked_pages' folder", small_style))
+    else:
+        elements.append(Paragraph("All images saved in 'images' folder", small_style))
+
+    # Build the PDF
+    doc.build(elements)
+
+
+def create_linked_page_pdf_simple(link_data, pdf_path, link_number, original_url):
+    """Create PDF for a linked page with NO images"""
+    # Create PDF document
+    doc = SimpleDocTemplate(
+        pdf_path,
+        pagesize=letter,
+        rightMargin=72,
+        leftMargin=72,
+        topMargin=72,
+        bottomMargin=72
+    )
+
+    # Container for PDF elements
+    elements = []
+
+    # Define styles
+    styles = getSampleStyleSheet()
+
+    # Custom styles
+    title_style = ParagraphStyle(
+        'TitleStyle',
+        parent=styles['Title'],
+        fontSize=14,
+        spaceAfter=12,
+        textColor=colors.HexColor('#1A365D')
+    )
+
+    header_style = ParagraphStyle(
+        'HeaderStyle',
+        parent=styles['Heading2'],
+        fontSize=11,
+        spaceAfter=6,
+        textColor=colors.HexColor('#2D3748')
+    )
+
+    normal_style = ParagraphStyle(
+        'NormalStyle',
+        parent=styles['Normal'],
+        fontSize=10,
+        spaceAfter=6
+    )
+
+    small_style = ParagraphStyle(
+        'SmallStyle',
+        parent=styles['Normal'],
+        fontSize=8,
+        textColor=colors.HexColor('#718096')
+    )
+
+    link_style = ParagraphStyle(
+        'LinkStyle',
+        parent=styles['Normal'],
+        fontSize=9,
+        textColor=colors.HexColor('#1A56DB'),
+        spaceAfter=4
+    )
+
+    # Add title
+    elements.append(Paragraph(f"Linked Page #{link_number}", title_style))
+    elements.append(Spacer(1, 0.1 * inch))
+
+    # Add metadata
+    elements.append(Paragraph(f"<b>Original URL:</b>", header_style))
+    elements.append(Paragraph(f"{original_url[:150]}", link_style))
+    elements.append(Spacer(1, 0.1 * inch))
+
+    # Add page title if available
+    if link_data.get('title'):
+        elements.append(Paragraph(f"<b>Page Title:</b>", header_style))
+        elements.append(Paragraph(f"{link_data['title']}", normal_style))
+        elements.append(Spacer(1, 0.1 * inch))
+
+    # Add content section
+    if link_data.get('content'):
+        elements.append(Paragraph("<b>Content:</b>", header_style))
+        content = link_data['content']
+
+        # Split into paragraphs
+        paragraphs = re.split(r'[\n\r]+', content)
+        paragraph_count = 0
+        for para in paragraphs:
+            para = para.strip()
+            if para and len(para) > 10:
+                safe_para = html.escape(para)
+                elements.append(Paragraph(safe_para, normal_style))
+                elements.append(Spacer(1, 0.05 * inch))
+                paragraph_count += 1
+                if paragraph_count >= 15:  # Limit to 15 paragraphs
+                    elements.append(Paragraph("[Content truncated for PDF - full content scraped]", small_style))
+                    break
+
+    # Add footer
+    elements.append(Spacer(1, 0.3 * inch))
+    elements.append(Paragraph("Scraped from Facebook post link", small_style))
+    elements.append(Paragraph(f"Saved in: linked_pages/link_{link_number}.pdf", small_style))
+
+    # Build the PDF
+    doc.build(elements)
+
+
+def create_linked_page_pdf(link_data, pdf_path, images, link_number, original_url):
+    """Create PDF for a linked page"""
+    # Create PDF document
+    doc = SimpleDocTemplate(
+        pdf_path,
+        pagesize=letter,
+        rightMargin=72,
+        leftMargin=72,
+        topMargin=72,
+        bottomMargin=72
+    )
+
+    # Container for PDF elements
+    elements = []
+
+    # Define styles
+    styles = getSampleStyleSheet()
+
+    # Custom styles
+    title_style = ParagraphStyle(
+        'TitleStyle',
+        parent=styles['Title'],
+        fontSize=14,
+        spaceAfter=12,
+        textColor=colors.HexColor('#1A365D')
+    )
+
+    header_style = ParagraphStyle(
+        'HeaderStyle',
+        parent=styles['Heading2'],
+        fontSize=11,
+        spaceAfter=6,
+        textColor=colors.HexColor('#2D3748')
+    )
+
+    normal_style = ParagraphStyle(
+        'NormalStyle',
+        parent=styles['Normal'],
+        fontSize=10,
+        spaceAfter=6
+    )
+
+    small_style = ParagraphStyle(
+        'SmallStyle',
+        parent=styles['Normal'],
+        fontSize=8,
+        textColor=colors.HexColor('#718096')
+    )
+
+    # Add title
+    elements.append(Paragraph(f"Linked Page #{link_number}", title_style))
+    elements.append(Spacer(1, 0.1 * inch))
+
+    # Add metadata
+    elements.append(Paragraph(f"<b>Original URL:</b> {original_url[:100]}", normal_style))
+    elements.append(Spacer(1, 0.1 * inch))
+
+    # Add page title if available
+    if link_data.get('title'):
+        elements.append(Paragraph(f"<b>Page Title:</b> {link_data['title']}", normal_style))
+        elements.append(Spacer(1, 0.1 * inch))
+
+    # Add content section
+    if link_data.get('content'):
+        elements.append(Paragraph("<b>Content:</b>", header_style))
+        content = link_data['content']
+
+        # Split into paragraphs
+        paragraphs = re.split(r'[\n\.]+', content)
+        for para in paragraphs[:10]:  # Limit to 10 paragraphs
+            para = para.strip()
+            if para and len(para) > 10:
+                safe_para = html.escape(para)
+                elements.append(Paragraph(safe_para, normal_style))
+                elements.append(Spacer(1, 0.05 * inch))
+
+    # Add images section if there are images
+    if images:
+        elements.append(Paragraph(f"<b>Page Images ({len(images)}):</b>", header_style))
+
+        for i, img in enumerate(images[:2], 1):  # Limit to 2 images in PDF
+            try:
+                img_info = f"Image {i}: {img['filename']}"
+                elements.append(Paragraph(img_info, normal_style))
+
+                # Try to embed the image
+                try:
+                    max_width = 4 * inch
+                    max_height = 2.5 * inch
+
+                    width = img['width'] / 72
+                    height = img['height'] / 72
+
+                    if width > 0 and height > 0:
+                        scale = min(max_width / width, max_height / height, 1.0)
+                        pdf_img = ReportLabImage(img['path'],
+                                                 width=width * scale,
+                                                 height=height * scale)
+                        elements.append(pdf_img)
+                        elements.append(Spacer(1, 0.1 * inch))
+                except:
+                    elements.append(Paragraph("[Image could not be embedded]", small_style))
+
+            except:
+                continue
+
+    # Add footer
+    elements.append(Spacer(1, 0.3 * inch))
+    elements.append(Paragraph("Scraped from Facebook post link", small_style))
+    elements.append(Paragraph(f"All images saved in 'images' folder", small_style))
+
+    # Build the PDF
+    doc.build(elements)
+
+
+# Main execution
+if __name__ == "__main__":
+    # Your EXACT list of posts in the EXACT order you provided
+    POST_URLS = [
+        # First URL in your list = Post 1
+        "https://www.facebook.com/1421foundation/posts/1423309422841157?ref=embed_post",
+        # Second URL in your list = Post 2
+        "https://www.facebook.com/1421foundation/posts/1420786739760092?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1407938784378221?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1404800118025421?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1400598948445538?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1399263935245706?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1371753627996737?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1366503745188392?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1362827778889322?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1352099449962155?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1349889430183157?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1348869396951827?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1344540750718025?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1342056160966484?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1341762400995860?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1336413604864073?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1314051980433569?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1312090010629766?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1287384319767002?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1247332793772155?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1216538130184955?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1214016717103763?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1168253551680080?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1163988178773284?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1132136568625112?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1106059201232849?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1102866244885478?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1094959852342784?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1083774710127965?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1078019687370134?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1068761721629264?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1061518822353554?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1025593365946100?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1010728210765949?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1006308017874635?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1004355501403220?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1001778288327608?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/985555989949838?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/969767354862035?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/965324895306281?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/962753412230096?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/960899735748797?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/955949142910523?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/955197786318992?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/944764880695616?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/943033450868759?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/932171578621613?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/920351139803657?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/879063830599055?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/858013339370771?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/856436022861836?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/853579486480823?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/846472737191498?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/824313112740794?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/811641500674622?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/809281844243921?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/803890518116387?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/746727827165990?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/714686207036819?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/713788993793207?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/695746788930761?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/679539103884863?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/625824592589648?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/5211164798938010?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/5165737790147378?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/5034636633257495?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/4810370675684093?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/4487557231298774?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/4384575788263586?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/4309026939151805?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/4181166295271204?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/4123360491051785?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/4103160949738406?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/3732702976784207?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/3675577362496769?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/3655685767819262?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/3548739951847178?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/3507907495930424?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/3497604703627370?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/3481021335285707?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/3475535915834249?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/3410322022355639?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/3395937580460750?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/3357183771002798?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/3292065647514611?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/3143552752365902?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/3111629092224935?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/3087336704654174?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/3020648054656373?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/3003162079738304?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/2960969837290862?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/2860808023973711?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/2836936873027493?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/2809742879080226?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/2796373053750542?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/2787667221287792?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/2785659221488592?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/2360609990660186?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/2340758555978663?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/2325268650860987?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/2147943658593488?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/2106586206062567?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/2034655546588967?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/2025336984187490?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1999733946747794?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1993101600744362?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1960676673986855?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1942267009161155?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1936803866374136?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1915972138457309?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1884293321625191?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1859439047443952?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1850497355004788?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1849052871815903?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1825098244211366?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1755336374520887?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1750753804979144?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1745175698870288?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1721139484607243?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1713786255342566?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1695069083880950?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1682875771766948?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1640234192697773?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1633949826659543?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1605596809494845?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1574965785891281?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1572323072822219?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1559155637472296?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1544318685622658?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1517976481590212?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1496560333731827?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1490461394341721?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1490382414349619?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1478398212214706?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1443887122332482?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1427897723931422?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1426239414097253?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1405737689480759?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1394879337233261?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1360853810635814?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1343418912379304?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1316077065113489?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1284581778263018?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1272917782762751?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1259440620777134?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1249367058451157?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1227405367313993?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1192001607521036?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1122529071134957?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1115152105205987?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1112126912175173?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1108585175862680?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1073179556069909?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1072643999456798?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1049615805092951?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1027119670675898?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1019259631461902?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/1014963198558212?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/988055137915685?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/983608495027016?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/930955420292324?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/889866201067913?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/871280246259842?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/838974539490413?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/838634682857732?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/834397693281431?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/833790543342146?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/829898563731344?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/798669826854218?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/798641873523680?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/766341440087057?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/765905613463973?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/764616763592858?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/755076184546916?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/739715142749687?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/733191076735427?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/731739536880581?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/727030237351511?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/724444454276756?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/715138425207359?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/710895282298340?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/697037750350760?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/658221340899068?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/10203427967844065?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/630558713665331?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/630017757052760?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/10203323730958208?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/10203026151518908?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/609825092405360?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/591051787616024?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/573450142709522?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/570619726325897?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/570080119713191?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/567246689996534?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/566725090048694?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/566530423401494?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/10202260066047250?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/564214410299762?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/563608777026992?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/562979673756569?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/562586557129214?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/557174274337109?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/540548619333008?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/511563145564889?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/502958673092003?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/462061920531548?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/231877413620556?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/222314457914386?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/417203821698515?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/480079502028341?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/313144305465611?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/122494681241911?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/133008280175786?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/310697362340843?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/231442550271753?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/230921800307087?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/267972913244912?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/139059032862597?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/178932675519264?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/6225788537475626?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/6225454640842349?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/161808167236395?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/258925100805671?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/6224610444260102?ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/145488142208592?ref=embed_post",
+        "https://www.facebook.com/1421foundation/photos/a.200071030047437/200071033380770/?type=3&ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/190070374380836?ref=embed_post",
+        "https://www.facebook.com/1421foundation/photos/a.187316247989582/187316281322912/?type=3&ref=embed_post",
+        "https://www.facebook.com/1421foundation/posts/185389538186638?ref=embed_post"
+    ]
+
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_urls = []
+    for url in POST_URLS:
+        if url not in seen:
+            seen.add(url)
+            unique_urls.append(url)
+
+    print("🎯 Facebook Posts Scraper - Simple Version")
+    print("📁 Each post will be saved in its own folder with PDF and images")
+    print("=" * 60)
+    print(f"📊 TOTAL POSTS: {len(unique_urls)}")
+    print(f"📋 EXACT ORDER FROM YOUR LIST:")
+    print(f"   Post 1: First URL in your list")
+    print(f"   Post 2: Second URL in your list")
+    print(f"   Post {len(unique_urls)}: Last URL in your list")
+    print("\n📦 KEY FEATURES:")
+    print("   ✅ NO date posted section")
+    print("   ✅ NO reactions/comments section")
+    print("   ✅ Scrapes external links found in posts")
+    print("   ✅ Stores linked pages as PDFs only in 'linked_pages' folder")
+    print("   ✅ URLs scraped in EXACT order from your list")
+    print("\n📊 Output per post:")
+    print("   - data/post_X.pdf (PDF file with post content)")
+    print("   - images/ (folder with post images)")
+    print("   - linked_pages/ (scraped external links as PDFs only - no images)")
+
+    # Check for required packages
+    try:
+        from reportlab.pdfgen import canvas
+
+        print("\n✅ ReportLab is installed and ready")
+    except ImportError:
+        print("\n❌ ReportLab is not installed!")
+        print("   Please install it with: pip install reportlab")
+        exit(1)
+
+    # Ask for confirmation before starting
+    print(f"\n⚠️  WARNING: This will scrape {len(unique_urls)} Facebook posts!")
+    print("   Estimated time: 30-60 minutes")
+    print("   Estimated storage: ~200-400MB")
+
+    proceed = input("\nProceed with scraping? (y/n): ").strip().lower()
+    if proceed != 'y':
+        print("Scraping cancelled.")
+        exit(0)
+
+    print("\n" + "=" * 60)
+    print("🚀 Starting Facebook post scraping...")
+    print("⏳ This will take a while. Please be patient.")
+    print("📝 Errors will be tracked and reported at the end.")
+    print("=" * 60)
+
+    # Run the scraper with unique URLs
+    successful, failed, zip_file = scrape_facebook_posts(unique_urls, main_folder="facebook_posts_simple")
+
+    if successful > 0:
+        print(f"\n🎉 Successfully processed {successful} posts!")
+        print(f"📁 Check the 'facebook_posts_simple' folder for all results")
+        print(f"📦 Zip file: {zip_file}")
+        print("\n📊 FINAL SUMMARY:")
+        print(f"   - Total posts attempted: {len(unique_urls)}")
+        print(f"   - Successfully scraped: {successful}")
+        print(f"   - Failed: {len(failed)}")
+        print(f"   - Success rate: {(successful / len(unique_urls)) * 100:.1f}%")
+
+        if failed:
+            print(f"\n📄 Error log saved to: facebook_posts_simple/scraping_errors.txt")
+            print(f"💡 You can try scraping failed posts individually later")
+
+        print(f"\n📋 ORDER CONFIRMATION:")
+        print(f"   Post 1 PDF contains: {unique_urls[0].split('/')[-1].split('?')[0]}")
+        print(f"   Post 2 PDF contains: {unique_urls[1].split('/')[-1].split('?')[0]}")
+        print(f"   Post {len(unique_urls)} PDF contains: {unique_urls[-1].split('/')[-1].split('?')[0]}")
+    else:
+        print("\n❌ No posts were successfully processed.")
+        print("💡 Possible issues:")
+        print("   - Facebook may be blocking automated access")
+        print("   - Check your internet connection")
+        print("   - Try running fewer posts at once")
+
+    print("=" * 60)
