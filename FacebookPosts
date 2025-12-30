@@ -1,458 +1,883 @@
 from playwright.sync_api import sync_playwright
-from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as ReportLabImage, Table, TableStyle
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import inch
-from reportlab.lib import colors
 import os
 import time
-from io import BytesIO
-from PIL import Image as PILImage
-import html
-import re
-
 import requests
+from bs4 import BeautifulSoup
+from urllib.parse import urlparse
+import re
+import random
+import hashlib
+import csv
 from datetime import datetime
-import urllib.parse
 import zipfile
+import concurrent.futures
 
 
-def scrape_facebook_posts(post_urls, main_folder="facebook_posts_collection"):
-    """
-    Scrape multiple Facebook posts and save each in its own folder
-    """
-    print(f"🚀 Starting Facebook Posts Scraper")
-    print(f"📊 Processing {len(post_urls)} posts")
-    print("=" * 60)
+def parse_post_datetime(date_str):
+    """Parse date string into DD/MM/YYYY format"""
+    if not date_str or date_str.strip() == "":
+        return "", ""
+
+    date_str = date_str.strip()
+
+    # Try different date formats (prioritize DD/MM/YY)
+    formats = [
+        "%d/%m/%y %H:%M",  # DD/MM/YY HH:MM (your format)
+        "%d/%m/%Y %H:%M",  # DD/MM/YYYY HH:MM
+        "%d-%m-%y %H:%M",  # DD-MM-YY HH:MM
+        "%d-%m-%Y %H:%M",  # DD-MM-YYYY HH:MM
+        "%m/%d/%y %H:%M",  # MM/DD/YY HH:MM (US format)
+        "%m/%d/%Y %H:%M",  # MM/DD/YYYY HH:MM
+        "%Y-%m-%d %H:%M",  # YYYY-MM-DD HH:MM (ISO)
+    ]
+
+    for fmt in formats:
+        try:
+            dt = datetime.strptime(date_str, fmt)
+            # Format to DD/MM/YYYY and HH:MM (no seconds)
+            post_date = dt.strftime("%d/%m/%Y")  # DD/MM/YYYY
+            post_time = dt.strftime("%H:%M")  # HH:MM (no seconds)
+            return post_date, post_time
+        except ValueError:
+            continue
+
+    # If parsing fails, try to extract date parts
+    date_match = re.search(r'(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})', date_str)
+    time_match = re.search(r'(\d{1,2}):(\d{2})', date_str)
+
+    if date_match:
+        day = date_match.group(1)
+        month = date_match.group(2)
+        year = date_match.group(3)
+
+        # Convert 2-digit year to 4-digit
+        if len(year) == 2:
+            year = "20" + year
+
+        post_date = f"{day}/{month}/{year}"
+    else:
+        post_date = ""
+
+    if time_match:
+        hour = time_match.group(1)
+        minute = time_match.group(2)
+        post_time = f"{hour}:{minute}"  # HH:MM (no seconds)
+    else:
+        post_time = "00:00"  # HH:MM (no seconds)
+
+    return post_date, post_time
+
+
+def clean_for_filename(text, max_length=50):
+    """Clean text for use in filenames with focus on keeping beginning"""
+    if not text:
+        return ""
+
+    # Remove special characters
+    text = re.sub(r'[<>:"/\\|?*]', '', text)
+    text = re.sub(r'[^\w\s-]', '', text)
+    text = re.sub(r'[-\s]+', '_', text)
+    text = text.strip('_')
+
+    # Find a good breaking point if too long
+    if len(text) > max_length:
+        # Try to break at last underscore before max_length
+        last_underscore = text[:max_length].rfind('_')
+        if last_underscore > 20:  # Ensure we keep enough text
+            text = text[:last_underscore]
+        else:
+            # Break at last word boundary before max_length
+            words = text.split('_')
+            result = []
+            current_length = 0
+            for word in words:
+                if current_length + len(word) + 1 <= max_length:
+                    result.append(word)
+                    current_length += len(word) + 1
+                else:
+                    break
+            if result:
+                text = '_'.join(result)
+            else:
+                text = text[:max_length]
+
+    return text
+
+
+def extract_post_title(page, post_number):
+    """Extract title from Facebook post with focus on first meaningful sentence"""
+    title_candidates = []
+
+    # METHOD 1: Try to get the FIRST meaningful sentence from content
+    content_selectors = [
+        'div[data-ad-preview="message"]',
+        'div[class*="userContent"]',
+        'div[data-testid="post_message"]',
+        '[role="article"] div[dir="auto"]',
+        'div.x1iorvi4',
+        'div.x1y1aw1k',
+        'div.x1lq5wgf',
+        'div.x78zum5.x1q0g3np.x1a02dak.x1qughib',
+        'div[data-pagelet="FeedUnit"] div[dir="auto"]',
+    ]
+
+    for selector in content_selectors:
+        try:
+            elements = page.query_selector_all(selector)
+            for element in elements:
+                try:
+                    text = element.inner_text().strip()
+                    if text and len(text) > 20:
+                        # Get the FIRST complete sentence (not random sentences from middle)
+                        sentences = re.split(r'[.!?]+', text)
+                        for sentence in sentences:
+                            sentence = sentence.strip()
+                            # Look for first substantial sentence (not questions, not too short)
+                            if 15 < len(sentence) < 150 and not sentence.startswith(('http', 'www.', '#', '@')):
+                                # Skip questions if they're not the main content
+                                if sentence.endswith('?'):
+                                    # Check if this is likely the main title or just a question
+                                    words = sentence.split()
+                                    if len(words) > 5:  # If it's a substantial question, keep it
+                                        clean_title = clean_for_filename(sentence, 50)
+                                        if clean_title and clean_title not in title_candidates:
+                                            title_candidates.append(clean_title)
+                                    continue
+
+                                # This is likely the main title/beginning
+                                clean_title = clean_for_filename(sentence, 50)
+                                if clean_title and clean_title not in title_candidates:
+                                    title_candidates.append(clean_title)
+                                    break  # Take first good sentence
+                except:
+                    continue
+        except:
+            continue
+
+    # METHOD 2: Try to get the first line/paragraph
+    if not title_candidates:
+        for selector in content_selectors:
+            try:
+                elements = page.query_selector_all(selector)
+                for element in elements:
+                    try:
+                        text = element.inner_text().strip()
+                        if text and len(text) > 20:
+                            # Get first line (before first newline or period)
+                            first_part = text.split('\n')[0].strip()
+                            if len(first_part) > 15:
+                                # Take first 80 chars or until first punctuation
+                                if len(first_part) > 80:
+                                    # Try to end at a word boundary
+                                    truncated = first_part[:80]
+                                    last_space = truncated.rfind(' ')
+                                    if last_space > 60:
+                                        first_part = truncated[:last_space]
+                                    else:
+                                        first_part = truncated
+
+                                clean_title = clean_for_filename(first_part, 50)
+                                if clean_title:
+                                    title_candidates.append(clean_title)
+                                    break
+                    except:
+                        continue
+            except:
+                continue
+
+    # METHOD 3: Try meta description or OpenGraph title
+    try:
+        og_title = page.query_selector('meta[property="og:title"]')
+        if og_title:
+            title = og_title.get_attribute('content')
+            if title and len(title) > 15:
+                if " | Facebook" in title:
+                    title = title.replace(" | Facebook", "")
+                clean_title = clean_for_filename(title[:60], 50)
+                if clean_title and clean_title not in title_candidates:
+                    title_candidates.append(clean_title)
+    except:
+        pass
+
+    # PRIORITIZE TITLE SELECTION - Choose the most title-like candidate
+    if title_candidates:
+        # Prefer candidates that look like titles (not questions, not too long)
+        for title in title_candidates:
+            words = title.split('_')
+            # Check if it looks like a proper title
+            if 3 <= len(words) <= 8 and len(title) > 15:
+                return title
+
+        # Fallback to first candidate
+        return title_candidates[0]
+
+    # Final fallback
+    return f"facebook_post_{post_number}"
+
+
+# ============================================================================
+# YOUR COMPLETE DATE LIST (230 posts)
+# ============================================================================
+POST_DATES = [
+    # Post 1-51
+    "12/12/25 16:00",  # 1
+    "17/11/25 11:11",  # 2
+    "14/11/25 10:43",  # 3
+    "31/10/25 14:05",  # 4
+    "27/10/25 19:27",  # 5
+    "23/10/25 11:25",  # 6
+    "22/10/25 00:33",  # 7
+    "22/9/25 12:58",  # 8
+    "16/9/25 15:51",  # 9
+    "12/9/25 09:54",  # 10
+    "30/8/25 10:03",  # 11
+    "27/8/25 16:23",  # 12
+    "26/8/25 13:14",  # 13
+    "21/8/25 13:34",  # 14
+    "18/8/25 16:47",  # 15
+    "18/8/25 10:44",  # 16
+    "12/8/25 09:39",  # 17
+    "16/7/25 20:29",  # 18
+    "14/7/25 12:59",  # 19
+    "13/6/25 21:53",  # 20
+    "24/4/25 10:15",  # 21
+    "21/3/25 16:21",  # 22
+    "18/3/25 20:15",  # 23
+    "21/1/25 11:52",  # 24
+    "15/1/25 15:38",  # 25
+    "3/12/24 13:43",  # 26
+    "29/10/24 18:19",  # 27
+    "25/10/24 13:18",  # 28
+    "15/10/24 11:04",  # 29
+    "1/10/24 14:39",  # 30
+    "24/9/24 13:49",  # 31
+    "12/9/24 15:13",  # 32
+    "2/9/24 13:51",  # 33
+    "11/7/24 15:22",  # 34
+    "20/6/24 12:17",  # 35
+    "13/6/24 12:31",  # 36
+    "10/6/24 11:29",  # 37
+    "6/6/24 09:42",  # 38
+    "13/5/24 10:51",  # 39
+    "19/4/24 11:40",  # 40
+    "12/4/24 13:39",  # 41
+    "8/4/24 12:22",  # 42
+    "5/4/24 14:37",  # 43
+    "29/3/24 11:58",  # 44
+    "28/3/24 08:52",  # 45
+    "11/3/24 10:29",  # 46
+    "8/3/24 11:51",  # 47
+    "19/2/24 13:45",  # 48
+    "1/2/24 11:58",  # 49
+    "28/11/23 13:51",  # 50
+    "23/10/23 14:25",  # 51
+
+    # Post 52-100
+    "20/10/23 20:15",  # 52
+    "16/10/23 12:49",  # 53
+    "5/10/23 09:30",  # 54
+    "30/8/23 10:50",  # 55
+    "8/8/23 12:33",  # 56
+    "4/8/23 12:10",  # 57
+    "26/7/23 17:20",  # 58
+    "28/4/23 14:05",  # 59
+    "8/3/23 09:29",  # 60
+    "7/3/23 00:02",  # 61
+    "10/2/23 15:38",  # 62
+    "20/1/23 11:33",  # 63
+    "15/11/22 10:54",  # 64
+    "12/7/23 18:23",  # 65
+    "25/6/22 18:46",  # 66
+    "10/5/22 17:56",  # 67
+    "16/2/22 18:07",  # 68
+    "17/11/21 18:48",  # 69
+    "15/10/21 13:16",  # 70
+    "21/9/21 14:49",  # 71
+    "10/8/21 12:41",  # 72
+    "21/7/21 16:15",  # 73
+    "14/7/21 11:32",  # 74
+    "8/3/21 13:56",  # 75
+    "17/2/21 12:07",  # 76
+    "9/2/21 17:10",  # 77
+    "30/12/20 21:25",  # 78
+    "14/12/20 14:06",  # 79
+    "10/12/20 16:08",  # 80
+    "4/12/20 11:47",  # 81
+    "2/12/20 11:13",  # 82
+    "8/11/20 18:21",  # 83
+    "3/11/20 14:40",  # 84
+    "20/10/20 14:04",  # 85
+    "28/9/20 17:13",  # 86
+    "11/8/20 14:02",  # 87 (fixed space)
+    "31/7/20 16:21",  # 88
+    "23/7/20 10:27",  # 89
+    "29/6/20 15:51",  # 90
+    "23/6/20 11:12",  # 91
+    "7/6/20 11:47",  # 92
+    "28/4/20 12:05",  # 93
+    "18/4/20 18:05",  # 94
+    "6/4/20 19:25",  # 95
+    "31/3/20 11:39",  # 96
+    "27/3/20 09:23",  # 97
+    "26/3/20 11:59",  # 98
+    "2/9/19 10:43",  # 99
+    "22/8/19 13:00",  # 100
+
+    # Post 101-150
+    "13/8/19 14:32",  # 101
+    "30/4/19 12:18",  # 102
+    "3/4/19 15:58",  # 103
+    "11/2/19 13:09",  # 104
+    "4/2/19 15:22",  # 105
+    "16/1/19 17:30",  # 106
+    "11/1/19 16:43",  # 107
+    "18/12/18 12:41",  # 108
+    "5/12/18 12:05",  # 109
+    "30/11/18 14:46",  # 110
+    "14/11/18 11:08",  # 111
+    "23/10/18 11:47",  # 112
+    "3/10/18 14:55",  # 113
+    "25/9/18 18:33",  # 114
+    "24/9/18 12:39",  # 115
+    "3/9/18 13:59",  # 116
+    "19/7/18 13:21",  # 117
+    "16/7/18 08:49",  # 118
+    "12/7/18 14:56",  # 119
+    "26/6/18 12:54",  # 120
+    "21/6/18 13:43",  # 121
+    "6/6/18 12:21",  # 122
+    "24/5/18 15:57",  # 123
+    "10/4/18 19:11",  # 124
+    "4/4/18 14:31",  # 125
+    "8/3/18 12:38",  # 126
+    "5/2/18 11:25",  # 127
+    "2/2/18 12:06",  # 128
+    "19/1/18 16:34",  # 129
+    "3/1/18 17:33",  # 130
+    "5/12/17 17:07",  # 131
+    "13/11/17 13:35",  # 132
+    "6/11/17 17:06",  # 133
+    "6/11/17 15:14",  # 134
+    "24/10/17 13:51",  # 135
+    "13/9/17 17:39",  # 136
+    "25/8/17 17:07",  # 137
+    "23/8/17 18:00",  # 138
+    "31/7/17 14:34",  # 139
+    "20/7/17 15:53",  # 140
+    "16/6/17 12:16",  # 141 (fixed space)
+    "29/5/17 15:24",  # 142
+    "27/4/17 15:04",  # 143
+    "29/3/17 12:04",  # 144
+    "16/3/17 12:27",  # 145
+    "1/3/17 15:15",  # 146
+    "17/2/17 15:28",  # 147
+    "24/1/17 18:00",  # 148
+    "19/12/16 18:18",  # 149
+    "13/10/16 15:34",  # 150
+
+    # Post 151-200
+    "4/10/16 11:04",  # 151
+    "30/9/16 15:36",  # 152
+    "26/9/16 12:19",  # 153
+    "12/8/16 07:35",  # 154
+    "11/8/16 14:47",  # 155
+    "5/7/16 16:31",  # 156
+    "5/7/16 16:31",  # 157 (duplicate - same post posted twice)
+    "25/5/16 15:52",  # 158
+    "10/5/16 22:03",  # 159
+    "3/5/16 10:32",  # 160
+    "23/3/16 14:28",  # 161
+    "17/3/16 16:12",  # 162
+    "11/12/15 13:21",  # 163
+    "1/9/15 12:44",  # 164
+    "22/7/15 12:28",  # 165
+    "12/5/15 10:06",  # 166
+    "11/5/15 13:28",  # 167
+    "30/4/15 17:54",  # 168
+    "29/4/15 10:31",  # 169
+    "20/4/15 11:43",  # 170
+    "16/2/15 16:39",  # 171
+    "16/2/15 16:03",  # 172
+    "12/12/14 13:00",  # 173
+    "11/12/14 11:09",  # 174 (fixed year from 2015 to 2014)
+    "8/12/14 16:25",  # 175
+    "17/12/14 16:10",  # 176
+    "14/10/14 11:50",  # 177
+    "1/10/14 13:17",  # 178
+    "27/9/14 21:02",  # 179
+    "16/9/14 16:57",  # 180
+    "10/9/14 12:11",  # 181
+    "20/8/14 17:49",  # 182
+    "11/8/14 16:22",  # 183
+    "16/7/14 10:47",  # 184
+    "28/4/14 18:13",  # 185
+    "7/3/14 15:14",  # 186
+    "25/2/14 19:07",  # 187
+    "24/2/14 13:01",  # 188
+    "21/2/14 13:07",  # 189
+    "10/1/14 18:22",  # 190 (fixed space)
+    "9/1/14 14:18",  # 191
+    "27/11/13 09:54",  # 192
+    "22/10/13 13:50",  # 193
+    "16/10/13 21:20",  # 194
+    "15/10/13 19:16",  # 195
+    "10/10/13 12:35",  # 196
+    "9/10/13 12:36",  # 197
+    "8/10/13 22:27",  # 198
+    "8/10/13 12:36",  # 199
+    "3/10/13 14:40",  # 200
+
+    # Post 201-230
+    "1/10/13 21:49",  # 201
+    "30/9/13 18:00",  # 202
+    "29/9/13 17:06",  # 203
+    "17/9/13 15:41",  # 204
+    "8/8/13 11:32",  # 205
+    "31/5/13 18:09",  # 206
+    "8/5/13 11:41",  # 207
+    "4/4/13 12:15",  # 208
+    "3/4/13 12:17",  # 209
+    "6/3/13 14:06",  # 210
+    "28/2/13 13:31",  # 211
+    "11/1/13 16:31",  # 212
+    "7/12/12 15:10",  # 213
+    "21/12/12 17:56",  # 214
+    "10/8/12 13:28",  # 215
+    "1/5/12 11:49",  # 216
+    "26/1/12 11:13",  # 217
+    "22/11/11 14:13",  # 218
+    "25/10/11 21:11",  # 219
+    "25/10/11 21:10",  # 220
+    "6/10/11 12:54",  # 221
+    "23/9/11 15:16",  # 222
+    "15/9/11 17:23",  # 223
+    "15/9/11 10:50",  # 224
+    "12/9/11 14:14",  # 225
+    "1/9/11 18:26",  # 226
+    "1/9/11 12:24",  # 227
+    "3/8/11 09:56",  # 228
+    "21/7/11 15:55",  # 229
+    "6/7/11 11:39"  # 230
+]
+
+# ============================================================================
+# UPDATED DATA FOLDER CSV COLUMNS (Main post data)
+# ============================================================================
+DATA_CSV_COLUMNS = [
+    'post_number',  # 1, 2, 3, etc.
+    'post_url',  # Facebook URL
+    'post_title',  # Extracted title
+    'post_content',  # Full post content
+    'post_author',  # Author name
+    'post_date',  # DD/MM/YYYY
+    'post_time',  # HH:MM (no seconds)
+    'word_count',  # Number of words
+    'image_count',  # Number of images
+    'external_links_count',  # Number of external links found
+    'folder_name'  # Folder where data is stored
+]
+
+# ============================================================================
+# UPDATED LINKED PAGES CSV COLUMNS (External links data)
+# ============================================================================
+LINKED_PAGES_CSV_COLUMNS = [
+    'link_id',  # Unique link ID
+    'original_post_number',  # Which post this came from
+    'link_title',  # Title of linked page
+    'link_url',  # URL of linked page
+    'link_domain',  # Domain name
+    'link_content',  # Content from linked page
+    'word_count',  # Word count of linked page
+    'status'  # Success/Error status
+]
+
+
+def scrape_facebook_posts(post_urls, main_folder="facebook_posts", max_workers=3):
+    """Scrape Facebook posts with dates"""
+
+    print("=" * 80)
+    print("📅 FACEBOOK POST SCRAPER - DD/MM/YYYY FORMAT")
+    print("=" * 80)
+
+    # Validate input
+    print(f"📊 Total Posts: {len(post_urls)}")
+    print(f"📅 Dates Provided: {len([d for d in POST_DATES if d.strip()])}")
+    print(f"📅 Dates Missing: {len(post_urls) - len([d for d in POST_DATES if d.strip()])}")
 
     # Create main folder
     os.makedirs(main_folder, exist_ok=True)
 
-    # Track successes and failures
-    successful_posts = 0
-    failed_posts = []  # Will store (post_number, url, error_message)
+    all_posts_data = []
+    failed_posts = []
 
-    # Create error log file
-    error_log_path = os.path.join(main_folder, "scraping_errors.txt")
+    def process_post(post_number):
+        """Process single post"""
+        if post_number > len(post_urls):
+            return post_number
 
-    # Process posts in the EXACT order given
-    for i, post_url in enumerate(post_urls, 1):
-        print(f"\n📱 Processing Post {i}/{len(post_urls)}")
-        print(f"   URL: {post_url[:80]}...")
+        url = post_urls[post_number - 1]
+        date_str = POST_DATES[post_number - 1] if post_number <= len(POST_DATES) else ""
 
-        # Create folder for this post
-        post_folder = os.path.join(main_folder, f"post_{i}")
+        print(f"\n[{post_number}/{len(post_urls)}] Processing...")
+        print(f"   URL: {url[:60]}...")
+        if date_str:
+            post_date, post_time = parse_post_datetime(date_str)
+            print(f"   📅 Date: {post_date} {post_time}")
+        else:
+            print(f"   ⚠️  No date provided for this post")
 
         try:
-            post_success, error_message = scrape_single_post_with_links(post_url, i, post_folder)
-
-            if post_success:
-                successful_posts += 1
-                print(f"   ✅ Post {i} completed successfully!")
-            else:
-                failed_posts.append((i, post_url, error_message))
-                print(f"   ❌ Post {i} failed: {error_message}")
-
-                # Log error to file
-                with open(error_log_path, 'a', encoding='utf-8') as error_file:
-                    error_file.write(f"Post {i}: {post_url}\n")
-                    error_file.write(f"Error: {error_message}\n")
-                    error_file.write("-" * 50 + "\n")
-
-        except Exception as e:
-            error_msg = f"Unexpected error: {str(e)}"
-            failed_posts.append((i, post_url, error_msg))
-            print(f"   💥 Post {i} crashed: {error_msg}")
-
-            # Log error to file
-            with open(error_log_path, 'a', encoding='utf-8') as error_file:
-                error_file.write(f"Post {i}: {post_url}\n")
-                error_file.write(f"CRASH: {error_msg}\n")
-                error_file.write("-" * 50 + "\n")
-
-    print("\n" + "=" * 60)
-    print(f"📊 SCRAPING COMPLETE!")
-    print(f"   Successful: {successful_posts}/{len(post_urls)} posts")
-    print(f"   Failed: {len(failed_posts)}/{len(post_urls)} posts")
-    print(f"   Success rate: {(successful_posts / len(post_urls)) * 100:.1f}%")
-    print(f"   Main folder: {os.path.abspath(main_folder)}")
-
-    # Create zip file of results
-    zip_path = create_zip_file(main_folder)
-    print(f"   Zip file created: {zip_path}")
-
-    # Show detailed error report if there are failures
-    if failed_posts:
-        print(f"\n❌ FAILED POSTS DETAILS ({len(failed_posts)} posts):")
-        print("=" * 50)
-
-        # Group errors by type for better analysis
-        error_types = {}
-        for post_num, url, error_msg in failed_posts:
-            # Extract error type (first line or key words)
-            error_type = "Unknown Error"
-            if "timeout" in error_msg.lower():
-                error_type = "Timeout Error"
-            elif "login" in error_msg.lower():
-                error_type = "Login/Blocked Error"
-            elif "network" in error_msg.lower():
-                error_type = "Network Error"
-            elif "not found" in error_msg.lower() or "404" in error_msg:
-                error_type = "Page Not Found"
-            elif "denied" in error_msg.lower() or "access" in error_msg.lower():
-                error_type = "Access Denied"
-            else:
-                error_type = "Other Error"
-
-            if error_type not in error_types:
-                error_types[error_type] = []
-            error_types[error_type].append((post_num, url, error_msg))
-
-        # Print error summary by type
-        print("\n📊 ERROR BREAKDOWN BY TYPE:")
-        for error_type, posts in error_types.items():
-            print(f"   {error_type}: {len(posts)} posts")
-
-        print("\n📋 DETAILED FAILED POST LIST:")
-        for error_type, posts in error_types.items():
-            print(f"\n   {error_type.upper()}:")
-            for post_num, url, error_msg in posts[:10]:  # Show first 10 of each type
-                print(f"     • Post {post_num}: {url[:60]}...")
-                if len(posts) > 10 and posts.index((post_num, url, error_msg)) == 9:
-                    print(f"       ... and {len(posts) - 10} more")
-                    break
-
-        print(f"\n📄 Full error details saved to: {error_log_path}")
-
-    print("\n📁 Folder structure:")
-    print(f"   {main_folder}/")
-    print("   ├── post_1/ (First URL in your list)")
-    print("   │   ├── data/post_1.pdf")
-    print("   │   ├── images/ (post images)")
-    print("   │   └── linked_pages/ (scraped linked pages as PDFs only)")
-    print("   ├── post_2/ (Second URL in your list)")
-    print("   │   ├── data/post_2.pdf")
-    print("   │   ├── images/")
-    print("   │   └── linked_pages/")
-    print("   └── ...")
-    print("=" * 60)
-
-    # Return both successful count and failed posts list
-    return successful_posts, failed_posts, zip_path
-
-
-def create_zip_file(main_folder):
-    """Create a zip file of all scraped posts"""
-    try:
-        zip_path = f"{main_folder}.zip"
-        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for root, dirs, files in os.walk(main_folder):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    # Create relative path for zip
-                    arcname = os.path.relpath(file_path, os.path.dirname(main_folder))
-                    zipf.write(file_path, arcname)
-        return zip_path
-    except Exception as e:
-        print(f"   ⚠️ Could not create zip file: {e}")
-        return None
-
-
-def scrape_single_post_with_links(post_url, post_number, post_folder):
-    """
-    Scrape a single Facebook post and any linked pages it contains
-    Returns: (success: bool, error_message: str)
-    """
-    error_message = ""
-
-    try:
-        # Create subfolders
-        data_dir = os.path.join(post_folder, "data")
-        images_dir = os.path.join(post_folder, "images")
-        linked_pages_dir = os.path.join(post_folder, "linked_pages")
-        os.makedirs(data_dir, exist_ok=True)
-        os.makedirs(images_dir, exist_ok=True)
-        os.makedirs(linked_pages_dir, exist_ok=True)
-
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            context = browser.new_context(
-                viewport={'width': 1920, 'height': 1080},
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            )
-            page = context.new_page()
-
-            try:
-                # Navigate to post
-                print(f"   🌐 Loading Facebook post...")
-                page.goto(post_url, wait_until="domcontentloaded", timeout=45000)
-                page.wait_for_timeout(3000)
-
-                # Check if we're blocked by login
-                if "login" in page.url.lower():
-                    error_message = "Login page detected - post may be private"
-                    print(f"   ⚠️  {error_message}")
-                    browser.close()
-                    return False, error_message
-
-                # Scroll to load content
-                print(f"   📜 Loading content...")
-                for _ in range(3):
-                    page.evaluate("window.scrollBy(0, 800)")
-                    page.wait_for_timeout(1500)
-
-                # Extract post data
-                print(f"   🔍 Extracting data...")
-                post_data = extract_post_data_simple(page, post_url)
-
-                # Download images from post
-                print(f"   🖼️  Downloading post images...")
-                images = download_images(page, images_dir)
-                post_data['images'] = images
-
-                # Get external links
-                external_links = post_data.get('external_links', [])
-
-                # Scrape linked pages if found
-                linked_pages_data = []
-                if external_links:
-                    print(f"   🔗 Found {len(external_links)} external links")
-
-                    # Limit to 5 links maximum per post
-                    links_to_scrape = external_links[:5]
-
-                    for i, link in enumerate(links_to_scrape, 1):
-                        try:
-                            link_url = link['url']
-                            print(f"      Link {i}/{len(links_to_scrape)}: {link['domain']}")
-
-                            # Create folder for this linked page
-                            link_folder = os.path.join(linked_pages_dir, f"link_{i}")
-                            os.makedirs(link_folder, exist_ok=True)
-
-                            # Scrape the linked page
-                            link_success, link_data = scrape_linked_page(
-                                context,
-                                link_url,
-                                link_folder,
-                                i
-                            )
-
-                            if link_success:
-                                linked_pages_data.append({
-                                    'number': i,
-                                    'original_url': link_url,
-                                    'title': link_data.get('title', '')[:100],
-                                    'content': link_data.get('content', '')[:300],
-                                    'folder': f"linked_pages/link_{i}.pdf"
-                                })
-                                print(f"      ✓ Link {i} scraped successfully")
-                            else:
-                                print(f"      ⚠️ Link {i} failed to scrape")
-
-                        except Exception as e:
-                            print(f"      ⚠️ Error scraping link {i}: {str(e)[:80]}")
-                            continue
-                else:
-                    print(f"   ℹ️  No external links found in this post")
-
-                # Create PDF
-                print(f"   📄 Creating PDF...")
-                pdf_path = os.path.join(data_dir, f"post_{post_number}.pdf")
-                create_post_pdf_simple(
-                    post_data,
-                    pdf_path,
-                    images,
-                    post_number,
-                    linked_pages_data
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                context = browser.new_context(
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    viewport={'width': 1920, 'height': 1080}
                 )
 
-                browser.close()
-                return True, ""  # Success
-
-            except Exception as e:
-                error_message = str(e)[:200]
-                browser.close()
-                return False, error_message
-
-    except Exception as e:
-        error_message = f"Fatal error: {str(e)[:200]}"
-        return False, error_message
-
-
-def scrape_linked_page(context, url, links_folder, link_number):
-    """
-    Scrape a linked page and save as PDF directly in links folder
-    Returns: (success: bool, data: dict)
-    """
-    data = {
-        'url': url,
-        'title': '',
-        'content': ''
-    }
-
-    try:
-        print(f"         Opening: {url[:60]}...")
-
-        # Open new page for the linked page
-        page = context.new_page()
-
-        try:
-            # Navigate to linked page with shorter timeout
-            page.goto(url, wait_until="domcontentloaded", timeout=20000)
-            page.wait_for_timeout(2000)
-
-            # Get page title
-            data['title'] = page.title()
-            print(f"         Title: {data['title'][:50]}...")
-
-            # Extract main content - try multiple strategies
-            content_text = ""
-
-            # Strategy 1: Try common content containers
-            content_selectors = [
-                'article',
-                'main',
-                'div[role="main"]',
-                'div.post-content',
-                'div.entry-content',
-                'div.article-content',
-                'div[class*="content"]'
-            ]
-
-            for selector in content_selectors:
                 try:
-                    element = page.query_selector(selector)
-                    if element:
-                        text = element.inner_text().strip()
-                        if len(text) > 100:
-                            content_text = text
-                            break
-                except:
-                    continue
+                    # Navigate to post
+                    page = context.new_page()
+                    page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                    time.sleep(4)
 
-            # Strategy 2: If no content found, get all paragraph text
-            if not content_text:
-                try:
-                    paragraphs = page.query_selector_all('p')
-                    texts = []
-                    for p in paragraphs[:20]:  # Limit to first 20 paragraphs
-                        text = p.inner_text().strip()
-                        if len(text) > 30:  # Skip short paragraphs
-                            texts.append(text)
-                    content_text = '\n\n'.join(texts)
-                except:
-                    pass
+                    # Check for login page
+                    current_url = page.url.lower()
+                    if any(x in current_url for x in ["login", "checkpoint", "sorry", "blocked"]):
+                        print(f"   ⚠️  Facebook blocked access - skipping")
+                        failed_posts.append(post_number)
+                        return post_number
 
-            data['content'] = clean_text(content_text[:3000])
-            print(f"         Content: {len(data['content'])} chars")
+                    # FIRST: Extract content to get the beginning for folder name
+                    content_selectors = [
+                        'div[data-ad-preview="message"]',
+                        'div[class*="userContent"]',
+                        'div[data-testid="post_message"]',
+                        '[role="article"] div[dir="auto"]',
+                    ]
 
-            # Create PDF directly in links folder
-            pdf_path = os.path.join(links_folder, f"link_{link_number}.pdf")
-            create_linked_page_pdf_simple(data, pdf_path, link_number, url)
-            print(f"         ✓ PDF created: link_{link_number}.pdf")
+                    content_beginning = ""
+                    for selector in content_selectors:
+                        try:
+                            element = page.query_selector(selector)
+                            if element:
+                                text = element.inner_text().strip()
+                                if text and len(text) > 20:
+                                    # Get first 100 chars for folder name
+                                    first_part = text[:100].strip()
+                                    # Clean it up
+                                    first_part = re.sub(r'\s+', ' ', first_part)
+                                    # Remove URLs, hashtags at beginning
+                                    if first_part.startswith(('http://', 'https://', 'www.', '#', '@')):
+                                        # Find first sentence after these
+                                        sentences = re.split(r'[.!?]+', text)
+                                        for sentence in sentences:
+                                            sentence = sentence.strip()
+                                            if len(sentence) > 20 and not sentence.startswith(
+                                                    ('http://', 'https://', 'www.', '#', '@')):
+                                                first_part = sentence[:80]
+                                                break
+                                    content_beginning = first_part
+                                    break
+                        except:
+                            continue
 
-            page.close()
-            return True, data
+                    # Create folder name from content beginning
+                    if content_beginning and len(content_beginning) > 20:
+                        folder_title = clean_for_filename(content_beginning, 40)
+                        print(f"   📁 Folder title from content: {folder_title}")
+                    else:
+                        # Fallback to regular title extraction
+                        folder_title = clean_for_filename(extract_post_title(page, post_number), 40)
+
+                    # Ensure folder title is from the beginning, not random sentences
+                    folder_name = f"post{post_number:03d}_{folder_title}"
+                    post_folder = os.path.join(main_folder, folder_name)
+
+                    # Create subfolders
+                    data_dir = os.path.join(post_folder, "data")
+                    images_dir = os.path.join(post_folder, "images")
+                    linked_pages_dir = os.path.join(post_folder, "linked_pages")
+                    os.makedirs(data_dir, exist_ok=True)
+                    os.makedirs(images_dir, exist_ok=True)
+                    os.makedirs(linked_pages_dir, exist_ok=True)
+
+                    # Scroll to load content
+                    for _ in range(3):
+                        page.evaluate("window.scrollBy(0, 800)")
+                        time.sleep(2)
+
+                    # Extract post data (this will also extract the title for CSV)
+                    post_data = extract_post_data(page, url, post_number, date_str, folder_name)
+
+                    # Download images - use the folder name for consistency
+                    images = download_images(page, images_dir, post_number, folder_name)
+                    post_data['image_count'] = len(images)
+
+                    # Extract and scrape external links
+                    external_links = extract_external_links(page)
+                    linked_pages_data = []
+                    external_links_count = 0
+
+                    if external_links:
+                        external_links_count = len(external_links)
+                        print(f"   🔗 Found {external_links_count} external links")
+
+                        # Limit to 3 links to avoid too many requests
+                        for i, link in enumerate(external_links[:3], 1):
+                            link_data = scrape_linked_page(link['url'], post_number, i)
+                            linked_pages_data.append(link_data)
+
+                        # Save linked pages CSV
+                        if linked_pages_data:
+                            # Use folder name for CSV filename
+                            link_csv_filename = f"{folder_name}_links.csv"
+                            link_csv_path = os.path.join(linked_pages_dir, link_csv_filename)
+                            save_linked_pages_csv(linked_pages_data, link_csv_path)
+
+                    post_data['external_links_count'] = external_links_count
+
+                    # Save individual post CSV with folder name
+                    csv_filename = f"{folder_name}.csv"
+                    csv_path = os.path.join(data_dir, csv_filename)
+                    save_post_csv(post_data, csv_path)
+
+                    # Add to combined data
+                    all_posts_data.append(post_data)
+
+                    print(f"   ✅ Successfully scraped: {folder_name}")
+
+                    page.close()
+                    browser.close()
+
+                except Exception as e:
+                    print(f"   ❌ Error: {str(e)[:100]}")
+                    failed_posts.append(post_number)
+                    if 'page' in locals():
+                        try:
+                            page.close()
+                        except:
+                            pass
+                    if 'browser' in locals():
+                        try:
+                            browser.close()
+                        except:
+                            pass
 
         except Exception as e:
-            print(f"         ⚠️ Error loading page: {str(e)[:100]}")
-            page.close()
-            return False, data
+            print(f"   💥 Fatal error: {str(e)[:100]}")
+            failed_posts.append(post_number)
 
-    except Exception as e:
-        print(f"         ⚠️ Fatal error: {str(e)[:100]}")
-        return False, data
+        # Random delay
+        time.sleep(random.uniform(3, 6))
+        return post_number
+
+    # Process with threading
+    print(f"\n🚀 Starting {len(post_urls)} posts with {max_workers} threads...")
+    print(
+        f"⏱️  Estimated time: {len(post_urls) * 30 / 60 / max_workers:.1f} - {len(post_urls) * 60 / 60 / max_workers:.1f} minutes")
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_post = {executor.submit(process_post, i + 1): i + 1 for i in range(len(post_urls))}
+
+        completed = 0
+        for future in concurrent.futures.as_completed(future_to_post):
+            post_number = future_to_post[future]
+            try:
+                future.result()
+                completed += 1
+                print(f"✓ Completed post {post_number} ({completed}/{len(post_urls)})")
+            except Exception as e:
+                print(f"✗ Error in post {post_number}: {e}")
+                failed_posts.append(post_number)
+
+    # Save combined CSV
+    if all_posts_data:
+        combined_csv_path = os.path.join(main_folder, "all_posts_combined.csv")
+        save_combined_csv(all_posts_data, combined_csv_path)
+    else:
+        print("❌ No posts were successfully scraped")
+
+    # Summary
+    successful = len(all_posts_data)
+    failed = len(failed_posts)
+
+    print(f"\n" + "=" * 80)
+    print(f"🎉 SCRAPING COMPLETED!")
+    print(f"   Successful: {successful}/{len(post_urls)} posts")
+    print(f"   Failed: {failed}/{len(post_urls)} posts")
+    print(f"   Success rate: {(successful / len(post_urls)) * 100:.1f}%")
+    print(f"📁 Output folder: {os.path.abspath(main_folder)}")
+
+    if failed_posts:
+        print(f"\n❌ Failed posts: {failed_posts[:20]}" + ("..." if len(failed_posts) > 20 else ""))
+
+    # Create zip
+    zip_file = create_zip_file(main_folder)
+    if zip_file:
+        print(f"📦 Zip archive: {zip_file}")
+
+    return successful, failed_posts
 
 
-def extract_post_data_simple(page, post_url):
-    """Extract data from a Facebook post with better link detection"""
+def extract_post_data(page, url, post_number, date_str, folder_name):
+    """Extract data from Facebook post with improved title handling"""
     data = {
-        'url': post_url,
-        'title': '',
-        'content': '',
-        'author': '',
-        'external_links': []
+        'post_number': post_number,
+        'post_url': url,
+        'post_title': "",
+        'post_content': "",
+        'post_author': "",
+        'post_date': "",
+        'post_time': "",
+        'word_count': 0,
+        'image_count': 0,
+        'external_links_count': 0,
+        'folder_name': folder_name
     }
 
+    # Parse date
+    if date_str:
+        post_date, post_time = parse_post_datetime(date_str)
+        data['post_date'] = post_date
+        data['post_time'] = post_time
+
+    # Extract content
+    content_selectors = [
+        'div[data-ad-preview="message"]',
+        'div[class*="userContent"]',
+        'div[data-testid="post_message"]',
+        '[role="article"] div[dir="auto"]',
+        'div[class*="x1iorvi4"]',
+        'div[class*="x1y1aw1k"]',
+        'div.x1lq5wgf',
+        'div.x78zum5.x1q0g3np.x1a02dak.x1qughib',
+        'div[data-pagelet="FeedUnit"] div[dir="auto"]'
+    ]
+
+    full_content = ""
+    for selector in content_selectors:
+        try:
+            element = page.query_selector(selector)
+            if element:
+                text = element.inner_text().strip()
+                if len(text) > 20:
+                    full_content = clean_text(text[:50000])
+                    data['word_count'] = len(full_content.split())
+                    print(f"   📝 Content: {data['word_count']} words")
+                    data['post_content'] = full_content
+                    break
+        except:
+            continue
+
+    # Extract author
+    author_selectors = [
+        'a[role="link"] strong',
+        'h2 a span',
+        'a.actor-link',
+        '[role="article"] a[href*="/"] strong',
+        'span[class*="xt0psk2"]',
+        'span.x1lliihq.x1plvlek.xryxfnj.x1n2onr6.x193iq5w.xeuugli.x1fj9vlw.x13faqbe.x1vvkbs.x1s928wv.xhkezso.x1gmr53x.x1cpjm7i.x1fgarty.x1943h6x.x1i0vuye.xvs91rp.x1s688f.x5n08af.x10wh9bi.x1wdrske.x8viiok.x18hxmgj'
+    ]
+
+    for selector in author_selectors:
+        try:
+            element = page.query_selector(selector)
+            if element:
+                author = element.inner_text().strip()
+                if author and len(author) > 1:
+                    data['post_author'] = clean_text(author[:100])
+                    print(f"   👤 Author: {author[:30]}")
+                    break
+        except:
+            continue
+
+    # EXTRACT TITLE FROM CONTENT - Focus on BEGINNING
+    if full_content:
+        # Strategy 1: Get the FIRST substantial sentence (not questions from the end)
+        sentences = re.split(r'[.!?]+', full_content)
+
+        # Look for first good sentence (not too short, not a question if possible)
+        for i, sentence in enumerate(sentences):
+            sentence = sentence.strip()
+            if 25 < len(sentence) < 150:  # Good length for a title
+                # Skip sentences that are just questions (unless it's the first one)
+                if sentence.endswith('?') and i > 0:
+                    continue  # Skip questions that aren't the opening sentence
+
+                # Skip sentences that start with commands or are fragments
+                if not re.match(
+                        r'^(click|Click|visit|Visit|read|Read|check|Check|see|See|watch|Watch|learn|Learn|join|Join|share|Share|#|@|http)',
+                        sentence):
+                    # Clean the sentence for use as title
+                    title = sentence
+                    # Remove excessive whitespace
+                    title = re.sub(r'\s+', ' ', title)
+                    # Remove trailing punctuation
+                    title = re.sub(r'[.,;:]+$', '', title)
+
+                    # Ensure it's a complete thought
+                    if len(title.split()) >= 4:  # At least 4 words
+                        data['post_title'] = clean_text(title[:100])
+                        print(f"   📰 Title from content: {data['post_title'][:60]}...")
+                        break
+
+        # Strategy 2: If no good sentence found, take first 120 chars
+        if not data['post_title'] and len(full_content) > 30:
+            # Take first 120 chars but try to end at a word boundary
+            first_part = full_content[:120]
+            if len(first_part) > 100:
+                last_space = first_part[:100].rfind(' ')
+                if last_space > 70:
+                    first_part = first_part[:last_space]
+
+            if len(first_part) > 25:
+                data['post_title'] = clean_text(first_part)
+                print(f"   📰 Title from first part: {data['post_title'][:60]}...")
+
+    # Strategy 3: Use folder name (but extract from actual content)
+    if not data['post_title'] or len(data['post_title']) < 10:
+        # Try to get title from the actual folder name content
+        if full_content and len(full_content) > 30:
+            # Take first 80 chars
+            first_part = full_content[:80].strip()
+            if len(first_part) > 30:
+                data['post_title'] = clean_text(first_part)
+        else:
+            data['post_title'] = f"Facebook Post {post_number}"
+
+    # Ensure CSV title is clean and professional
+    if data['post_title']:
+        # Clean up the title
+        data['post_title'] = re.sub(r'\s+', ' ', data['post_title']).strip()
+
+    return data
+
+
+def extract_external_links(page):
+    """Extract external links from post"""
+    links = []
+    seen = set()
+
     try:
-        # Get page title
-        data['title'] = page.title()
-
-        # Extract post content - focus on the main post area
-        print(f"      Extracting content...")
-
-        # Try to find the main post content container
-        content_selectors = [
-            'div[data-ad-preview="message"]',
-            'div[class*="userContent"]',
-            'div[data-testid="post_message"]',
-            '[role="article"] div[dir="auto"]',
-        ]
-
-        content_element = None
-        for selector in content_selectors:
-            try:
-                element = page.query_selector(selector)
-                if element:
-                    text = element.inner_text().strip()
-                    if len(text) > 20:
-                        content_element = element
-                        data['content'] = clean_text(text[:4000])
-                        print(f"         Found content: {len(text)} chars")
-                        break
-            except:
-                continue
-
-        # Extract author name
-        print(f"      Extracting author...")
-        author_selectors = [
-            'a[role="link"] strong',
-            'h2 a span',
-            'a.actor-link',
-            '[role="article"] a[href*="/"] strong'
-        ]
-
-        for selector in author_selectors:
-            try:
-                element = page.query_selector(selector)
-                if element:
-                    author = element.inner_text().strip()
-                    if author and len(author) < 100:
-                        data['author'] = clean_text(author)
-                        print(f"         Found author: {author}")
-                        break
-            except:
-                continue
-
-        # Extract ALL external links from the post
-        print(f"      Extracting external links...")
-
-        # Find all links in the post
         all_links = page.query_selector_all('a[href]')
-        seen_urls = set()
-
         for link_element in all_links:
             try:
                 href = link_element.get_attribute('href')
-
                 if not href:
                     continue
 
-                # Decode Facebook's link wrapper if present
-                # Facebook wraps external links like: https://l.facebook.com/l.php?u=ACTUAL_URL
+                # Decode Facebook link wrapper
                 actual_url = href
                 if 'l.facebook.com/l.php' in href or 'l.facebook.com/l/' in href:
                     try:
-                        from urllib.parse import urlparse, parse_qs
                         parsed = urlparse(href)
+                        from urllib.parse import parse_qs
                         if 'u' in parse_qs(parsed.query):
                             actual_url = parse_qs(parsed.query)['u'][0]
-                            print(f"         Decoded FB wrapper: {actual_url[:60]}...")
                     except:
                         pass
 
-                # Check if it's an external link (not Facebook/Instagram/WhatsApp)
+                # Check if external
                 is_external = (
                         actual_url.startswith('http') and
                         'facebook.com' not in actual_url.lower() and
@@ -460,201 +885,77 @@ def extract_post_data_simple(page, post_url):
                         'fb.me' not in actual_url.lower() and
                         'instagram.com' not in actual_url.lower() and
                         'whatsapp.com' not in actual_url.lower() and
-                        actual_url not in seen_urls
+                        'messenger.com' not in actual_url.lower() and
+                        actual_url not in seen
                 )
 
                 if is_external:
-                    # Get link text
-                    link_text = link_element.inner_text().strip()
-                    if not link_text:
-                        link_text = "External Link"
-
-                    # Get domain for categorization
+                    link_text = link_element.inner_text().strip() or "External Link"
                     try:
-                        from urllib.parse import urlparse
                         domain = urlparse(actual_url).netloc
                     except:
                         domain = ""
 
-                    data['external_links'].append({
-                        'text': clean_text(link_text[:150]),
-                        'url': actual_url[:500],
+                    links.append({
+                        'url': actual_url[:1000],
+                        'text': clean_text(link_text[:200]),
                         'domain': domain
                     })
+                    seen.add(actual_url)
 
-                    seen_urls.add(actual_url)
-                    print(f"         ✓ Found external link: {domain}")
-
-            except Exception as e:
+            except:
                 continue
 
-        print(f"      Extracted: {len(data['content'])} chars, {len(data['external_links'])} external links")
-
     except Exception as e:
-        print(f"      ⚠️ Error in extraction: {e}")
+        print(f"   ⚠️ Link extraction error: {e}")
 
-    return data
-
-
-def extract_content_with_links(html_content):
-    """Extract content preserving links inline"""
-    try:
-        # Remove scripts and styles
-        html_content = re.sub(r'<script.*?</script>', '', html_content, flags=re.DOTALL)
-        html_content = re.sub(r'<style.*?</style>', '', html_content, flags=re.DOTALL)
-
-        # Replace links with text + URL in parentheses
-        def replace_link(match):
-            link_text = match.group(2) or match.group(1)
-            link_url = match.group(3)
-
-            # Clean the link text
-            link_text = re.sub(r'<[^>]+>', '', link_text)
-            link_text = clean_text(link_text)
-
-            if link_text and link_url:
-                # Check if it's an external link
-                if any(x in link_url.lower() for x in ['http://', 'https://', 'www.']):
-                    return f"{link_text} [EXTERNAL LINK: {link_url}]"
-                return f"{link_text} [LINK: {link_url}]"
-            return link_text or ""
-
-        # Pattern for links
-        link_pattern = r'<a\s+(?:[^>]*?\s+)?href="([^"]*)"[^>]*>(.*?)</a>'
-        content = re.sub(link_pattern, replace_link, html_content, flags=re.DOTALL | re.IGNORECASE)
-
-        # Remove remaining HTML tags
-        content = re.sub(r'<[^>]+>', ' ', content)
-
-        # Clean up whitespace
-        content = re.sub(r'\s+', ' ', content)
-        content = clean_text(content)
-
-        return content[:6000]
-
-    except Exception as e:
-        print(f"      ⚠️ Error extracting content with links: {e}")
-        return ""
+    return links[:10]  # Limit to 10 links
 
 
-def extract_external_links(html_content):
-    """Extract external links from HTML content"""
-    external_links = []
-
-    try:
-        # Find all links in the content
-        link_pattern = r'<a\s+(?:[^>]*?\s+)?href="([^"]*)"[^>]*>(.*?)</a>'
-        matches = list(re.finditer(link_pattern, html_content, re.DOTALL | re.IGNORECASE))
-
-        for match in matches:
-            link_url = match.group(1)
-            link_text = match.group(2)
-
-            # Clean link text
-            link_text = re.sub(r'<[^>]+>', '', link_text)
-            link_text = clean_text(link_text.strip())
-
-            # Check if it's an external link (not Facebook)
-            if (link_text and link_url and
-                    'facebook.com' not in link_url and
-                    'fb.com' not in link_url and
-                    any(x in link_url.lower() for x in ['http://', 'https://', 'www.'])):
-
-                # Extract domain
-                domain = ""
-                try:
-                    parsed_url = urllib.parse.urlparse(link_url)
-                    domain = parsed_url.netloc
-                except:
-                    pass
-
-                external_links.append({
-                    'text': link_text[:100],
-                    'url': link_url[:300],
-                    'domain': domain
-                })
-
-    except Exception as e:
-        print(f"      ⚠️ Error extracting external links: {e}")
-
-    return external_links
-
-
-def extract_links_with_context(html_content):
-    """Extract links with their surrounding context"""
-    links = []
-
-    try:
-        # Find all links in the content
-        link_pattern = r'<a\s+(?:[^>]*?\s+)?href="([^"]*)"[^>]*>(.*?)</a>'
-        matches = list(re.finditer(link_pattern, html_content, re.DOTALL | re.IGNORECASE))
-
-        for match in matches:
-            link_url = match.group(1)
-            link_text = match.group(2)
-
-            # Clean link text
-            link_text = re.sub(r'<[^>]+>', '', link_text)
-            link_text = clean_text(link_text.strip())
-
-            if link_text and link_url:
-                # Get context (50 chars before and after)
-                start = max(0, match.start() - 50)
-                end = min(len(html_content), match.end() + 50)
-                context_html = html_content[start:end]
-                context_text = re.sub(r'<[^>]+>', ' ', context_html)
-                context_text = clean_text(context_text.strip())
-
-                links.append({
-                    'text': link_text[:80],
-                    'url': link_url[:200],
-                    'context': context_text[:150]
-                })
-
-    except Exception as e:
-        print(f"      ⚠️ Error extracting links with context: {e}")
-
-    return links
-
-
-def download_images(page, images_dir):
-    """Download images from the post"""
+def download_images(page, images_dir, post_number, folder_name):
+    """Download images from post using folder name for image filenames"""
     images = []
+    found_hashes = set()
 
     try:
-        # Facebook image selectors
         img_selectors = [
             'img[src*="scontent"]',
             'img[src*="fbcdn"]',
             'div[role="article"] img',
             'div[data-pagelet="FeedUnit"] img',
-            'img[class*="x1ey2m1c"]',
-            'img[class*="x5yr21d"]',
-            'img[class*="x1lq5wgf"]',
-            'img[class*="xpdipgo"]'
+            'img[class*="x1ey2m1c"]'
         ]
 
-        found_urls = set()
+        # Extract the descriptive part from the folder name
+        # Folder name format: post001_A_milestone_for_humanity_Recent
+        # We want just: A_milestone_for_humanity_Recent
+        if '_' in folder_name:
+            # Remove the "post001_" prefix
+            base_name = folder_name.split('_', 1)[1]
+        else:
+            base_name = f"post{post_number:03d}"
 
+        # Ensure base_name is clean
+        base_name = clean_for_filename(base_name, 40)
+
+        img_count = 0
         for selector in img_selectors:
             img_elements = page.query_selector_all(selector)
-            for img in img_elements[:20]:
+            for i, img in enumerate(img_elements[:15], 1):
                 try:
                     src = img.get_attribute('src')
-
-                    if not src or src in found_urls:
+                    if not src:
                         continue
 
                     # Skip non-content images
-                    if any(x in src.lower() for x in
-                           ['profile', 'static', 'emoji', 'icon', 'svg', 'gif', 'sticker', 'placeholder']):
+                    if any(x in src.lower() for x in ['profile', 'static', 'emoji', 'icon', 'svg', 'gif', 'sticker']):
                         continue
 
-                    # Check image size if possible
+                    # Check image size
                     try:
                         bbox = img.bounding_box()
-                        if bbox and (bbox['width'] < 50 or bbox['height'] < 50):
-                            continue  # Skip tiny images
+                        if bbox and (bbox['width'] < 100 or bbox['height'] < 100):
+                            continue
                     except:
                         pass
 
@@ -662,884 +963,530 @@ def download_images(page, images_dir):
                     response = page.request.get(src)
                     if response.status == 200:
                         img_data = response.body()
+                        img_hash = hashlib.md5(img_data).hexdigest()
 
-                        # Create unique filename
-                        img_filename = f"image_{len(images) + 1}.jpg"
+                        if img_hash in found_hashes:
+                            continue
+
+                        img_count += 1
+
+                        # Create image filename using the same naming convention as folder
+                        # Format: post001_A_milestone_for_humanity_Recent_image_001.jpg
+                        img_filename = f"{folder_name}_image_{img_count:03d}.jpg"
                         img_path = os.path.join(images_dir, img_filename)
 
-                        # Save image
                         with open(img_path, 'wb') as f:
                             f.write(img_data)
 
-                        # Get image dimensions for PDF
-                        try:
-                            pil_img = PILImage.open(BytesIO(img_data))
-                            images.append({
-                                'path': img_path,
-                                'filename': img_filename,
-                                'width': pil_img.width,
-                                'height': pil_img.height
-                            })
-                            print(f"      ✓ Downloaded image {len(images)}")
-                        except:
-                            # Still record even if we can't open it
-                            images.append({
-                                'path': img_path,
-                                'filename': img_filename,
-                                'width': 0,
-                                'height': 0
-                            })
+                        images.append({'filename': img_filename, 'path': img_path})
+                        found_hashes.add(img_hash)
 
-                        found_urls.add(src)
+                        if img_count <= 3:  # Only show first 3
+                            print(f"   🖼️ Image {img_count}: {img_filename}")
 
-                except Exception as e:
+                except:
                     continue
 
+        if images:
+            print(f"   📸 Downloaded {len(images)} images")
+
     except Exception as e:
-        print(f"      ⚠️ Image download error: {e}")
+        print(f"   ⚠️ Image error: {e}")
 
     return images
 
 
+def scrape_linked_page(url, post_number, link_number):
+    """Scrape a linked page"""
+    data = {
+        'link_id': f'post{post_number:03d}_link{link_number:03d}',
+        'original_post_number': post_number,
+        'link_title': '',
+        'link_url': url,
+        'link_domain': urlparse(url).netloc if url else '',
+        'link_content': '',
+        'word_count': 0,
+        'status': 'success'
+    }
+
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+
+        soup = BeautifulSoup(response.content, 'html.parser')
+
+        # Get title
+        if soup.title and soup.title.string:
+            data['link_title'] = clean_text(soup.title.string[:200])
+
+        # Get content
+        for script in soup(["script", "style", "nav", "header", "footer"]):
+            script.decompose()
+
+        # Try to get main content
+        content_selectors = ['main', 'article', '.content', '#content', '.entry-content']
+        content_element = None
+
+        for selector in content_selectors:
+            element = soup.select_one(selector)
+            if element:
+                content_element = element
+                break
+
+        if content_element:
+            text = content_element.get_text(separator=' ', strip=True)
+        else:
+            text = soup.get_text(separator=' ', strip=True)
+
+        data['link_content'] = clean_text(text[:5000])
+        data['word_count'] = len(data['link_content'].split())
+
+    except requests.exceptions.Timeout:
+        data['status'] = 'timeout'
+    except Exception as e:
+        data['status'] = f'error: {str(e)[:50]}'
+
+    return data
+
+
 def clean_text(text):
-    """Clean text for safe display"""
+    """Clean text for CSV"""
     if not text:
         return ""
 
-    # Replace problematic Unicode characters with safe alternatives
+    # Replace problematic characters
     replacements = {
-        '\u2022': '•',
-        '\u2013': '-',
-        '\u2014': '-',
-        '\u2018': "'",
-        '\u2019': "'",
+        '\n': ' ',
+        '\r': ' ',
+        '\t': ' ',
+        '"': '""',  # Escape quotes for CSV
         '\u201c': '"',
         '\u201d': '"',
+        '\u2018': "'",
+        '\u2019': "'",
+        '\u2026': '...',
         '\u00a0': ' ',
-        '\u200b': '',  # Zero-width space
-        '\ufffd': '',  # Replacement character
-        '\u2026': '...',  # Ellipsis
-        '\u00a9': '(c)',
-        '\u00ae': '(R)',
-        '\u2122': '(TM)',
     }
 
-    cleaned = text
     for char, replacement in replacements.items():
-        cleaned = cleaned.replace(char, replacement)
+        text = text.replace(char, replacement)
 
     # Remove excessive whitespace
-    cleaned = re.sub(r'\s+', ' ', cleaned)
+    text = re.sub(r'\s+', ' ', text)
 
-    return cleaned.strip()
+    return text.strip()
 
 
-def create_post_pdf_simple(post_data, pdf_path, images, post_number, linked_pages_data=None):
-    """Create PDF for a single post with simple formatting (no date, reactions, comments)"""
-    # Create PDF document
-    doc = SimpleDocTemplate(
-        pdf_path,
-        pagesize=letter,
-        rightMargin=72,
-        leftMargin=72,
-        topMargin=72,
-        bottomMargin=72
-    )
-
-    # Container for PDF elements
-    elements = []
-
-    # Define styles
-    styles = getSampleStyleSheet()
-
-    # Custom styles
-    title_style = ParagraphStyle(
-        'TitleStyle',
-        parent=styles['Title'],
-        fontSize=16,
-        spaceAfter=12,
-        textColor=colors.HexColor('#1A365D')
-    )
-
-    header_style = ParagraphStyle(
-        'HeaderStyle',
-        parent=styles['Heading2'],
-        fontSize=12,
-        spaceAfter=6,
-        textColor=colors.HexColor('#2D3748')
-    )
-
-    normal_style = ParagraphStyle(
-        'NormalStyle',
-        parent=styles['Normal'],
-        fontSize=10,
-        spaceAfter=6
-    )
-
-    link_style = ParagraphStyle(
-        'LinkStyle',
-        parent=styles['Normal'],
-        fontSize=9,
-        textColor=colors.HexColor('#1A56DB'),
-        spaceAfter=4
-    )
-
-    external_link_style = ParagraphStyle(
-        'ExternalLinkStyle',
-        parent=styles['Normal'],
-        fontSize=9,
-        textColor=colors.HexColor('#057A55'),
-        spaceAfter=4
-    )
-
-    small_style = ParagraphStyle(
-        'SmallStyle',
-        parent=styles['Normal'],
-        fontSize=8,
-        textColor=colors.HexColor('#718096')
-    )
-
-    metadata_style = ParagraphStyle(
-        'MetadataStyle',
-        parent=styles['Normal'],
-        fontSize=9,
-        textColor=colors.HexColor('#4B5563'),
-        spaceAfter=3
-    )
-
-    # Add main title with post number
-    elements.append(Paragraph(f"Facebook Post #{post_number}", title_style))
-
-    # Add post number info
-    elements.append(Paragraph(f"<i>Post {post_number} in the provided list</i>", small_style))
-
-    elements.append(Spacer(1, 0.2 * inch))
-
-    # Add simple post metadata table - ONLY URL and Author
-    metadata = [
-        ["<b>Post URL:</b>", post_data['url']],
-    ]
-
-    if post_data['author']:
-        metadata.append(["<b>Author:</b>", post_data['author']])
-
-    metadata_table = Table(metadata, colWidths=[1.5 * inch, 4 * inch])
-    metadata_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#E2E8F0')),
-        ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
-        ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
-        ('ALIGN', (1, 0), (1, -1), 'LEFT'),
-        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 9),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-        ('TOPPADDING', (0, 0), (-1, -1), 6),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-    ]))
-
-    elements.append(metadata_table)
-    elements.append(Spacer(1, 0.3 * inch))
-
-    # Add content section with embedded links
-    elements.append(Paragraph("<b>Post Content:</b>", header_style))
-
-    if post_data.get('content'):
-        # Process content to format links nicely
-        content_with_links = post_data['content']
-
-        # Split content into paragraphs
-        paragraphs = content_with_links.split('\n')
-        line_count = 0
-
-        for para in paragraphs:
-            para = para.strip()
-            if para:
-                # Check if paragraph contains a link marker
-                if '[EXTERNAL LINK:' in para:
-                    # Split by external link markers
-                    parts = re.split(r'(\[EXTERNAL LINK:[^\]]+\])', para)
-                    for part in parts:
-                        if part.startswith('[EXTERNAL LINK:'):
-                            # Extract URL from link marker
-                            link_match = re.search(r'\[EXTERNAL LINK:\s*([^\]]+)\]', part)
-                            if link_match:
-                                url = link_match.group(1)
-                                # Create external link indicator
-                                link_text = f"<link href='{url}' color='green'><u>🌐 External Link</u></link>"
-                                elements.append(Paragraph(link_text, external_link_style))
-                                elements.append(Paragraph(f"URL: {url[:120]}", small_style))
-                                elements.append(Spacer(1, 0.05 * inch))
-                        elif part.startswith('[LINK:'):
-                            # Extract URL from link marker
-                            link_match = re.search(r'\[LINK:\s*([^\]]+)\]', part)
-                            if link_match:
-                                url = link_match.group(1)
-                                # Create clickable link in PDF
-                                link_text = f"<link href='{url}' color='blue'><u>🔗 Link</u></link>"
-                                elements.append(Paragraph(link_text, link_style))
-                                elements.append(Paragraph(f"URL: {url[:100]}", small_style))
-                                elements.append(Spacer(1, 0.05 * inch))
-                        elif part.strip():
-                            safe_part = html.escape(part)
-                            elements.append(Paragraph(safe_part, normal_style))
-                elif '[LINK:' in para:
-                    # Split by internal link markers
-                    parts = re.split(r'(\[LINK:[^\]]+\])', para)
-                    for part in parts:
-                        if part.startswith('[LINK:'):
-                            link_match = re.search(r'\[LINK:\s*([^\]]+)\]', part)
-                            if link_match:
-                                url = link_match.group(1)
-                                link_text = f"<link href='{url}' color='blue'><u>🔗 Link</u></link>"
-                                elements.append(Paragraph(link_text, link_style))
-                                elements.append(Paragraph(f"URL: {url[:100]}", small_style))
-                                elements.append(Spacer(1, 0.05 * inch))
-                        elif part.strip():
-                            safe_part = html.escape(part)
-                            elements.append(Paragraph(safe_part, normal_style))
-                else:
-                    safe_para = html.escape(para)
-                    elements.append(Paragraph(safe_para, normal_style))
-
-                elements.append(Spacer(1, 0.05 * inch))
-                line_count += 1
-
-                # Limit content in PDF to prevent huge files
-                if line_count > 50:
-                    elements.append(Paragraph("[Content truncated - see images for full post]", small_style))
-                    break
-    else:
-        elements.append(Paragraph("No text content extracted from this post", normal_style))
-
-    elements.append(Spacer(1, 0.2 * inch))
-
-    # Add linked pages section if we scraped any
-    if linked_pages_data:
-        elements.append(Paragraph(f"<b>Linked Pages Scraped ({len(linked_pages_data)}):</b>", header_style))
-
-        for i, link_data in enumerate(linked_pages_data, 1):
-            elements.append(Paragraph(f"<b>Linked Page {i}:</b>", normal_style))
-            elements.append(Paragraph(f"URL: {link_data['original_url'][:100]}", link_style))
-
-            if link_data.get('title'):
-                elements.append(Paragraph(f"Title: {link_data['title'][:80]}", metadata_style))
-
-            if link_data.get('content'):
-                content_preview = link_data['content'][:200] + "..." if len(link_data['content']) > 200 else link_data[
-                    'content']
-                elements.append(Paragraph(f"Content Preview: {content_preview}", small_style))
-
-            elements.append(Paragraph(f"Saved in: {link_data['folder']}", small_style))
-            elements.append(Spacer(1, 0.1 * inch))
-
-    # Add external links section if there are external links
-    elif post_data.get('external_links') and len(post_data['external_links']) > 0:
-        elements.append(Paragraph(f"<b>External Links Found ({len(post_data['external_links'])}):</b>", header_style))
-
-        for i, link in enumerate(post_data['external_links'][:5], 1):  # Limit to 5 links
-            elements.append(Paragraph(f"<b>Link {i}:</b>", metadata_style))
-
-            if link['text']:
-                elements.append(Paragraph(f"Text: {link['text']}", metadata_style))
-
-            elements.append(Paragraph(f"URL: {link['url'][:120]}", external_link_style))
-
-            if link.get('context'):
-                elements.append(Paragraph(f"Context: {link['context']}", small_style))
-
-            elements.append(Spacer(1, 0.1 * inch))
-
-    elements.append(Spacer(1, 0.2 * inch))
-
-    # Add images section if there are images
-    if images:
-        elements.append(Paragraph(f"<b>Post Images ({len(images)}):</b>", header_style))
-
-        for i, img in enumerate(images, 1):
-            try:
-                # Add image info
-                img_info = f"Image {i}: {img['filename']}"
-                elements.append(Paragraph(img_info, normal_style))
-
-                if img['width'] > 0 and img['height'] > 0:
-                    size_info = f"Size: {img['width']} × {img['height']} pixels"
-                    elements.append(Paragraph(size_info, small_style))
-
-                # Try to add the image to PDF (limit to 3 images in PDF)
-                if i <= 3:
-                    try:
-                        # Resize image if too large
-                        max_width = 5 * inch
-                        max_height = 3 * inch
-
-                        width = img['width'] / 72  # Convert pixels to inches (approx)
-                        height = img['height'] / 72
-
-                        # Calculate scaling
-                        if width > 0 and height > 0:
-                            scale = min(max_width / width, max_height / height, 1.0)
-
-                            pdf_img = ReportLabImage(img['path'],
-                                                     width=width * scale,
-                                                     height=height * scale)
-                            elements.append(pdf_img)
-                            elements.append(Spacer(1, 0.1 * inch))
-                        else:
-                            elements.append(Paragraph("[Image could not be processed]", small_style))
-
-                    except Exception as e:
-                        elements.append(Paragraph("[Image could not be embedded in PDF]", small_style))
-
-                elements.append(Spacer(1, 0.05 * inch))
-
-            except Exception as e:
-                continue
-    else:
-        elements.append(Paragraph("No images extracted from this post", small_style))
-
-    # Add footer
-    elements.append(Spacer(1, 0.3 * inch))
-    elements.append(Paragraph("Generated by Facebook Post Scraper", small_style))
-    elements.append(Paragraph(f"Post #{post_number} in the exact order from your list", small_style))
-    if linked_pages_data:
-        elements.append(Paragraph(f"Linked pages saved as PDFs in 'linked_pages' folder", small_style))
-    else:
-        elements.append(Paragraph("All images saved in 'images' folder", small_style))
-
-    # Build the PDF
-    doc.build(elements)
-
-
-def create_linked_page_pdf_simple(link_data, pdf_path, link_number, original_url):
-    """Create PDF for a linked page with NO images"""
-    # Create PDF document
-    doc = SimpleDocTemplate(
-        pdf_path,
-        pagesize=letter,
-        rightMargin=72,
-        leftMargin=72,
-        topMargin=72,
-        bottomMargin=72
-    )
-
-    # Container for PDF elements
-    elements = []
-
-    # Define styles
-    styles = getSampleStyleSheet()
-
-    # Custom styles
-    title_style = ParagraphStyle(
-        'TitleStyle',
-        parent=styles['Title'],
-        fontSize=14,
-        spaceAfter=12,
-        textColor=colors.HexColor('#1A365D')
-    )
-
-    header_style = ParagraphStyle(
-        'HeaderStyle',
-        parent=styles['Heading2'],
-        fontSize=11,
-        spaceAfter=6,
-        textColor=colors.HexColor('#2D3748')
-    )
-
-    normal_style = ParagraphStyle(
-        'NormalStyle',
-        parent=styles['Normal'],
-        fontSize=10,
-        spaceAfter=6
-    )
-
-    small_style = ParagraphStyle(
-        'SmallStyle',
-        parent=styles['Normal'],
-        fontSize=8,
-        textColor=colors.HexColor('#718096')
-    )
-
-    link_style = ParagraphStyle(
-        'LinkStyle',
-        parent=styles['Normal'],
-        fontSize=9,
-        textColor=colors.HexColor('#1A56DB'),
-        spaceAfter=4
-    )
-
-    # Add title
-    elements.append(Paragraph(f"Linked Page #{link_number}", title_style))
-    elements.append(Spacer(1, 0.1 * inch))
-
-    # Add metadata
-    elements.append(Paragraph(f"<b>Original URL:</b>", header_style))
-    elements.append(Paragraph(f"{original_url[:150]}", link_style))
-    elements.append(Spacer(1, 0.1 * inch))
-
-    # Add page title if available
-    if link_data.get('title'):
-        elements.append(Paragraph(f"<b>Page Title:</b>", header_style))
-        elements.append(Paragraph(f"{link_data['title']}", normal_style))
-        elements.append(Spacer(1, 0.1 * inch))
-
-    # Add content section
-    if link_data.get('content'):
-        elements.append(Paragraph("<b>Content:</b>", header_style))
-        content = link_data['content']
-
-        # Split into paragraphs
-        paragraphs = re.split(r'[\n\r]+', content)
-        paragraph_count = 0
-        for para in paragraphs:
-            para = para.strip()
-            if para and len(para) > 10:
-                safe_para = html.escape(para)
-                elements.append(Paragraph(safe_para, normal_style))
-                elements.append(Spacer(1, 0.05 * inch))
-                paragraph_count += 1
-                if paragraph_count >= 15:  # Limit to 15 paragraphs
-                    elements.append(Paragraph("[Content truncated for PDF - full content scraped]", small_style))
-                    break
-
-    # Add footer
-    elements.append(Spacer(1, 0.3 * inch))
-    elements.append(Paragraph("Scraped from Facebook post link", small_style))
-    elements.append(Paragraph(f"Saved in: linked_pages/link_{link_number}.pdf", small_style))
-
-    # Build the PDF
-    doc.build(elements)
-
-
-def create_linked_page_pdf(link_data, pdf_path, images, link_number, original_url):
-    """Create PDF for a linked page"""
-    # Create PDF document
-    doc = SimpleDocTemplate(
-        pdf_path,
-        pagesize=letter,
-        rightMargin=72,
-        leftMargin=72,
-        topMargin=72,
-        bottomMargin=72
-    )
-
-    # Container for PDF elements
-    elements = []
-
-    # Define styles
-    styles = getSampleStyleSheet()
-
-    # Custom styles
-    title_style = ParagraphStyle(
-        'TitleStyle',
-        parent=styles['Title'],
-        fontSize=14,
-        spaceAfter=12,
-        textColor=colors.HexColor('#1A365D')
-    )
-
-    header_style = ParagraphStyle(
-        'HeaderStyle',
-        parent=styles['Heading2'],
-        fontSize=11,
-        spaceAfter=6,
-        textColor=colors.HexColor('#2D3748')
-    )
-
-    normal_style = ParagraphStyle(
-        'NormalStyle',
-        parent=styles['Normal'],
-        fontSize=10,
-        spaceAfter=6
-    )
-
-    small_style = ParagraphStyle(
-        'SmallStyle',
-        parent=styles['Normal'],
-        fontSize=8,
-        textColor=colors.HexColor('#718096')
-    )
-
-    # Add title
-    elements.append(Paragraph(f"Linked Page #{link_number}", title_style))
-    elements.append(Spacer(1, 0.1 * inch))
-
-    # Add metadata
-    elements.append(Paragraph(f"<b>Original URL:</b> {original_url[:100]}", normal_style))
-    elements.append(Spacer(1, 0.1 * inch))
-
-    # Add page title if available
-    if link_data.get('title'):
-        elements.append(Paragraph(f"<b>Page Title:</b> {link_data['title']}", normal_style))
-        elements.append(Spacer(1, 0.1 * inch))
-
-    # Add content section
-    if link_data.get('content'):
-        elements.append(Paragraph("<b>Content:</b>", header_style))
-        content = link_data['content']
-
-        # Split into paragraphs
-        paragraphs = re.split(r'[\n\.]+', content)
-        for para in paragraphs[:10]:  # Limit to 10 paragraphs
-            para = para.strip()
-            if para and len(para) > 10:
-                safe_para = html.escape(para)
-                elements.append(Paragraph(safe_para, normal_style))
-                elements.append(Spacer(1, 0.05 * inch))
-
-    # Add images section if there are images
-    if images:
-        elements.append(Paragraph(f"<b>Page Images ({len(images)}):</b>", header_style))
-
-        for i, img in enumerate(images[:2], 1):  # Limit to 2 images in PDF
-            try:
-                img_info = f"Image {i}: {img['filename']}"
-                elements.append(Paragraph(img_info, normal_style))
-
-                # Try to embed the image
-                try:
-                    max_width = 4 * inch
-                    max_height = 2.5 * inch
-
-                    width = img['width'] / 72
-                    height = img['height'] / 72
-
-                    if width > 0 and height > 0:
-                        scale = min(max_width / width, max_height / height, 1.0)
-                        pdf_img = ReportLabImage(img['path'],
-                                                 width=width * scale,
-                                                 height=height * scale)
-                        elements.append(pdf_img)
-                        elements.append(Spacer(1, 0.1 * inch))
-                except:
-                    elements.append(Paragraph("[Image could not be embedded]", small_style))
-
-            except:
-                continue
-
-    # Add footer
-    elements.append(Spacer(1, 0.3 * inch))
-    elements.append(Paragraph("Scraped from Facebook post link", small_style))
-    elements.append(Paragraph(f"All images saved in 'images' folder", small_style))
-
-    # Build the PDF
-    doc.build(elements)
-
-
-# Main execution
-if __name__ == "__main__":
-    # Your EXACT list of posts in the EXACT order you provided
-    POST_URLS = [
-        # First URL in your list = Post 1
-        "https://www.facebook.com/1421foundation/posts/1423309422841157?ref=embed_post",
-        # Second URL in your list = Post 2
-        "https://www.facebook.com/1421foundation/posts/1420786739760092?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1407938784378221?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1404800118025421?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1400598948445538?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1399263935245706?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1371753627996737?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1366503745188392?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1362827778889322?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1352099449962155?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1349889430183157?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1348869396951827?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1344540750718025?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1342056160966484?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1341762400995860?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1336413604864073?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1314051980433569?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1312090010629766?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1287384319767002?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1247332793772155?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1216538130184955?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1214016717103763?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1168253551680080?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1163988178773284?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1132136568625112?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1106059201232849?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1102866244885478?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1094959852342784?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1083774710127965?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1078019687370134?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1068761721629264?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1061518822353554?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1025593365946100?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1010728210765949?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1006308017874635?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1004355501403220?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1001778288327608?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/985555989949838?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/969767354862035?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/965324895306281?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/962753412230096?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/960899735748797?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/955949142910523?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/955197786318992?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/944764880695616?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/943033450868759?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/932171578621613?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/920351139803657?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/879063830599055?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/858013339370771?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/856436022861836?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/853579486480823?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/846472737191498?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/824313112740794?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/811641500674622?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/809281844243921?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/803890518116387?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/746727827165990?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/714686207036819?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/713788993793207?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/695746788930761?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/679539103884863?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/625824592589648?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/5211164798938010?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/5165737790147378?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/5034636633257495?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/4810370675684093?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/4487557231298774?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/4384575788263586?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/4309026939151805?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/4181166295271204?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/4123360491051785?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/4103160949738406?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/3732702976784207?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/3675577362496769?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/3655685767819262?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/3548739951847178?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/3507907495930424?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/3497604703627370?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/3481021335285707?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/3475535915834249?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/3410322022355639?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/3395937580460750?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/3357183771002798?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/3292065647514611?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/3143552752365902?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/3111629092224935?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/3087336704654174?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/3020648054656373?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/3003162079738304?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/2960969837290862?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/2860808023973711?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/2836936873027493?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/2809742879080226?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/2796373053750542?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/2787667221287792?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/2785659221488592?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/2360609990660186?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/2340758555978663?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/2325268650860987?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/2147943658593488?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/2106586206062567?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/2034655546588967?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/2025336984187490?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1999733946747794?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1993101600744362?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1960676673986855?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1942267009161155?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1936803866374136?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1915972138457309?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1884293321625191?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1859439047443952?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1850497355004788?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1849052871815903?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1825098244211366?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1755336374520887?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1750753804979144?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1745175698870288?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1721139484607243?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1713786255342566?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1695069083880950?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1682875771766948?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1640234192697773?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1633949826659543?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1605596809494845?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1574965785891281?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1572323072822219?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1559155637472296?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1544318685622658?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1517976481590212?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1496560333731827?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1490461394341721?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1490382414349619?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1478398212214706?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1443887122332482?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1427897723931422?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1426239414097253?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1405737689480759?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1394879337233261?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1360853810635814?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1343418912379304?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1316077065113489?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1284581778263018?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1272917782762751?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1259440620777134?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1249367058451157?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1227405367313993?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1192001607521036?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1122529071134957?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1115152105205987?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1112126912175173?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1108585175862680?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1073179556069909?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1072643999456798?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1049615805092951?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1027119670675898?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1019259631461902?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/1014963198558212?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/988055137915685?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/983608495027016?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/930955420292324?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/889866201067913?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/871280246259842?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/838974539490413?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/838634682857732?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/834397693281431?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/833790543342146?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/829898563731344?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/798669826854218?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/798641873523680?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/766341440087057?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/765905613463973?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/764616763592858?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/755076184546916?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/739715142749687?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/733191076735427?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/731739536880581?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/727030237351511?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/724444454276756?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/715138425207359?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/710895282298340?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/697037750350760?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/658221340899068?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/10203427967844065?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/630558713665331?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/630017757052760?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/10203323730958208?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/10203026151518908?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/609825092405360?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/591051787616024?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/573450142709522?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/570619726325897?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/570080119713191?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/567246689996534?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/566725090048694?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/566530423401494?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/10202260066047250?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/564214410299762?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/563608777026992?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/562979673756569?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/562586557129214?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/557174274337109?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/540548619333008?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/511563145564889?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/502958673092003?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/462061920531548?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/231877413620556?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/222314457914386?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/417203821698515?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/480079502028341?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/313144305465611?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/122494681241911?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/133008280175786?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/310697362340843?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/231442550271753?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/230921800307087?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/267972913244912?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/139059032862597?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/178932675519264?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/6225788537475626?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/6225454640842349?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/161808167236395?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/258925100805671?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/6224610444260102?ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/145488142208592?ref=embed_post",
-        "https://www.facebook.com/1421foundation/photos/a.200071030047437/200071033380770/?type=3&ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/190070374380836?ref=embed_post",
-        "https://www.facebook.com/1421foundation/photos/a.187316247989582/187316281322912/?type=3&ref=embed_post",
-        "https://www.facebook.com/1421foundation/posts/185389538186638?ref=embed_post"
-    ]
-
-    # Remove duplicates while preserving order
-    seen = set()
-    unique_urls = []
-    for url in POST_URLS:
-        if url not in seen:
-            seen.add(url)
-            unique_urls.append(url)
-
-    print("🎯 Facebook Posts Scraper - Simple Version")
-    print("📁 Each post will be saved in its own folder with PDF and images")
-    print("=" * 60)
-    print(f"📊 TOTAL POSTS: {len(unique_urls)}")
-    print(f"📋 EXACT ORDER FROM YOUR LIST:")
-    print(f"   Post 1: First URL in your list")
-    print(f"   Post 2: Second URL in your list")
-    print(f"   Post {len(unique_urls)}: Last URL in your list")
-    print("\n📦 KEY FEATURES:")
-    print("   ✅ NO date posted section")
-    print("   ✅ NO reactions/comments section")
-    print("   ✅ Scrapes external links found in posts")
-    print("   ✅ Stores linked pages as PDFs only in 'linked_pages' folder")
-    print("   ✅ URLs scraped in EXACT order from your list")
-    print("\n📊 Output per post:")
-    print("   - data/post_X.pdf (PDF file with post content)")
-    print("   - images/ (folder with post images)")
-    print("   - linked_pages/ (scraped external links as PDFs only - no images)")
-
-    # Check for required packages
+def save_post_csv(post_data, csv_path):
+    """Save individual post CSV"""
     try:
-        from reportlab.pdfgen import canvas
+        with open(csv_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=DATA_CSV_COLUMNS)
+            writer.writeheader()
+            writer.writerow(post_data)
+        print(f"   💾 Saved CSV: {os.path.basename(csv_path)}")
+        return True
+    except Exception as e:
+        print(f"   ⚠️ CSV save error: {e}")
+        return False
 
-        print("\n✅ ReportLab is installed and ready")
-    except ImportError:
-        print("\n❌ ReportLab is not installed!")
-        print("   Please install it with: pip install reportlab")
-        exit(1)
 
-    # Ask for confirmation before starting
-    print(f"\n⚠️  WARNING: This will scrape {len(unique_urls)} Facebook posts!")
-    print("   Estimated time: 30-60 minutes")
-    print("   Estimated storage: ~200-400MB")
+def save_linked_pages_csv(linked_pages_data, csv_path):
+    """Save linked pages CSV"""
+    try:
+        with open(csv_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=LINKED_PAGES_CSV_COLUMNS)
+            writer.writeheader()
+            writer.writerows(linked_pages_data)
+        print(f"   💾 Saved links CSV: {os.path.basename(csv_path)}")
+        return True
+    except Exception as e:
+        print(f"   ⚠️ Links CSV error: {e}")
+        return False
 
-    proceed = input("\nProceed with scraping? (y/n): ").strip().lower()
+
+def save_combined_csv(all_posts_data, csv_path):
+    """Save combined CSV with all posts"""
+    try:
+        with open(csv_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=DATA_CSV_COLUMNS)
+            writer.writeheader()
+            writer.writerows(all_posts_data)
+
+        print(f"\n📊 Combined CSV saved: {csv_path}")
+        print(f"   Total posts in combined CSV: {len(all_posts_data)}")
+
+        # Show sample of dates
+        print(f"\n📅 SAMPLE DATES FROM CSV:")
+        for i, post in enumerate(all_posts_data[:5]):
+            print(f"   Post {post['post_number']}: {post['post_date']} {post['post_time']}")
+
+        return True
+    except Exception as e:
+        print(f"❌ Error saving combined CSV: {e}")
+        return False
+
+
+def create_zip_file(main_folder):
+    """Create zip archive"""
+    try:
+        zip_path = f"{main_folder}.zip"
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for root, dirs, files in os.walk(main_folder):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    arcname = os.path.relpath(file_path, os.path.dirname(main_folder))
+                    zipf.write(file_path, arcname)
+        return zip_path
+    except Exception as e:
+        print(f"⚠️ Could not create zip: {e}")
+        return None
+
+
+# ============================================================================
+# MAIN EXECUTION
+# ============================================================================
+if __name__ == "__main__":
+    POST_URLS = [
+        # Post 1-10 (12/12/25 16:00 - 12/9/25 09:54)
+        "https://www.facebook.com/1421foundation/posts/1443488057489960?ref=embed_post",  # 1
+        "https://www.facebook.com/1421foundation/posts/1423309422841157?ref=embed_post",  # 2
+        "https://www.facebook.com/1421foundation/posts/1420786739760092?ref=embed_post",  # 3
+        "https://www.facebook.com/1421foundation/posts/1407938784378221?ref=embed_post",  # 4
+        "https://www.facebook.com/1421foundation/posts/1404800118025421?ref=embed_post",  # 5
+        "https://www.facebook.com/1421foundation/posts/1400598948445538?ref=embed_post",  # 6
+        "https://www.facebook.com/1421foundation/posts/1399263935245706?ref=embed_post",  # 7
+        "https://www.facebook.com/1421foundation/posts/1371753627996737?ref=embed_post",  # 8
+        "https://www.facebook.com/1421foundation/posts/1366503745188392?ref=embed_post",  # 9
+        "https://www.facebook.com/1421foundation/posts/1362827778889322?ref=embed_post",  # 10
+
+        # Post 11-20 (30/8/25 10:03 - 13/6/25 21:53)
+        "https://www.facebook.com/1421foundation/posts/1352099449962155?ref=embed_post",  # 11
+        "https://www.facebook.com/1421foundation/posts/1349889430183157?ref=embed_post",  # 12
+        "https://www.facebook.com/1421foundation/posts/1348869396951827?ref=embed_post",  # 13
+        "https://www.facebook.com/1421foundation/posts/1344540750718025?ref=embed_post",  # 14
+        "https://www.facebook.com/1421foundation/posts/1342056160966484?ref=embed_post",  # 15
+        "https://www.facebook.com/1421foundation/posts/1341762400995860?ref=embed_post",  # 16
+        "https://www.facebook.com/1421foundation/posts/1336413604864073?ref=embed_post",  # 17
+        "https://www.facebook.com/1421foundation/posts/1314051980433569?ref=embed_post",  # 18
+        "https://www.facebook.com/1421foundation/posts/1312090010629766?ref=embed_post",  # 19
+        "https://www.facebook.com/1421foundation/posts/1287384319767002?ref=embed_post",  # 20
+
+        # Post 21-30 (24/4/25 10:15 - 1/10/24 14:39)
+        "https://www.facebook.com/1421foundation/posts/1247332793772155?ref=embed_post",  # 21
+        "https://www.facebook.com/1421foundation/posts/1216538130184955?ref=embed_post",  # 22
+        "https://www.facebook.com/1421foundation/posts/1214016717103763?ref=embed_post",  # 23
+        "https://www.facebook.com/1421foundation/posts/1168253551680080?ref=embed_post",  # 24
+        "https://www.facebook.com/1421foundation/posts/1163988178773284?ref=embed_post",  # 25
+        "https://www.facebook.com/1421foundation/posts/1132136568625112?ref=embed_post",  # 26
+        "https://www.facebook.com/1421foundation/posts/1106059201232849?ref=embed_post",  # 27
+        "https://www.facebook.com/1421foundation/posts/1102866244885478?ref=embed_post",  # 28
+        "https://www.facebook.com/1421foundation/posts/1094959852342784?ref=embed_post",  # 29
+        "https://www.facebook.com/1421foundation/posts/1083774710127965?ref=embed_post",  # 30
+
+        # Post 31-40 (24/9/24 13:49 - 8/3/24 11:51)
+        "https://www.facebook.com/1421foundation/posts/1078019687370134?ref=embed_post",  # 31
+        "https://www.facebook.com/1421foundation/posts/1068761721629264?ref=embed_post",  # 32
+        "https://www.facebook.com/1421foundation/posts/1061518822353554?ref=embed_post",  # 33
+        "https://www.facebook.com/1421foundation/posts/1025593365946100?ref=embed_post",  # 34
+        "https://www.facebook.com/1421foundation/posts/1010728210765949?ref=embed_post",  # 35
+        "https://www.facebook.com/1421foundation/posts/1006308017874635?ref=embed_post",  # 36
+        "https://www.facebook.com/1421foundation/posts/1004355501403220?ref=embed_post",  # 37
+        "https://www.facebook.com/1421foundation/posts/1001778288327608?ref=embed_post",  # 38
+        "https://www.facebook.com/1421foundation/posts/985555989949838?ref=embed_post",  # 39
+        "https://www.facebook.com/1421foundation/posts/969767354862035?ref=embed_post",  # 40
+
+        # Post 41-50 (19/4/24 11:40 - 23/10/23 14:25)
+        "https://www.facebook.com/1421foundation/posts/965324895306281?ref=embed_post",  # 41
+        "https://www.facebook.com/1421foundation/posts/962753412230096?ref=embed_post",  # 42
+        "https://www.facebook.com/1421foundation/posts/960899735748797?ref=embed_post",  # 43
+        "https://www.facebook.com/1421foundation/posts/955949142910523?ref=embed_post",  # 44
+        "https://www.facebook.com/1421foundation/posts/955197786318992?ref=embed_post",  # 45
+        "https://www.facebook.com/1421foundation/posts/944764880695616?ref=embed_post",  # 46
+        "https://www.facebook.com/1421foundation/posts/943033450868759?ref=embed_post",  # 47
+        "https://www.facebook.com/1421foundation/posts/932171578621613?ref=embed_post",  # 48
+        "https://www.facebook.com/1421foundation/posts/920351139803657?ref=embed_post",  # 49
+        "https://www.facebook.com/1421foundation/posts/879063830599055?ref=embed_post",  # 50
+
+        # Post 51-60 (28/11/23 13:51 - 8/3/23 09:29)
+        "https://www.facebook.com/1421foundation/posts/858013339370771?ref=embed_post",  # 51
+        "https://www.facebook.com/1421foundation/posts/856436022861836?ref=embed_post",  # 52
+        "https://www.facebook.com/1421foundation/posts/853579486480823?ref=embed_post",  # 53
+        "https://www.facebook.com/1421foundation/posts/846472737191498?ref=embed_post",  # 54
+        "https://www.facebook.com/1421foundation/posts/824313112740794?ref=embed_post",  # 55
+        "https://www.facebook.com/1421foundation/posts/811641500674622?ref=embed_post",  # 56
+        "https://www.facebook.com/1421foundation/posts/809281844243921?ref=embed_post",  # 57
+        "https://www.facebook.com/1421foundation/posts/803890518116387?ref=embed_post",  # 58
+        "https://www.facebook.com/1421foundation/posts/746727827165990?ref=embed_post",  # 59
+        "https://www.facebook.com/1421foundation/posts/714686207036819?ref=embed_post",  # 60
+
+        # Post 61-70 (7/3/23 00:02 - 15/10/21 13:16)
+        "https://www.facebook.com/1421foundation/posts/713788993793207?ref=embed_post",  # 61
+        "https://www.facebook.com/1421foundation/posts/695746788930761?ref=embed_post",  # 62
+        "https://www.facebook.com/1421foundation/posts/679539103884863?ref=embed_post",  # 63
+        "https://www.facebook.com/1421foundation/posts/625824592589648?ref=embed_post",  # 64
+        "https://www.facebook.com/1421foundation/posts/5211164798938010?ref=embed_post",  # 65
+        "https://www.facebook.com/1421foundation/posts/5165737790147378?ref=embed_post",  # 66
+        "https://www.facebook.com/1421foundation/posts/5034636633257495?ref=embed_post",  # 67
+        "https://www.facebook.com/1421foundation/posts/4810370675684093?ref=embed_post",  # 68
+        "https://www.facebook.com/1421foundation/posts/4487557231298774?ref=embed_post",  # 69
+        "https://www.facebook.com/1421foundation/posts/4384575788263586?ref=embed_post",  # 70
+
+        # Post 71-80 (21/9/21 14:49 - 10/12/20 16:08)
+        "https://www.facebook.com/1421foundation/posts/4309026939151805?ref=embed_post",  # 71
+        "https://www.facebook.com/1421foundation/posts/4181166295271204?ref=embed_post",  # 72
+        "https://www.facebook.com/1421foundation/posts/4123360491051785?ref=embed_post",  # 73
+        "https://www.facebook.com/1421foundation/posts/4103160949738406?ref=embed_post",  # 74
+        "https://www.facebook.com/1421foundation/posts/3732702976784207?ref=embed_post",  # 75
+        "https://www.facebook.com/1421foundation/posts/3675577362496769?ref=embed_post",  # 76
+        "https://www.facebook.com/1421foundation/posts/3655685767819262?ref=embed_post",  # 77
+        "https://www.facebook.com/1421foundation/posts/3548739951847178?ref=embed_post",  # 78
+        "https://www.facebook.com/1421foundation/posts/3507907495930424?ref=embed_post",  # 79
+        "https://www.facebook.com/1421foundation/posts/3497604703627370?ref=embed_post",  # 80
+
+        # Post 81-90 (4/12/20 11:47 - 8/11/20 18:21)
+        "https://www.facebook.com/1421foundation/posts/3481021335285707?ref=embed_post",  # 81
+        "https://www.facebook.com/1421foundation/posts/3475535915834249?ref=embed_post",  # 82
+        "https://www.facebook.com/1421foundation/posts/3410322022355639?ref=embed_post",  # 83
+        "https://www.facebook.com/1421foundation/posts/3395937580460750?ref=embed_post",  # 84
+        "https://www.facebook.com/1421foundation/posts/3357183771002798?ref=embed_post",  # 85
+        "https://www.facebook.com/1421foundation/posts/3292065647514611?ref=embed_post",  # 86
+        "https://www.facebook.com/1421foundation/posts/3143552752365902?ref=embed_post",  # 87
+        "https://www.facebook.com/1421foundation/posts/3111629092224935?ref=embed_post",  # 88
+        "https://www.facebook.com/1421foundation/posts/3087336704654174?ref=embed_post",  # 89
+        "https://www.facebook.com/1421foundation/posts/3020648054656373?ref=embed_post",  # 90
+
+        # Post 91-100 (3/11/20 14:40 - 22/8/19 13:00)
+        "https://www.facebook.com/1421foundation/posts/3003162079738304?ref=embed_post",  # 91
+        "https://www.facebook.com/1421foundation/posts/2960969837290862?ref=embed_post",  # 92
+        "https://www.facebook.com/1421foundation/posts/2860808023973711?ref=embed_post",  # 93
+        "https://www.facebook.com/1421foundation/posts/2836936873027493?ref=embed_post",  # 94
+        "https://www.facebook.com/1421foundation/posts/2809742879080226?ref=embed_post",  # 95
+        "https://www.facebook.com/1421foundation/posts/2796373053750542?ref=embed_post",  # 96
+        "https://www.facebook.com/1421foundation/posts/2787667221287792?ref=embed_post",  # 97
+        "https://www.facebook.com/1421foundation/posts/2785659221488592?ref=embed_post",  # 98
+        "https://www.facebook.com/1421foundation/posts/2360609990660186?ref=embed_post",  # 99
+        "https://www.facebook.com/1421foundation/posts/2340758555978663?ref=embed_post",  # 100
+
+        # Post 101-110 (13/8/19 14:32 - 14/11/18 11:08)
+        "https://www.facebook.com/1421foundation/posts/2325268650860987?ref=embed_post",  # 101
+        "https://www.facebook.com/1421foundation/posts/2147943658593488?ref=embed_post",  # 102
+        "https://www.facebook.com/1421foundation/posts/2106586206062567?ref=embed_post",  # 103
+        "https://www.facebook.com/1421foundation/posts/2034655546588967?ref=embed_post",  # 104
+        "https://www.facebook.com/1421foundation/posts/2025336984187490?ref=embed_post",  # 105
+        "https://www.facebook.com/1421foundation/posts/1999733946747794?ref=embed_post",  # 106
+        "https://www.facebook.com/1421foundation/posts/1993101600744362?ref=embed_post",  # 107
+        "https://www.facebook.com/1421foundation/posts/1960676673986855?ref=embed_post",  # 108
+        "https://www.facebook.com/1421foundation/posts/1942267009161155?ref=embed_post",  # 109
+        "https://www.facebook.com/1421foundation/posts/1936803866374136?ref=embed_post",  # 110
+
+        # Post 111-120 (23/10/18 11:47 - 19/1/18 16:34)
+        "https://www.facebook.com/1421foundation/posts/1915972138457309?ref=embed_post",  # 111
+        "https://www.facebook.com/1421foundation/posts/1884293321625191?ref=embed_post",  # 112
+        "https://www.facebook.com/1421foundation/posts/1859439047443952?ref=embed_post",  # 113
+        "https://www.facebook.com/1421foundation/posts/1850497355004788?ref=embed_post",  # 114
+        "https://www.facebook.com/1421foundation/posts/1849052871815903?ref=embed_post",  # 115
+        "https://www.facebook.com/1421foundation/posts/1825098244211366?ref=embed_post",  # 116
+        "https://www.facebook.com/1421foundation/posts/1755336374520887?ref=embed_post",  # 117
+        "https://www.facebook.com/1421foundation/posts/1750753804979144?ref=embed_post",  # 118
+        "https://www.facebook.com/1421foundation/posts/1745175698870288?ref=embed_post",  # 119
+        "https://www.facebook.com/1421foundation/posts/1721139484607243?ref=embed_post",  # 120
+
+        # Post 121-130 (3/1/18 17:33 - 13/11/17 13:35)
+        "https://www.facebook.com/1421foundation/posts/1713786255342566?ref=embed_post",  # 121
+        "https://www.facebook.com/1421foundation/posts/1695069083880950?ref=embed_post",  # 122
+        "https://www.facebook.com/1421foundation/posts/1682875771766948?ref=embed_post",  # 123
+        "https://www.facebook.com/1421foundation/posts/1640234192697773?ref=embed_post",  # 124
+        "https://www.facebook.com/1421foundation/posts/1633949826659543?ref=embed_post",  # 125
+        "https://www.facebook.com/1421foundation/posts/1605596809494845?ref=embed_post",  # 126
+        "https://www.facebook.com/1421foundation/posts/1574965785891281?ref=embed_post",  # 127
+        "https://www.facebook.com/1421foundation/posts/1572323072822219?ref=embed_post",  # 128
+        "https://www.facebook.com/1421foundation/posts/1559155637472296?ref=embed_post",  # 129
+        "https://www.facebook.com/1421foundation/posts/1544318685622658?ref=embed_post",  # 130
+
+        # Post 131-140 (6/11/17 17:06 - 20/7/17 15:53)
+        "https://www.facebook.com/1421foundation/posts/1517976481590212?ref=embed_post",  # 131
+        "https://www.facebook.com/1421foundation/posts/1496560333731827?ref=embed_post",  # 132
+        "https://www.facebook.com/1421foundation/posts/1490461394341721?ref=embed_post",  # 133
+        "https://www.facebook.com/1421foundation/posts/1490382414349619?ref=embed_post",  # 134
+        "https://www.facebook.com/1421foundation/posts/1478398212214706?ref=embed_post",  # 135
+        "https://www.facebook.com/1421foundation/posts/1443887122332482?ref=embed_post",  # 136
+        "https://www.facebook.com/1421foundation/posts/1427897723931422?ref=embed_post",  # 137
+        "https://www.facebook.com/1421foundation/posts/1426239414097253?ref=embed_post",  # 138
+        "https://www.facebook.com/1421foundation/posts/1405737689480759?ref=embed_post",  # 139
+        "https://www.facebook.com/1421foundation/posts/1394879337233261?ref=embed_post",  # 140
+
+        # Post 141-150 (16/6/17 12:16 - 13/10/16 15:34)
+        "https://www.facebook.com/1421foundation/posts/1360853810635814?ref=embed_post",  # 141
+        "https://www.facebook.com/1421foundation/posts/1343418912379304?ref=embed_post",  # 142
+        "https://www.facebook.com/1421foundation/posts/1316077065113489?ref=embed_post",  # 143
+        "https://www.facebook.com/1421foundation/posts/1284581778263018?ref=embed_post",  # 144
+        "https://www.facebook.com/1421foundation/posts/1272917782762751?ref=embed_post",  # 145
+        "https://www.facebook.com/1421foundation/posts/1259440620777134?ref=embed_post",  # 146
+        "https://www.facebook.com/1421foundation/posts/1249367058451157?ref=embed_post",  # 147
+        "https://www.facebook.com/1421foundation/posts/1227405367313993?ref=embed_post",  # 148
+        "https://www.facebook.com/1421foundation/posts/1192001607521036?ref=embed_post",  # 149
+        "https://www.facebook.com/1421foundation/posts/1122529071134957?ref=embed_post",  # 150
+
+        # Post 151-160 (4/10/16 11:04 - 3/5/16 10:32)
+        "https://www.facebook.com/1421foundation/posts/1115152105205987?ref=embed_post",  # 151
+        "https://www.facebook.com/1421foundation/posts/1112126912175173?ref=embed_post",  # 152
+        "https://www.facebook.com/1421foundation/posts/1108585175862680?ref=embed_post",  # 153
+        "https://www.facebook.com/1421foundation/posts/1073179556069909?ref=embed_post",  # 154
+        "https://www.facebook.com/1421foundation/posts/1072643999456798?ref=embed_post",  # 155
+        "https://www.facebook.com/1421foundation/posts/1049615805092951?ref=embed_post",  # 156
+        "https://www.facebook.com/1421foundation/posts/1049615805092951?ref=embed_post",
+        # 157 (duplicate post - same as #156)
+        "https://www.facebook.com/1421foundation/posts/1027119670675898?ref=embed_post",  # 158
+        "https://www.facebook.com/1421foundation/posts/1019259631461902?ref=embed_post",  # 159
+        "https://www.facebook.com/1421foundation/posts/1014963198558212?ref=embed_post",  # 160
+
+        # Post 161-170 (23/3/16 14:28 - 16/2/15 16:03)
+        "https://www.facebook.com/1421foundation/posts/988055137915685?ref=embed_post",  # 161
+        "https://www.facebook.com/1421foundation/posts/983608495027016?ref=embed_post",  # 162
+        "https://www.facebook.com/1421foundation/posts/930955420292324?ref=embed_post",  # 163
+        "https://www.facebook.com/1421foundation/posts/889866201067913?ref=embed_post",  # 164
+        "https://www.facebook.com/1421foundation/posts/871280246259842?ref=embed_post",  # 165
+        "https://www.facebook.com/1421foundation/posts/838974539490413?ref=embed_post",  # 166
+        "https://www.facebook.com/1421foundation/posts/838634682857732?ref=embed_post",  # 167
+        "https://www.facebook.com/1421foundation/posts/834397693281431?ref=embed_post",  # 168
+        "https://www.facebook.com/1421foundation/posts/833790543342146?ref=embed_post",  # 169
+        "https://www.facebook.com/1421foundation/posts/829898563731344?ref=embed_post",  # 170
+
+        # Post 171-180 (12/12/14 13:00 - 16/9/14 16:57)
+        "https://www.facebook.com/1421foundation/posts/798669826854218?ref=embed_post",  # 171
+        "https://www.facebook.com/1421foundation/posts/798641873523680?ref=embed_post",  # 172
+        "https://www.facebook.com/1421foundation/posts/766341440087057?ref=embed_post",  # 173
+        "https://www.facebook.com/1421foundation/posts/765905613463973?ref=embed_post",  # 174
+        "https://www.facebook.com/1421foundation/posts/764616763592858?ref=embed_post",  # 175
+        "https://www.facebook.com/1421foundation/posts/755076184546916?ref=embed_post",  # 176
+        "https://www.facebook.com/1421foundation/posts/739715142749687?ref=embed_post",  # 177
+        "https://www.facebook.com/1421foundation/posts/733191076735427?ref=embed_post",  # 178
+        "https://www.facebook.com/1421foundation/posts/731739536880581?ref=embed_post",  # 179
+        "https://www.facebook.com/1421foundation/posts/727030237351511?ref=embed_post",  # 180
+
+        # Post 181-190 (10/9/14 12:11 - 9/1/14 14:18)
+        "https://www.facebook.com/1421foundation/posts/724444454276756?ref=embed_post",  # 181
+        "https://www.facebook.com/1421foundation/posts/715138425207359?ref=embed_post",  # 182
+        "https://www.facebook.com/1421foundation/posts/710895282298340?ref=embed_post",  # 183
+        "https://www.facebook.com/1421foundation/posts/697037750350760?ref=embed_post",  # 184
+        "https://www.facebook.com/1421foundation/posts/658221340899068?ref=embed_post",  # 185
+        "https://www.facebook.com/1421foundation/posts/10203427967844065?ref=embed_post",  # 186
+        "https://www.facebook.com/1421foundation/posts/630558713665331?ref=embed_post",  # 187
+        "https://www.facebook.com/1421foundation/posts/630017757052760?ref=embed_post",  # 188
+        "https://www.facebook.com/1421foundation/posts/10203323730958208?ref=embed_post",  # 189
+        "https://www.facebook.com/1421foundation/posts/10203026151518908?ref=embed_post",  # 190
+
+        # Post 191-200 (27/11/13 09:54 - 3/10/13 14:40)
+        "https://www.facebook.com/1421foundation/posts/609825092405360?ref=embed_post",  # 191
+        "https://www.facebook.com/1421foundation/posts/591051787616024?ref=embed_post",  # 192
+        "https://www.facebook.com/1421foundation/posts/573450142709522?ref=embed_post",  # 193
+        "https://www.facebook.com/1421foundation/posts/570619726325897?ref=embed_post",  # 194
+        "https://www.facebook.com/1421foundation/posts/570080119713191?ref=embed_post",  # 195
+        "https://www.facebook.com/1421foundation/posts/567246689996534?ref=embed_post",  # 196
+        "https://www.facebook.com/1421foundation/posts/566725090048694?ref=embed_post",  # 197
+        "https://www.facebook.com/1421foundation/posts/566530423401494?ref=embed_post",  # 198
+        "https://www.facebook.com/1421foundation/posts/10202260066047250?ref=embed_post",  # 199
+        "https://www.facebook.com/1421foundation/posts/564214410299762?ref=embed_post",  # 200
+
+        # Post 201-210 (1/10/13 21:49 - 28/2/13 13:31)
+        "https://www.facebook.com/1421foundation/posts/563608777026992?ref=embed_post",  # 201
+        "https://www.facebook.com/1421foundation/posts/562979673756569?ref=embed_post",  # 202
+        "https://www.facebook.com/1421foundation/posts/562586557129214?ref=embed_post",  # 203
+        "https://www.facebook.com/1421foundation/posts/557174274337109?ref=embed_post",  # 204
+        "https://www.facebook.com/1421foundation/posts/540548619333008?ref=embed_post",  # 205
+        "https://www.facebook.com/1421foundation/posts/511563145564889?ref=embed_post",  # 206
+        "https://www.facebook.com/1421foundation/posts/502958673092003?ref=embed_post",  # 207
+        "https://www.facebook.com/1421foundation/posts/462061920531548?ref=embed_post",  # 208
+        "https://www.facebook.com/1421foundation/posts/231877413620556?ref=embed_post",  # 209
+        "https://www.facebook.com/1421foundation/posts/222314457914386?ref=embed_post",  # 210
+
+        # Post 211-220 (11/1/13 16:31 - 25/10/11 21:10)
+        "https://www.facebook.com/1421foundation/posts/417203821698515?ref=embed_post",  # 211
+        "https://www.facebook.com/1421foundation/posts/480079502028341?ref=embed_post",  # 212
+        "https://www.facebook.com/1421foundation/posts/313144305465611?ref=embed_post",  # 213
+        "https://www.facebook.com/1421foundation/posts/122494681241911?ref=embed_post",  # 214
+        "https://www.facebook.com/1421foundation/posts/133008280175786?ref=embed_post",  # 215
+        "https://www.facebook.com/1421foundation/posts/310697362340843?ref=embed_post",  # 216
+        "https://www.facebook.com/1421foundation/posts/231442550271753?ref=embed_post",  # 217
+        "https://www.facebook.com/1421foundation/posts/230921800307087?ref=embed_post",  # 218
+        "https://www.facebook.com/1421foundation/posts/267972913244912?ref=embed_post",  # 219
+        "https://www.facebook.com/1421foundation/posts/139059032862597?ref=embed_post",  # 220
+
+        # Post 221-230 (6/10/11 12:54 - 6/7/11 11:39)
+        "https://www.facebook.com/1421foundation/posts/178932675519264?ref=embed_post",  # 221
+        "https://www.facebook.com/1421foundation/posts/6225788537475626?ref=embed_post",  # 222
+        "https://www.facebook.com/1421foundation/posts/6225454640842349?ref=embed_post",  # 223
+        "https://www.facebook.com/1421foundation/posts/161808167236395?ref=embed_post",  # 224
+        "https://www.facebook.com/1421foundation/posts/258925100805671?ref=embed_post",  # 225
+        "https://www.facebook.com/1421foundation/posts/6224610444260102?ref=embed_post",  # 226
+        "https://www.facebook.com/1421foundation/posts/145488142208592?ref=embed_post",  # 227
+        "https://www.facebook.com/1421foundation/photos/a.200071030047437/200071033380770/?type=3&ref=embed_post",
+        # 228
+        "https://www.facebook.com/1421foundation/posts/190070374380836?ref=embed_post",  # 229
+        "https://www.facebook.com/1421foundation/photos/a.187316247989582/187316281322912/?type=3&ref=embed_post",
+        # 230
+    ]
+
+    print("=" * 80)
+    print("🎯 FACEBOOK POST SCRAPER")
+    print("=" * 80)
+
+    # Show date statistics
+    total_dates = len(POST_DATES)
+    valid_dates = len([d for d in POST_DATES if d.strip()])
+    missing_dates = total_dates - valid_dates
+
+    print(f"📊 Total Posts to scrape: {len(POST_URLS)}")
+    print(f"📅 Dates provided: {valid_dates} (posts 1-{valid_dates})")
+    print(f"📅 Dates missing: {missing_dates} (posts {valid_dates + 1}-{len(POST_URLS)})")
+
+    print(f"\n📋 UPDATED DATA CSV COLUMNS ({len(DATA_CSV_COLUMNS)} columns):")
+    for i, col in enumerate(DATA_CSV_COLUMNS, 1):
+        print(f"   {i:2d}. {col}")
+
+    print(f"\n📋 UPDATED LINKED PAGES CSV COLUMNS ({len(LINKED_PAGES_CSV_COLUMNS)} columns):")
+    for i, col in enumerate(LINKED_PAGES_CSV_COLUMNS, 1):
+        print(f"   {i:2d}. {col}")
+
+    print("\n📁 FOLDER STRUCTURE:")
+    print("   facebook_posts/")
+    print("   ├── post001_A_milestone_for_humanity_Recent/")
+    print("   │   ├── data/post001_A_milestone_for_humanity_Recent.csv")
+    print("   │   ├── images/post001_A_milestone_for_humanity_Recent_image_001.jpg")
+    print("   │   └── linked_pages/post001_A_milestone_for_humanity_Recent_links.csv")
+    print("   ├── post002_AnotherTitleBeginning/")
+    print("   │   └── ...")
+    print("   └── all_posts_combined.csv")
+
+    # Configuration
+    print(f"\n⚙️  Configuration:")
+    try:
+        max_workers = int(input("Threads (1-5, default 3): ") or "3")
+        max_workers = max(1, min(max_workers, 5))
+    except:
+        max_workers = 3
+        print("   Using default: 3 threads")
+
+    # Ask for confirmation
+    print(f"\n⚠️  This will process {len(POST_URLS)} posts")
+    print(f"   Posts 1-{valid_dates} will have your provided dates")
+    print(f"   Posts {valid_dates + 1}-{len(POST_URLS)} will have blank dates")
+
+    proceed = input("\nProceed? (y/n): ").strip().lower()
+
     if proceed != 'y':
-        print("Scraping cancelled.")
-        exit(0)
+        print("Cancelled.")
+        exit()
 
-    print("\n" + "=" * 60)
-    print("🚀 Starting Facebook post scraping...")
-    print("⏳ This will take a while. Please be patient.")
-    print("📝 Errors will be tracked and reported at the end.")
-    print("=" * 60)
+    # Start scraping
+    successful, failed = scrape_facebook_posts(
+        post_urls=POST_URLS,
+        main_folder="facebook_posts",
+        max_workers=max_workers
+    )
 
-    # Run the scraper with unique URLs
-    successful, failed, zip_file = scrape_facebook_posts(unique_urls, main_folder="facebook_posts_simple")
-
-    if successful > 0:
-        print(f"\n🎉 Successfully processed {successful} posts!")
-        print(f"📁 Check the 'facebook_posts_simple' folder for all results")
-        print(f"📦 Zip file: {zip_file}")
-        print("\n📊 FINAL SUMMARY:")
-        print(f"   - Total posts attempted: {len(unique_urls)}")
-        print(f"   - Successfully scraped: {successful}")
-        print(f"   - Failed: {len(failed)}")
-        print(f"   - Success rate: {(successful / len(unique_urls)) * 100:.1f}%")
-
-        if failed:
-            print(f"\n📄 Error log saved to: facebook_posts_simple/scraping_errors.txt")
-            print(f"💡 You can try scraping failed posts individually later")
-
-        print(f"\n📋 ORDER CONFIRMATION:")
-        print(f"   Post 1 PDF contains: {unique_urls[0].split('/')[-1].split('?')[0]}")
-        print(f"   Post 2 PDF contains: {unique_urls[1].split('/')[-1].split('?')[0]}")
-        print(f"   Post {len(unique_urls)} PDF contains: {unique_urls[-1].split('/')[-1].split('?')[0]}")
-    else:
-        print("\n❌ No posts were successfully processed.")
-        print("💡 Possible issues:")
-        print("   - Facebook may be blocking automated access")
-        print("   - Check your internet connection")
-        print("   - Try running fewer posts at once")
-
-    print("=" * 60)
+    print("=" * 80)
+    print("🎉 ALL DONE!")
+    print("=" * 80)
