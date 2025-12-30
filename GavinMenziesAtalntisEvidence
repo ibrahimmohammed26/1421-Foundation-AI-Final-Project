@@ -1,1 +1,823 @@
 
+from playwright.sync_api import sync_playwright
+import os
+import time
+import requests
+from bs4 import BeautifulSoup
+from urllib.parse import urlparse
+import re
+import random
+import hashlib
+import csv
+from datetime import datetime
+import zipfile
+
+
+class EvidenceScraper:
+    def __init__(self):
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        }
+        self.errors = []
+        self.scrape_log = []
+        self.url_mapping = {}  # Store URL to readable name mapping
+        self.section_counter = {}
+        self.page_counter = 1  # Global page counter
+        self.chapter_numbers = {}  # Track chapter numbers per section
+
+    def create_folder_name(self, url, section_name, position_in_section):
+        """Create readable folder name with proper chapter ordering"""
+        # Get the title from URL path
+        path = urlparse(url).path.strip('/').split('/')[-1]
+
+        # Extract chapter number from URL
+        chapter_match = re.search(r'chapter-(\d+)', path)
+        chapter_num = chapter_match.group(1) if chapter_match else str(position_in_section).zfill(2)
+
+        # Extract title words from URL
+        title_part = re.sub(r'chapter-\d+[-%]?', '', path)  # Remove chapter number
+        title_part = re.sub(r'[%-]', ' ', title_part)  # Replace hyphens and percent signs with spaces
+
+        # Clean and format title
+        title_words = title_part.title()
+
+        # Remove common prefixes and clean up
+        title_words = re.sub(r'^\s*', '', title_words)
+        title_words = re.sub(r'\s+', ' ', title_words)
+
+        # Use section counter for folder numbering
+        if section_name not in self.section_counter:
+            self.section_counter[section_name] = 0
+        self.section_counter[section_name] += 1
+
+        # Store chapter number for CSV
+        if section_name not in self.chapter_numbers:
+            self.chapter_numbers[section_name] = {}
+        self.chapter_numbers[section_name][position_in_section] = chapter_num
+
+        # Format: SectionNumber_ChapterNumber_Title_SequenceHash
+        section_num = section_name.split('_')[0]  # Get "01" from "01_book_i"
+        folder_name = f"{section_num}_Chapter{chapter_num.zfill(2)}_{title_words}_{self.section_counter[section_name]:02d}"
+
+        # Truncate if too long
+        if len(folder_name) > 60:
+            folder_name = folder_name[:55]
+
+        # Add short hash for uniqueness
+        url_hash = hashlib.md5(url.encode()).hexdigest()[:4]
+        folder_name = f"{folder_name}_{url_hash}"
+
+        # Replace any remaining problematic characters
+        folder_name = re.sub(r'[<>:"/\\|?*]', '_', folder_name)
+
+        self.url_mapping[folder_name] = url
+        return folder_name, chapter_num
+
+    def scrape_all_evidence(self):
+        """Main function to scrape all evidence pages in order"""
+        print("🚀 Starting The Lost Empire of Atlantis Evidence Scraping...")
+        print("=" * 70)
+
+        evidence_structure = self.get_evidence_structure()
+        total_urls = sum(len(urls) for urls in evidence_structure.values())
+
+        print(f"📊 Total Evidence Pages: {total_urls}")
+        print("=" * 70)
+
+        successful = 0
+        start_time = time.time()
+
+        # Create main summary CSV data
+        main_summary_data = []
+
+        for section_name, urls in evidence_structure.items():
+            print(f"\n📁 SECTION: {section_name.upper()}")
+            print("-" * 50)
+
+            for idx, url in enumerate(urls, 1):
+                print(f"  [{idx}/{len(urls)}] {url[:70]}...")
+                folder_name, chapter_num = self.create_folder_name(url, section_name, idx)
+                time.sleep(random.uniform(1.5, 3))
+
+                result = self.scrape_single_url(url, section_name, folder_name, idx)
+
+                if result['success']:
+                    successful += 1
+                    print(f"  ✅ Success ({result.get('word_count', 0)} words)")
+
+                    # Add to main summary data (kept simple for sorting)
+                    main_summary_data.append({
+                        'section': section_name,
+                        'position_in_section': idx,
+                        'chapter_number': chapter_num,
+                        'folder_name': folder_name,
+                        'url': url,
+                        'title': result.get('title', ''),
+                        'word_count': result.get('word_count', 0),
+                        'page_number': self.section_counter[section_name]  # This is the sequential number in section
+                    })
+
+                    self.scrape_log.append({
+                        'section': section_name,
+                        'url': url,
+                        'status': 'success',
+                        'words': result.get('word_count', 0)
+                    })
+
+                    self.page_counter += 1
+                else:
+                    print(f"  ❌ Failed: {result.get('error', 'Unknown')}")
+                    self.errors.append({
+                        'section': section_name,
+                        'url': url,
+                        'folder_name': folder_name,
+                        'error': result.get('error', 'Unknown')
+                    })
+
+                    # Add failed entry to summary
+                    main_summary_data.append({
+                        'section': section_name,
+                        'position_in_section': idx,
+                        'chapter_number': chapter_num,
+                        'folder_name': folder_name,
+                        'url': url,
+                        'title': '',
+                        'word_count': 0,
+                        'page_number': self.section_counter[section_name]
+                    })
+
+                    self.scrape_log.append({
+                        'section': section_name,
+                        'url': url,
+                        'status': 'failed',
+                        'error': result.get('error')
+                    })
+
+                    self.page_counter += 1
+
+                time.sleep(1)
+
+        elapsed = time.time() - start_time
+
+        print("\n" + "=" * 70)
+        print(f"🎉 SCRAPING COMPLETED!")
+        print(f"   Successful: {successful}/{total_urls}")
+        print(f"   Failed: {len(self.errors)}/{total_urls}")
+        print(f"   Time: {int(elapsed / 60)}m {int(elapsed % 60)}s")
+        print("=" * 70)
+
+        # Save all CSVs
+        self.save_all_csvs(main_summary_data, successful, total_urls, elapsed)
+
+        # Create zip file
+        zip_path = self.create_zip_file()
+
+        return successful, zip_path
+
+    def save_all_csvs(self, summary_data, successful, total, elapsed):
+        """Save all CSV files"""
+        print("\n💾 Saving all CSV files...")
+
+        # Sort summary data by section number and position for proper order
+        summary_data.sort(key=lambda x: (
+            int(x['section'].split('_')[0]),  # Sort by section number (01, 02, etc.)
+            int(x['position_in_section'])  # Then by position in section
+        ))
+
+        # 1. Main summary CSV (with simple columns)
+        self.save_summary_csv(summary_data)
+
+        # 2. URL mapping CSV
+        self.save_url_mapping_csv()
+
+        # 3. Scraping summary CSV
+        self.save_scraping_summary_csv(successful, total, elapsed)
+
+        # 4. Section summary CSV
+        self.save_section_summary_csv(summary_data)
+
+        # 5. Errors CSV (if any)
+        if self.errors:
+            self.save_errors_csv()
+
+    def save_summary_csv(self, data):
+        """Save main summary CSV with requested columns"""
+        csv_path = "atlantis_evidence_scraped/all_evidence_summary.csv"
+        try:
+            os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+
+            # Convert to simple format with requested columns
+            simple_data = []
+            for item in data:
+                simple_data.append({
+                    'page_number': item['page_number'],
+                    'folder_name': item['folder_name'],
+                    'url': item['url'],
+                    'title': item['title'],
+                    'word_count': item['word_count'],
+                    'section': item['section']
+                })
+
+            with open(csv_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
+                fieldnames = [
+                    'page_number',
+                    'folder_name',
+                    'url',
+                    'title',
+                    'word_count',
+                    'section'
+                ]
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(simple_data)
+
+            print(f"✅ Main summary CSV saved: {csv_path}")
+            return True
+
+        except Exception as e:
+            print(f"❌ Error saving main summary CSV: {e}")
+            return False
+
+    def save_url_mapping_csv(self):
+        """Save URL mapping CSV"""
+        csv_path = "atlantis_evidence_scraped/url_mapping.csv"
+        try:
+            os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+
+            with open(csv_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
+                fieldnames = ['folder_name', 'url', 'title', 'section', 'chapter']
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+
+                # Sort folders by section and chapter number
+                sorted_folders = []
+                for folder_name, url in self.url_mapping.items():
+                    # Extract info from folder name
+                    parts = folder_name.split('_')
+                    if len(parts) >= 2:
+                        section_num = parts[0]
+                        chapter_part = parts[1]
+                        chapter_match = re.search(r'Chapter(\d+)', chapter_part)
+                        chapter_num = chapter_match.group(1) if chapter_match else "00"
+
+                        # Reconstruct title
+                        title_parts = parts[2:-2]  # Skip section, chapter, sequence, and hash
+                        title = ' '.join(title_parts).title()
+
+                        sorted_folders.append({
+                            'folder_name': folder_name,
+                            'url': url,
+                            'title': title,
+                            'section': f"Section {section_num}",
+                            'chapter': f"Chapter {int(chapter_num)}"
+                        })
+
+                # Sort by section and chapter number
+                sorted_folders.sort(key=lambda x: (x['section'], int(x['chapter'].split()[-1])))
+
+                for item in sorted_folders:
+                    writer.writerow({
+                        'folder_name': item['folder_name'],
+                        'url': item['url'],
+                        'title': item['title'],
+                        'section': item['section'],
+                        'chapter': item['chapter']
+                    })
+
+            print(f"✅ URL mapping CSV saved: {csv_path}")
+            return True
+
+        except Exception as e:
+            print(f"❌ Error saving URL mapping CSV: {e}")
+            return False
+
+    def save_scraping_summary_csv(self, successful, total, elapsed):
+        """Save scraping summary CSV"""
+        csv_path = "atlantis_evidence_scraped/scraping_summary.csv"
+        try:
+            with open(csv_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
+                fieldnames = [
+                    'total_pages',
+                    'successful',
+                    'failed',
+                    'success_rate',
+                    'time_elapsed_minutes',
+                    'date_completed'
+                ]
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerow({
+                    'total_pages': total,
+                    'successful': successful,
+                    'failed': len(self.errors),
+                    'success_rate': f"{(successful / total * 100):.1f}%",
+                    'time_elapsed_minutes': f"{int(elapsed / 60)}m {int(elapsed % 60)}s",
+                    'date_completed': datetime.now().strftime("%Y-%m-%d")
+                })
+
+            print(f"✅ Scraping summary CSV saved: {csv_path}")
+            return True
+
+        except Exception as e:
+            print(f"❌ Error saving scraping summary CSV: {e}")
+            return False
+
+    def save_section_summary_csv(self, summary_data):
+        """Save section summary CSV"""
+        csv_path = "atlantis_evidence_scraped/section_summary.csv"
+        try:
+            section_stats = {}
+
+            # Calculate section statistics
+            for item in summary_data:
+                section = item['section']
+                if section not in section_stats:
+                    section_stats[section] = {'total': 0, 'success': 0, 'failed': 0}
+
+                section_stats[section]['total'] += 1
+                if item['word_count'] > 0:
+                    section_stats[section]['success'] += 1
+                else:
+                    section_stats[section]['failed'] += 1
+
+            with open(csv_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
+                fieldnames = ['section', 'total_pages', 'successful', 'failed', 'success_rate']
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+
+                # Sort sections numerically
+                sorted_sections = sorted(section_stats.items(),
+                                         key=lambda x: int(x[0].split('_')[0]))
+
+                for section, stats in sorted_sections:
+                    section_name = section.replace('_', ' ').title()
+                    writer.writerow({
+                        'section': section_name,
+                        'total_pages': stats['total'],
+                        'successful': stats['success'],
+                        'failed': stats['failed'],
+                        'success_rate': f"{(stats['success'] / stats['total'] * 100):.1f}%" if stats[
+                                                                                                   'total'] > 0 else "0%"
+                    })
+
+            print(f"✅ Section summary CSV saved: {csv_path}")
+            return True
+
+        except Exception as e:
+            print(f"❌ Error saving section summary CSV: {e}")
+            return False
+
+    def save_errors_csv(self):
+        """Save errors CSV"""
+        csv_path = "atlantis_evidence_scraped/scraping_errors.csv"
+        try:
+            with open(csv_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
+                fieldnames = ['section', 'url', 'folder_name', 'error']
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+                for err in self.errors:
+                    writer.writerow({
+                        'section': err['section'],
+                        'url': err['url'],
+                        'folder_name': err['folder_name'],
+                        'error': err['error'][:500]
+                    })
+
+            print(f"✅ Errors CSV saved: {csv_path}")
+            return True
+
+        except Exception as e:
+            print(f"❌ Error saving errors CSV: {e}")
+            return False
+
+    def get_evidence_structure(self):
+        """The Lost Empire of Atlantis Evidence URLs - Organized by books/chapters"""
+        from collections import OrderedDict
+
+        structure = OrderedDict()
+
+        structure["01_book_i"] = [
+            "https://www.gavinmenzies.net/Evidence/chapter-1-an-adventure-on-crete/",
+            "https://www.gavinmenzies.net/Evidence/chapter-2-%e2%80%93-under-the-volcano/",
+            "https://www.gavinmenzies.net/Evidence/chapter-3-%e2%80%93-the-search-for-the-minoan-naval-base/",
+            "https://www.gavinmenzies.net/Evidence/chapter-4-%e2%80%93-return-to-phaestos/",
+            "https://www.gavinmenzies.net/Evidence/chapter-5-%e2%80%93-the-ancient-scholars-speak/",
+            "https://www.gavinmenzies.net/Evidence/chapter-6-%e2%80%93-the-missing-link-copper/",
+            "https://www.gavinmenzies.net/Evidence/chapter-7-%e2%80%93-who-were-the-minoans/"
+        ]
+
+        structure["02_book_ii"] = [
+            "https://www.gavinmenzies.net/Evidence/chapter-8-%e2%80%93-the-lost-wreck-and-the-buried-treasure-trove/",
+            "https://www.gavinmenzies.net/Evidence/chapter-9-%e2%80%93-sailing-from-byzantium/",
+            "https://www.gavinmenzies.net/Evidence/chapter-10-%e2%80%93-life-in-the-library/",
+            "https://www.gavinmenzies.net/Evidence/chapter-11-%e2%80%93-a-place-of-many-names-and-many-nations/",
+            "https://www.gavinmenzies.net/Evidence/chapter-12-%e2%80%93-a-ship-in-the-desert/",
+            "https://www.gavinmenzies.net/Evidence/chapter-13-%e2%80%93-new-worlds-for-old/",
+            "https://www.gavinmenzies.net/Evidence/chapter-14-%e2%80%93-rich-exotic-lands/",
+            "https://www.gavinmenzies.net/Evidence/chapter-15-%e2%80%93-proud-ninevah/",
+            "https://www.gavinmenzies.net/Evidence/chapter-16-%e2%80%93-the-key-to-india/",
+            "https://www.gavinmenzies.net/Evidence/chapter-17-%e2%80%93-indian-ocean-trade-in-the-bronze-age/",
+            "https://www.gavinmenzies.net/Evidence/chapter-18-%e2%80%93the-truth-is-in-the-trade/"
+        ]
+
+        structure["03_book_iii"] = [
+            "https://www.gavinmenzies.net/Evidence/chapter-19-%e2%80%93-nec-plus-ultra-entering-the-atlantic/",
+            "https://www.gavinmenzies.net/Evidence/chapter-20-%e2%80%93-a-folk-memory-of-home/",
+            "https://www.gavinmenzies.net/Evidence/chapter-21-%e2%80%93-spain-and-la-tauromaquia/",
+            "https://www.gavinmenzies.net/Evidence/chapter-22-%e2%80%93-blazing-the-trail-to-dover/",
+            "https://www.gavinmenzies.net/Evidence/chapter-23-%e2%80%93-the-land-of-running-silver/",
+            "https://www.gavinmenzies.net/Evidence/chapter-24-%e2%80%93-a-labyrinth-in-dragon-country/",
+            "https://www.gavinmenzies.net/Evidence/chapter-25-%e2%80%93-strange-beasts-and-astrolabes/"
+        ]
+
+        structure["04_book_iv"] = [
+            "https://www.gavinmenzies.net/Evidence/chapter-26-%e2%80%93-seeing-the-skies-in-stone/",
+            "https://www.gavinmenzies.net/Evidence/chapter-27-%e2%80%93-mediterranean-and-atlantic-megaliths/",
+            "https://www.gavinmenzies.net/Evidence/chapter-28-%e2%80%93-stonehenge-%e2%80%93-the-master-work/",
+            "https://www.gavinmenzies.net/Evidence/chapter-29-%e2%80%93-from-the-med-to-the-megalith/",
+            "https://www.gavinmenzies.net/Evidence/chapter-30-the-land-that-time-forgot-2/",
+            "https://www.gavinmenzies.net/Evidence/chapter-31-%e2%80%93-the-bronze-boy/"
+        ]
+
+        structure["05_book_v"] = [
+            "https://www.gavinmenzies.net/Evidence/chapter-32-%e2%80%93-the-seekers-set-sail/",
+            "https://www.gavinmenzies.net/Evidence/chapter-33-%e2%80%93-a-metallurgical-mystery/",
+            "https://www.gavinmenzies.net/Evidence/chapter-34-%e2%80%93-adventures-by-water/",
+            "https://www.gavinmenzies.net/Evidence/chapter-35-%e2%80%93-a-heavy-load-indeed/",
+            "https://www.gavinmenzies.net/Evidence/chapter-36-%e2%80%93-into-the-deep-unknown/",
+            "https://www.gavinmenzies.net/Evidence/chapter-37-%e2%80%93-so-the-proof/"
+        ]
+
+        structure["06_book_vi"] = [
+            "https://www.gavinmenzies.net/Evidence/chapter-38-%e2%80%93-the-spots-marked-%e2%80%98x%e2%80%99/",
+            "https://www.gavinmenzies.net/Evidence/chapter-39-%e2%80%93-a-new-beginning/",
+            "https://www.gavinmenzies.net/Evidence/chapter-40-%e2%80%93-a-return-to-crete/",
+            "https://www.gavinmenzies.net/Evidence/chapter-41-the-legacy-of-hope/"
+        ]
+
+        structure["07_ps_section"] = [
+            "https://www.gavinmenzies.net/Evidence/3541/"
+        ]
+
+        return structure
+
+    def scrape_single_url(self, url, section, folder_name, position):
+        """Scrape a single URL and save as CSV"""
+        try:
+            base_dir = "atlantis_evidence_scraped"
+            # Create folder structure
+            page_dir = os.path.join(base_dir, section, folder_name)
+            data_dir = os.path.join(page_dir, "data")
+            os.makedirs(data_dir, exist_ok=True)
+
+            # Try scraping with requests first
+            try:
+                response = requests.get(url, headers=self.headers, timeout=30)
+                response.raise_for_status()
+                soup = BeautifulSoup(response.text, 'html.parser')
+            except:
+                # Fallback to Playwright
+                soup = self.scrape_playwright(url)
+
+            title = self.clean_text(self.extract_title(soup, url))
+            content = self.clean_text(self.extract_content(soup))
+            author = self.extract_author(soup)
+
+            # Get metadata
+            word_count = len(content.split())
+
+            # Create CSV data with EXACTLY the requested columns
+            csv_data = {
+                'page_number': self.section_counter[section],  # Sequential number in section
+                'folder_name': folder_name,
+                'url': url,
+                'title': title[:1000],
+                'content': content[:50000],
+                'author': author[:200],
+                'word_count': word_count
+            }
+
+            # Save CSV
+            csv_path = os.path.join(data_dir, f"{folder_name}.csv")
+            success = self.save_page_to_csv(csv_data, csv_path)
+
+            if success:
+                return {
+                    'success': True,
+                    'word_count': word_count,
+                    'title': title,
+                    'content': content,
+                    'author': author
+                }
+            else:
+                return {'success': False, 'error': 'Failed to save CSV'}
+
+        except Exception as e:
+            print(f"    ⚠️ Scraping error: {str(e)[:100]}")
+            return {'success': False, 'error': str(e)}
+
+    def scrape_playwright(self, url):
+        """Fallback scraping with Playwright"""
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto(url, wait_until="networkidle", timeout=60000)
+            page.wait_for_timeout(3000)
+            content = page.content()
+            browser.close()
+            return BeautifulSoup(content, 'html.parser')
+
+    def extract_title(self, soup, url):
+        """Extract page title"""
+        t = soup.find('title')
+        if t:
+            return t.get_text().strip()
+
+        h1 = soup.find('h1')
+        if h1:
+            return h1.get_text().strip()
+
+        # Try other heading tags
+        for tag in ['h2', 'h3', 'h4']:
+            heading = soup.find(tag)
+            if heading:
+                return heading.get_text().strip()
+
+        # Use URL as fallback
+        path = urlparse(url).path.strip('/').split('/')[-1]
+        return path.replace('-', ' ').replace('_', ' ').title()
+
+    def extract_author(self, soup):
+        """Extract author from page"""
+        # Try common author selectors
+        author_selectors = [
+            '.author',
+            '.byline',
+            '.post-author',
+            '.entry-author',
+            'meta[name="author"]',
+            'meta[property="article:author"]',
+            'meta[property="og:author"]'
+        ]
+
+        for sel in author_selectors:
+            elem = soup.select_one(sel)
+            if elem:
+                if elem.name == 'meta':
+                    return elem.get('content', '').strip()
+                return elem.get_text().strip()
+
+        return ""
+
+    def extract_content(self, soup):
+        """Extract main content from page"""
+        # Remove unwanted elements
+        for s in soup(["script", "style", "nav", "header", "footer", "iframe", "form", "button"]):
+            s.decompose()
+
+        # Try content selectors (priority order)
+        content_selectors = [
+            'main',
+            'article',
+            '.content',
+            '#content',
+            '.entry-content',
+            'section',
+            '.post-content',
+            '.article-content',
+            '.page-content',
+            'div.content',
+            'div.article'
+        ]
+
+        for sel in content_selectors:
+            elem = soup.select_one(sel)
+            if elem:
+                text = elem.get_text(separator='\n', strip=True)
+                if len(text) > 200:
+                    return self.clean_content(text)
+
+        # Fallback to body
+        body = soup.find('body')
+        if body:
+            # Remove navigation and other noise
+            for noise in body.select('nav, .navigation, .menu, .sidebar, .footer'):
+                noise.decompose()
+            text = body.get_text(separator='\n', strip=True)
+            return self.clean_content(text)
+
+        return "Content not found"
+
+    def clean_content(self, text):
+        """Clean extracted content"""
+        # Remove excessive whitespace
+        text = re.sub(r'\n\s*\n', '\n\n', text)
+        text = re.sub(r'[ \t]+', ' ', text)
+        return text.strip()
+
+    def clean_text(self, text):
+        """Clean text for safe CSV storage"""
+        if not text:
+            return ""
+
+        # Replace problematic characters
+        replacements = {
+            '\u2022': '•',
+            '\u2013': '-',
+            '\u2014': '-',
+            '\u2018': "'",
+            '\u2019': "'",
+            '\u201c': '"',
+            '\u201d': '"',
+            '\u00a0': ' ',
+            '\u200b': '',  # Zero-width space
+            '\ufffd': '',  # Replacement character
+            '\u2026': '...',  # Ellipsis
+            '\u00a9': '(c)',
+            '\u00ae': '(R)',
+            '\u2122': '(TM)',
+            '\n': ' ',  # Replace newlines with spaces for CSV
+            '\r': ' ',
+            '\t': ' ',
+            '"': '""',  # Escape double quotes for CSV
+        }
+
+        cleaned = text
+        for char, replacement in replacements.items():
+            cleaned = cleaned.replace(char, replacement)
+
+        # Remove excessive whitespace
+        cleaned = re.sub(r'\s+', ' ', cleaned)
+
+        return cleaned.strip()
+
+    def save_page_to_csv(self, page_data, csv_path):
+        """Save page data to CSV with EXACTLY the requested columns"""
+        try:
+            # EXACT column order as requested
+            fieldnames = [
+                'page_number',  # Sequential number in section (1, 2, 3, etc.)
+                'folder_name',  # Readable folder name
+                'url',  # Page URL
+                'title',  # Page title
+                'content',  # Main text content
+                'author',  # Author name (if available)
+                'word_count'  # Number of words in content
+            ]
+
+            # Write to CSV
+            with open(csv_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerow(page_data)
+
+            return True
+
+        except Exception as e:
+            print(f"    ⚠️ Error saving CSV: {e}")
+            return False
+
+    def create_zip_file(self):
+        """Create a zip file of all scraped evidence"""
+        try:
+            zip_path = "atlantis_evidence_scraped.zip"
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                # Walk through directories in proper order
+                sections = ["01_book_i", "02_book_ii", "03_book_iii", "04_book_iv",
+                            "05_book_v", "06_book_vi", "07_ps_section"]
+
+                for section in sections:
+                    section_path = os.path.join("atlantis_evidence_scraped", section)
+                    if os.path.exists(section_path):
+                        # Get all chapter folders and sort them
+                        chapter_folders = []
+                        for item in os.listdir(section_path):
+                            item_path = os.path.join(section_path, item)
+                            if os.path.isdir(item_path):
+                                # Extract chapter number for sorting
+                                chapter_match = re.search(r'Chapter(\d+)', item)
+                                chapter_num = int(chapter_match.group(1)) if chapter_match else 999
+                                chapter_folders.append((chapter_num, item, item_path))
+
+                        # Sort by chapter number
+                        chapter_folders.sort(key=lambda x: x[0])
+
+                        # Add to zip in sorted order
+                        for chapter_num, folder_name, folder_path in chapter_folders:
+                            for root, dirs, files in os.walk(folder_path):
+                                for file in files:
+                                    file_path = os.path.join(root, file)
+                                    arcname = os.path.relpath(file_path, ".")
+                                    zipf.write(file_path, arcname)
+
+                # Add CSV files
+                csv_dir = "atlantis_evidence_scraped"
+                if os.path.exists(csv_dir):
+                    for file in os.listdir(csv_dir):
+                        if file.endswith('.csv'):
+                            file_path = os.path.join(csv_dir, file)
+                            arcname = os.path.relpath(file_path, ".")
+                            zipf.write(file_path, arcname)
+
+            print(f"✅ Zip file created: {zip_path}")
+            return zip_path
+
+        except Exception as e:
+            print(f"⚠️ Could not create zip file: {e}")
+            return None
+
+
+def main():
+    """Run the evidence scraper"""
+    print("=" * 70)
+    print("📚 THE LOST EMPIRE OF ATLANTIS EVIDENCE SCRAPER")
+    print("   ✓ Chapters processed IN ORDER (Book I → Book VI → PS)")
+    print("   ✓ Folder names preserve chapter numbers for proper sorting")
+    print("   ✓ CSV files with exact columns as requested")
+    print("=" * 70)
+
+    print("\n📊 CSV COLUMNS FOR INDIVIDUAL PAGES (EXACT AS REQUESTED):")
+    print("   page_number      - Sequential number in section (1, 2, 3, etc.)")
+    print("   folder_name      - Readable folder name with chapter number")
+    print("   url              - Page URL")
+    print("   title            - Page title")
+    print("   content          - Main text content")
+    print("   author           - Author name (if available)")
+    print("   word_count       - Number of words in content")
+
+    print("\n📁 Output structure (PROPERLY ORDERED):")
+    print("   atlantis_evidence_scraped/")
+    print("   ├── 01_book_i/")
+    print("   │   ├── 01_Chapter01_An Adventure On Crete_01_hash/")
+    print("   │   │   └── data/01_Chapter01_An Adventure On Crete_01_hash.csv")
+    print("   │   ├── 01_Chapter02_Under The Volcano_02_hash/")
+    print("   │   │   └── data/01_Chapter02_Under The Volcano_02_hash.csv")
+    print("   │   ├── 01_Chapter03_The Search For The Minoan Naval Base_03_hash/")
+    print("   │   │   └── data/01_Chapter03_The Search For The Minoan Naval Base_03_hash.csv")
+    print("   │   └── ... (Chapters 4-7 in order)")
+    print("   ├── 02_book_ii/")
+    print("   │   ├── 02_Chapter08_The Lost Wreck And The Buried Treasure Trove_01_hash/")
+    print("   │   │   └── data/02_Chapter08_The Lost Wreck And The Buried Treasure Trove_01_hash.csv")
+    print("   │   ├── 02_Chapter09_Sailing From Byzantium_02_hash/")
+    print("   │   │   └── data/02_Chapter09_Sailing From Byzantium_02_hash.csv")
+    print("   │   └── ... (Chapters 10-18 in order)")
+    print("   └── ... (Other books in order)")
+
+    print(f"\n📊 Total sections: 7 (6 books + 1 PS section)")
+    print(f"📊 Total evidence pages: 42")
+    print(f"📊 Chapters per book: Book I:7, Book II:11, Book III:7, Book IV:6, Book V:6, Book VI:4, PS:1")
+
+    os.makedirs("atlantis_evidence_scraped", exist_ok=True)
+
+    # Ask for confirmation before starting
+    print(f"\n⚠️  WARNING: This will scrape 42 evidence pages from gavinmenzies.net!")
+    print("   Estimated time: 20-40 minutes")
+    print("   Estimated storage: ~20-40MB")
+    print("   Chapters will be processed IN ORDER within each book")
+
+    proceed = input("\nProceed with scraping? (y/n): ").strip().lower()
+    if proceed != 'y':
+        print("Scraping cancelled.")
+        exit(0)
+
+    print("\n" + "=" * 70)
+    print("🚀 Starting The Lost Empire of Atlantis evidence scraping...")
+    print("⏳ This will take a while. Please be patient.")
+    print("📝 All data will be saved as CSV files IN PROPER ORDER.")
+    print("=" * 70)
+
+    scraper = EvidenceScraper()
+    success_count, zip_file = scraper.scrape_all_evidence()
+
+    print("\n📊 FINAL SUMMARY")
+    print(f"✅ Successfully scraped: {success_count} pages")
+    print(f"📂 Output folder: atlantis_evidence_scraped/")
+
+    if zip_file:
+        print(f"📦 Zip file: {zip_file}")
+
+    print("\n📄 Output CSV files:")
+    print("   - all_evidence_summary.csv (main index with page numbers, titles, word counts)")
+    print("   - url_mapping.csv (folder name to URL mapping with sections/chapters)")
+    print("   - scraping_summary.csv (overall statistics)")
+    print("   - section_summary.csv (per-section statistics)")
+
+    if scraper.errors:
+        print("   - scraping_errors.csv (error details)")
+        print(f"\n⚠️  {len(scraper.errors)} pages failed to scrape")
+        print("💡 Check scraping_errors.csv for details")
+
+    print("\n✨ All data saved in clean CSV format with EXACT columns as requested!")
+    print("   Each chapter folder contains a CSV with:")
+    print("   - page_number (sequential in section)")
+    print("   - folder_name")
+    print("   - url")
+    print("   - title")
+    print("   - content")
+    print("   - author")
+    print("   - word_count")
+
+
+if __name__ == "__main__":
+    main()
