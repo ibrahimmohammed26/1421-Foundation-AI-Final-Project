@@ -1,0 +1,203 @@
+# 3_search_vector_db.py
+import chromadb
+from chromadb.config import Settings
+from sentence_transformers import SentenceTransformer
+import pandas as pd
+
+
+class VectorDatabaseSearcher:
+    def __init__(self, persist_directory="./chroma_vector_db"):
+        """Initialize vector database searcher"""
+        self.persist_directory = persist_directory
+        self.chroma_client = None
+        self.collection = None
+        self.embedding_model = None
+
+        self.initialize()
+
+    def initialize(self):
+        """Initialize connections"""
+        # Initialize ChromaDB
+        self.chroma_client = chromadb.PersistentClient(
+            path=self.persist_directory,
+            settings=Settings(allow_reset=True, anonymized_telemetry=False)
+        )
+
+        # Load embedding model
+        self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+
+        # Get collections
+        collections = self.chroma_client.list_collections()
+        print(f"📁 Available collections: {[c.name for c in collections]}")
+
+        # Use main collection
+        self.collection = self.chroma_client.get_collection("1421_research_documents")
+
+    def search(self, query, n_results=5, source_filter=None):
+        """Search the vector database"""
+
+        print(f"\n🔍 Searching for: '{query}'")
+        print("-" * 60)
+
+        # Prepare filter
+        where_filter = {}
+        if source_filter:
+            where_filter = {"source_type": source_filter}
+
+        # Perform search
+        results = self.collection.query(
+            query_texts=[query],
+            n_results=n_results,
+            where=where_filter,
+            include=["documents", "metadatas", "distances"]
+        )
+
+        if not results['documents']:
+            print("No results found")
+            return []
+
+        # Display results
+        search_results = []
+        for i in range(len(results['documents'][0])):
+            doc = results['documents'][0][i]
+            metadata = results['metadatas'][0][i]
+            distance = results['distances'][0][i] if results['distances'] else 0
+
+            similarity = 1 - distance if distance else 1.0
+
+            result = {
+                'rank': i + 1,
+                'similarity': similarity,
+                'source': metadata.get('source_type', 'Unknown'),
+                'title': metadata.get('title', 'No title'),
+                'author': metadata.get('author', ''),
+                'word_count': metadata.get('word_count', 0),
+                'content_preview': doc[:300] + "..." if len(doc) > 300 else doc,
+                'metadata': metadata
+            }
+
+            search_results.append(result)
+
+            # Display
+            print(f"\n📄 RESULT {i + 1} (Similarity: {similarity:.3f})")
+            print(f"   Source: {result['source']}")
+            print(f"   Title: {result['title']}")
+            if result['author']:
+                print(f"   Author: {result['author']}")
+            print(f"   Preview: {result['content_preview']}")
+            print("-" * 50)
+
+        return search_results
+
+    def search_by_source(self, source_type, limit=10):
+        """Get documents by source type"""
+        print(f"\n📁 Documents from: {source_type}")
+        print("-" * 60)
+
+        results = self.collection.get(
+            where={"source_type": source_type},
+            limit=limit,
+            include=["metadatas", "documents"]
+        )
+
+        if not results['metadatas']:
+            print("No documents found for this source type")
+            return []
+
+        for i in range(len(results['metadatas'])):
+            metadata = results['metadatas'][i]
+            doc = results['documents'][i] if results['documents'] else ""
+
+            print(f"\n{i + 1}. {metadata.get('title', 'No title')}")
+            print(f"   Author: {metadata.get('author', 'Unknown')}")
+            print(f"   Words: {metadata.get('word_count', 0):,}")
+
+            if doc:
+                preview = doc[:200] + "..." if len(doc) > 200 else doc
+                print(f"   Preview: {preview}")
+
+        return results['metadatas']
+
+    def export_results(self, query, n_results=10, filename="search_results.csv"):
+        """Search and export results to CSV"""
+        results = self.search(query, n_results)
+
+        if results:
+            df = pd.DataFrame(results)
+            df.to_csv(filename, index=False)
+            print(f"\n✅ Results exported to: {filename}")
+            return df
+        return None
+
+
+def interactive_search():
+    """Interactive search interface"""
+    searcher = VectorDatabaseSearcher()
+
+    print("=" * 70)
+    print("🔍 1421 RESEARCH VECTOR DATABASE SEARCH")
+    print("=" * 70)
+
+    while True:
+        print("\nOptions:")
+        print("1. Semantic search")
+        print("2. Search by source type")
+        print("3. Export search results")
+        print("4. Show database statistics")
+        print("5. Exit")
+
+        choice = input("\nSelect option (1-5): ").strip()
+
+        if choice == '1':
+            query = input("Enter search query: ").strip()
+            if query:
+                n_results = input("Number of results (default 5): ").strip()
+                n_results = int(n_results) if n_results.isdigit() else 5
+                searcher.search(query, n_results)
+
+        elif choice == '2':
+            source_types = ["facebook_posts", "foundation", "gavin_menzies", "facebook_pages"]
+            print("\nAvailable source types:")
+            for i, st in enumerate(source_types, 1):
+                print(f"{i}. {st}")
+
+            source_choice = input("\nSelect source (1-4 or type name): ").strip()
+            if source_choice.isdigit() and 1 <= int(source_choice) <= 4:
+                source_type = source_types[int(source_choice) - 1]
+            else:
+                source_type = source_choice
+
+            searcher.search_by_source(source_type)
+
+        elif choice == '3':
+            query = input("Search query to export: ").strip()
+            if query:
+                filename = input("Filename (default: search_results.csv): ").strip()
+                filename = filename if filename else "search_results.csv"
+                searcher.export_results(query, filename=filename)
+
+        elif choice == '4':
+            print(f"\n📊 Database Statistics:")
+            print(f"Collection: {searcher.collection.name}")
+            print(f"Total vectors: {searcher.collection.count():,}")
+
+            # Get counts by source
+            all_metadata = searcher.collection.get(include=["metadatas"])
+            if all_metadata['metadatas']:
+                df = pd.DataFrame(all_metadata['metadatas'])
+                if 'source_type' in df.columns:
+                    print("\nDocuments by source:")
+                    source_counts = df['source_type'].value_counts()
+                    for source, count in source_counts.items():
+                        print(f"  {source}: {count:,}")
+
+        elif choice == '5':
+            print("Goodbye!")
+            break
+
+        else:
+            print("Invalid option")
+
+
+if __name__ == "__main__":
+    interactive_search()
