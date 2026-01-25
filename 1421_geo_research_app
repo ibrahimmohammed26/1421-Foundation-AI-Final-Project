@@ -1,0 +1,993 @@
+# 1421_geo_research_app.py
+"""
+1421 Research AI with Geographical Mapping using Plotly
+- Answers questions about your research data
+- Extracts locations from text and queries
+- Generates interactive maps with Plotly (no extra installation needed)
+- Shows relevant documents with locations highlighted
+
+Run:
+    streamlit run 1421_geo_research_app.py
+"""
+
+import streamlit as st
+import pandas as pd
+import numpy as np
+from pathlib import Path
+import re
+import json
+from datetime import datetime
+from collections import Counter
+import plotly.express as px
+import plotly.graph_objects as go
+import pickle
+import faiss
+from sentence_transformers import SentenceTransformer
+import warnings
+
+warnings.filterwarnings('ignore')
+
+# Page config
+st.set_page_config(
+    page_title="1421 Geographical Research AI",
+    page_icon="🗺️",
+    layout="wide"
+)
+
+
+@st.cache_resource
+def load_vector_databases():
+    """Load vector databases for semantic search"""
+
+    databases = {}
+    vector_dir = Path("vector_databases")
+
+    if vector_dir.exists():
+        for db_folder in vector_dir.iterdir():
+            if db_folder.is_dir():
+                index_file = db_folder / "faiss_index.bin"
+                metadata_file = db_folder / "faiss_metadata.pkl"
+
+                if index_file.exists() and metadata_file.exists():
+                    try:
+                        index = faiss.read_index(str(index_file))
+
+                        with open(metadata_file, 'rb') as f:
+                            data = pickle.load(f)
+                            documents = data['documents']
+                            metadatas = data['metadatas']
+
+                        databases[db_folder.name] = {
+                            'index': index,
+                            'documents': documents,
+                            'metadatas': metadatas
+                        }
+
+                    except Exception as e:
+                        st.warning(f"Could not load {db_folder.name}: {e}")
+
+    return databases
+
+
+@st.cache_resource
+def load_model():
+    """Load sentence transformer model"""
+    try:
+        return SentenceTransformer('all-MiniLM-L6-v2')
+    except:
+        st.error("Please install: pip install sentence-transformers")
+        return None
+
+
+def extract_locations_from_text(text):
+    """Extract location names from text using regex patterns"""
+
+    locations = []
+
+    # Enhanced regex patterns for historical/geographical locations
+    patterns = [
+        # Countries and regions
+        r'\b(?:in|at|near|around|from|to|of|the)\s+([A-Z][a-zA-Z\s\-]+\b(?:Country|Nation|Kingdom|Empire|Republic|Province|Region|State|Territory|Continent)?)\b',
+
+        # Cities and towns
+        r'\b([A-Z][a-zA-Z\s\-]+?(?:City|Town|Village|Hamlet|Settlement|Port|Harbor|Bay|Cove|Inlet))\b',
+
+        # Geographical features
+        r'\b(?:the\s+)?([A-Z][a-zA-Z\s\-]+?(?:Island|Islands|Archipelago|Peninsula|Cape|Point|Strait|Channel|Sea|Ocean|River|Lake|Mountains?|Peak|Valley|Desert|Forest|Plain|Plateau))\b',
+
+        # Historical/Ancient names
+        r'\b(?:ancient|old|former|historical)\s+([A-Z][a-zA-Z\s\-]+)\b',
+
+        # Specific 1421-related patterns
+        r'\b(?:Zheng He|Ming|Chinese)\s+(?:sailed to|visited|discovered|explored)\s+([A-Z][a-zA-Z\s\-]+)\b',
+        r'\b(?:voyage to|expedition to|fleet reached)\s+([A-Z][a-zA-Z\s\-]+)\b',
+
+        # Coordinates patterns
+        r'(\d+°\s*\d+\'\s*\d+(?:\.\d+)?"?\s*[NS])\s*,\s*(\d+°\s*\d+\'\s*\d+(?:\.\d+)?"?\s*[EW])',
+        r'(\d+\.\d+°?\s*[NS]?)\s*,\s*(\d+\.\d+°?\s*[EW]?)',
+        r'latitude\s*[:=]?\s*([+-]?\d+\.\d+)[°]?\s*,\s*longitude\s*[:=]?\s*([+-]?\d+\.\d+)',
+    ]
+
+    for pattern in patterns:
+        matches = re.findall(pattern, text, re.IGNORECASE)
+        if matches:
+            if isinstance(matches[0], tuple):  # Coordinates
+                for match in matches:
+                    if len(match) == 2:
+                        locations.append(f"Coordinates: {match[0]}, {match[1]}")
+            else:  # Regular location names
+                locations.extend(matches)
+
+    # Clean up
+    locations = [loc.strip() for loc in locations if len(loc.strip()) > 2]
+
+    # Remove common false positives
+    false_positives = ['the', 'and', 'or', 'but', 'however', 'therefore', 'because']
+    locations = [loc for loc in locations if loc.lower() not in false_positives]
+
+    return list(set(locations))[:20]  # Limit to 20 unique locations
+
+
+def get_coordinates_for_location(location_name):
+    """Get coordinates for a location name (using a predefined cache)"""
+
+    # Extensive cache of 1421-related locations
+    location_cache = {
+        # China and East Asia
+        'China': (35.8617, 104.1954),
+        'Beijing': (39.9042, 116.4074),
+        'Nanjing': (32.0603, 118.7969),
+        'Shanghai': (31.2304, 121.4737),
+        'Guangzhou': (23.1291, 113.2644),
+        'Quanzhou': (24.9139, 118.5858),
+        'Fujian': (26.4837, 118.0894),
+        'Zhejiang': (29.1416, 119.7889),
+        'Yangtze River': (31.769, 120.967),
+        'Yellow Sea': (35.0, 123.0),
+
+        # Zheng He's Voyage Locations
+        'Malacca': (2.1896, 102.2501),
+        'Strait of Malacca': (2.5, 101.0),
+        'Sumatra': (-0.7893, 101.3431),
+        'Java': (-7.491, 110.022),
+        'Borneo': (0.9619, 114.5548),
+        'Bali': (-8.4095, 115.1889),
+        'Sri Lanka': (7.8731, 80.7718),
+        'Ceylon': (7.8731, 80.7718),
+        'India': (20.5937, 78.9629),
+        'Calicut': (11.2588, 75.7804),
+        'Kozhikode': (11.2588, 75.7804),
+        'Goa': (15.2993, 74.124),
+        'Hormuz': (27.1833, 56.2667),
+        'Persian Gulf': (27.0, 51.0),
+        'Arabian Sea': (14.0, 65.0),
+        'Red Sea': (20.0, 38.0),
+        'Aden': (12.7855, 45.0187),
+        'Mogadishu': (2.0371, 45.3438),
+        'Mombasa': (-4.0435, 39.6682),
+        'Zanzibar': (-6.1659, 39.2026),
+        'Kenya': (-1.2864, 36.8172),
+        'Mozambique': (-18.6657, 35.5296),
+        'Madagascar': (-18.7669, 46.8691),
+
+        # Americas (1421 Hypothesis Locations)
+        'America': (37.0902, -95.7129),
+        'North America': (54.526, -105.2551),
+        'South America': (-8.7832, -55.4915),
+        'California': (36.7783, -119.4179),
+        'Baja California': (27.8406, -113.2222),
+        'San Francisco': (37.7749, -122.4194),
+        'Los Angeles': (34.0522, -118.2437),
+        'Mexico': (23.6345, -102.5528),
+        'Peru': (-9.19, -75.0152),
+        'Lima': (-12.0464, -77.0428),
+        'Brazil': (-14.235, -51.9253),
+        'Rio de Janeiro': (-22.9068, -43.1729),
+        'Caribbean': (15.0, -75.0),
+        'West Indies': (21.0, -78.0),
+        'Bahamas': (25.0343, -77.3963),
+        'Cuba': (21.5218, -77.7812),
+        'Florida': (27.6648, -81.5158),
+        'Newfoundland': (48.5635, -55.8071),
+        'Nova Scotia': (44.682, -63.7443),
+
+        # Oceans and Major Bodies of Water
+        'Pacific Ocean': (0.0, -160.0),
+        'Indian Ocean': (-20.0, 80.0),
+        'Atlantic Ocean': (15.0, -40.0),
+        'South China Sea': (12.0, 113.0),
+        'East China Sea': (30.0, 125.0),
+        'Philippine Sea': (20.0, 130.0),
+
+        # Historical/Alternative Names
+        'Cathay': (35.8617, 104.1954),
+        'Marco Polo': (44.4056, 8.9463),
+        'Ming Dynasty': (32.0603, 118.7969),
+        'Treasure Fleet': (31.2304, 121.4737),
+        'Zheng He': (31.2304, 121.4737),
+        'Gavin Menzies': (51.5074, -0.1278),  # London
+        '1421': (35.8617, 104.1954),  # China
+
+        # Ancient Trade Ports
+        'Silk Road': (40.0, 80.0),
+        'Spice Islands': (-2.0, 128.0),
+        'Maluku Islands': (-2.0, 128.0),
+        'Timor': (-9.0, 125.0),
+        'Philippines': (12.8797, 121.774),
+        'Vietnam': (14.0583, 108.2772),
+        'Thailand': (15.87, 100.9925),
+        'Cambodia': (12.5657, 104.991),
+        'Myanmar': (21.9162, 95.956),
+    }
+
+    # Try exact match first
+    location_name_lower = location_name.lower()
+    for known_name, coords in location_cache.items():
+        if known_name.lower() == location_name_lower:
+            return {
+                'name': location_name,
+                'latitude': coords[0],
+                'longitude': coords[1],
+                'source': 'cache_exact',
+                'confidence': 'high'
+            }
+
+    # Try partial match
+    for known_name, coords in location_cache.items():
+        if known_name.lower() in location_name_lower or location_name_lower in known_name.lower():
+            return {
+                'name': location_name,
+                'latitude': coords[0],
+                'longitude': coords[1],
+                'source': 'cache_partial',
+                'confidence': 'medium'
+            }
+
+    # Try to extract coordinates directly
+    coord_patterns = [
+        r'(\d+\.\d+)[°]?\s*[NS]?\s*,\s*(\d+\.\d+)[°]?\s*[EW]?',
+        r'lat[:\s]*([+-]?\d+\.\d+)[°]?\s*[,;]\s*lon[:\s]*([+-]?\d+\.\d+)'
+    ]
+
+    for pattern in coord_patterns:
+        match = re.search(pattern, location_name, re.IGNORECASE)
+        if match:
+            try:
+                lat = float(match.group(1))
+                lon = float(match.group(2))
+                return {
+                    'name': f"Coordinates {lat}, {lon}",
+                    'latitude': lat,
+                    'longitude': lon,
+                    'source': 'coordinates',
+                    'confidence': 'high'
+                }
+            except:
+                pass
+
+    return None
+
+
+def create_plotly_map(query_locations, document_locations, query_text):
+    """Create an interactive map using Plotly"""
+
+    # Prepare data for the map
+    map_data = []
+
+    # Add query locations
+    for loc in query_locations:
+        map_data.append({
+            'name': loc['name'],
+            'latitude': loc['latitude'],
+            'longitude': loc['longitude'],
+            'type': 'query',
+            'size': 15,
+            'color': 'red',
+            'symbol': 'star',
+            'confidence': loc.get('confidence', 'unknown'),
+            'hover_text': f"<b>Query:</b> {loc['name']}<br>Confidence: {loc.get('confidence', 'unknown')}"
+        })
+
+    # Add document locations
+    for loc in document_locations:
+        map_data.append({
+            'name': loc['name'],
+            'latitude': loc['latitude'],
+            'longitude': loc['longitude'],
+            'type': 'document',
+            'size': 10,
+            'color': 'blue',
+            'symbol': 'circle',
+            'relevance': loc.get('relevance', 0),
+            'document': loc.get('document_title', 'Unknown'),
+            'hover_text': f"<b>Document:</b> {loc['name']}<br>Relevance: {loc.get('relevance', 0):.1%}<br>Source: {loc.get('document_title', 'Unknown')[:30]}..."
+        })
+
+    if not map_data:
+        return None
+
+    df = pd.DataFrame(map_data)
+
+    # Create scatter plot on map
+    fig = px.scatter_geo(
+        df,
+        lat='latitude',
+        lon='longitude',
+        color='type',
+        size='size',
+        symbol='symbol',
+        hover_name='name',
+        hover_data={'hover_text': True, 'latitude': False, 'longitude': False},
+        title=f"Locations for: {query_text[:50]}...",
+        projection='natural earth',
+        color_discrete_map={'query': 'red', 'document': 'blue'}
+    )
+
+    # Customize the map
+    fig.update_geos(
+        showland=True,
+        landcolor="lightgray",
+        showocean=True,
+        oceancolor="lightblue",
+        showlakes=True,
+        lakecolor="blue",
+        showrivers=True,
+        rivercolor="blue"
+    )
+
+    fig.update_layout(
+        height=600,
+        margin={"r": 0, "t": 30, "l": 0, "b": 0},
+        legend_title="Location Type"
+    )
+
+    # Add connections if we have multiple locations
+    if len(map_data) > 1:
+        # Create lines between locations (simulating voyage routes)
+        line_data = []
+        for i in range(len(map_data) - 1):
+            line_data.append({
+                'lat': [map_data[i]['latitude'], map_data[i + 1]['latitude']],
+                'lon': [map_data[i]['longitude'], map_data[i + 1]['longitude']]
+            })
+
+        # Add lines to the figure
+        for line in line_data[:5]:  # Limit to 5 lines
+            fig.add_trace(
+                go.Scattergeo(
+                    lat=line['lat'],
+                    lon=line['lon'],
+                    mode='lines',
+                    line=dict(width=2, color='gray'),
+                    opacity=0.5,
+                    showlegend=False
+                )
+            )
+
+    return fig
+
+
+def create_density_map(query_locations, document_locations):
+    """Create a density heatmap of locations"""
+
+    all_locations = query_locations + document_locations
+
+    if len(all_locations) < 3:
+        return None
+
+    # Prepare data for density map
+    lats = [loc['latitude'] for loc in all_locations]
+    lons = [loc['longitude'] for loc in all_locations]
+    names = [loc['name'] for loc in all_locations]
+
+    # Create density heatmap
+    fig = go.Figure(go.Densitymapbox(
+        lat=lats,
+        lon=lons,
+        z=[1] * len(lats),  # Uniform weight
+        radius=20,
+        colorscale='Viridis',
+        opacity=0.6
+    ))
+
+    fig.update_layout(
+        mapbox_style="stamen-terrain",
+        mapbox_center={"lat": np.mean(lats), "lon": np.mean(lons)},
+        mapbox_zoom=1,
+        height=500,
+        margin={"r": 0, "t": 0, "l": 0, "b": 0},
+        title="Location Density Heatmap"
+    )
+
+    # Add markers on top
+    fig.add_trace(go.Scattermapbox(
+        lat=lats,
+        lon=lons,
+        mode='markers',
+        marker=dict(size=8, color='red'),
+        text=names,
+        hoverinfo='text'
+    ))
+
+    return fig
+
+
+def search_documents(query, databases, model, top_k=10):
+    """Search for relevant documents"""
+
+    all_results = []
+
+    for db_name, db_data in databases.items():
+        index = db_data['index']
+        documents = db_data['documents']
+        metadatas = db_data['metadatas']
+
+        try:
+            query_embedding = model.encode([query]).astype('float32')
+            k = min(top_k, len(documents))
+
+            if k > 0:
+                distances, indices = index.search(query_embedding, k)
+
+                for idx, distance in zip(indices[0], distances[0]):
+                    if idx < len(documents):
+                        similarity = 1 / (1 + distance)
+                        all_results.append({
+                            'database': db_name,
+                            'document': documents[idx],
+                            'metadata': metadatas[idx] if idx < len(metadatas) else {},
+                            'similarity': similarity,
+                            'index': idx
+                        })
+
+        except Exception as e:
+            st.warning(f"Search error in {db_name}: {e}")
+
+    # Sort by similarity
+    all_results.sort(key=lambda x: x['similarity'], reverse=True)
+    return all_results[:top_k]
+
+
+def generate_response_with_locations(query, results, query_locations):
+    """Generate AI response with location information"""
+
+    response = f"## 🧭 Analysis of: '{query}'\n\n"
+
+    # Location summary
+    if query_locations:
+        response += "### 🌍 Locations Identified in Query:\n"
+        for loc in query_locations[:5]:
+            confidence_emoji = "🟢" if loc.get('confidence') == 'high' else "🟡" if loc.get(
+                'confidence') == 'medium' else "🔴"
+            response += f"{confidence_emoji} **{loc['name']}**: "
+            if 'address' in loc:
+                response += f"{loc['address']}\n"
+            else:
+                response += f"Lat: {loc['latitude']:.2f}°, Lon: {loc['longitude']:.2f}°\n"
+        response += "\n"
+
+    # Document summary
+    if results:
+        response += f"### 📚 Found {len(results)} relevant documents:\n\n"
+
+        # Group by relevance
+        high_relevance = [r for r in results if r['similarity'] > 0.7]
+        medium_relevance = [r for r in results if 0.4 <= r['similarity'] <= 0.7]
+
+        if high_relevance:
+            response += "#### 🔥 High Relevance:\n"
+            for i, result in enumerate(high_relevance[:3], 1):
+                title = result['metadata'].get('title', f'Document {result["index"]}')
+                response += f"{i}. **{title[:70]}**\n"
+                response += f"   📊 Confidence: {result['similarity']:.1%} | 📍 Source: {result['database']}\n\n"
+
+        if medium_relevance:
+            response += "#### ⚡ Medium Relevance:\n"
+            for i, result in enumerate(medium_relevance[:3], 1):
+                title = result['metadata'].get('title', f'Document {result["index"]}')
+                response += f"{i}. **{title[:70]}**\n"
+                response += f"   📊 Confidence: {result['similarity']:.1%} | 📍 Source: {result['database']}\n\n"
+
+    # Historical context based on query
+    response += "### 🏮 Historical Context:\n"
+
+    query_lower = query.lower()
+
+    if any(word in query_lower for word in ['zheng he', 'treasure fleet', 'ming fleet']):
+        response += """
+        **Zheng He (1371–1433)** was a Chinese mariner, explorer, diplomat, and fleet admiral during the Ming dynasty.
+        Between 1405 and 1433, he commanded seven treasure voyages that visited Southeast Asia, South Asia, 
+        Western Asia, and East Africa. His largest ships (baochuan) were estimated to be 400 feet long.
+        """
+
+    if any(word in query_lower for word in ['1421', 'menzies', 'gavin']):
+        response += """
+        **The 1421 hypothesis**, proposed by retired British submarine commander Gavin Menzies, suggests that 
+        Chinese fleets under Admiral Zheng He visited the Americas before Christopher Columbus in 1492. 
+        The theory points to various pieces of evidence including maps, artifacts, and DNA studies, 
+        though it remains controversial among mainstream historians.
+        """
+
+    if any(word in query_lower for word in ['america', 'new world', 'columbus']):
+        response += """
+        **Trans-Pacific contact theories** suggest various pre-Columbian contacts between Asia and the Americas.
+        While mainstream archaeology accepts Norse contact around 1000 AD, Chinese contact remains debated.
+        Potential evidence includes: Chinese artifacts in America, shared plant species, and alleged Chinese maps.
+        """
+
+    # Analysis insights
+    response += "\n### 🔍 Key Insights:\n"
+
+    if query_locations:
+        response += "1. **Geographical Focus**: Your question focuses on "
+        response += f"{', '.join([loc['name'] for loc in query_locations[:3]])}"
+        if len(query_locations) > 3:
+            response += f" and {len(query_locations) - 3} other locations"
+        response += "\n"
+
+    if results:
+        source_types = Counter([r['metadata'].get('source_type', 'Unknown') for r in results])
+        if source_types:
+            response += f"2. **Source Diversity**: Found {len(source_types)} different source types: "
+            response += ', '.join([f"{k} ({v})" for k, v in source_types.most_common(3)])
+            response += "\n"
+
+    response += "3. **Further Research**: Consider examining Ming dynasty records, archaeological reports, "
+    response += "and comparative analysis with European exploration timelines.\n"
+
+    return response
+
+
+def main():
+    """Main Streamlit app"""
+
+    # Custom CSS
+    st.markdown("""
+    <style>
+    .main-header {
+        font-size: 2.8rem;
+        color: #1E3A8A;
+        text-align: center;
+        margin-bottom: 1rem;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+    .location-badge {
+        display: inline-block;
+        background: #e0f2fe;
+        color: #0369a1;
+        padding: 4px 12px;
+        margin: 4px;
+        border-radius: 20px;
+        font-size: 0.9em;
+        border: 1px solid #bae6fd;
+    }
+    .location-badge.query {
+        background: #fee2e2;
+        color: #991b1b;
+        border-color: #fecaca;
+    }
+    .map-container {
+        border: 2px solid #e5e7eb;
+        border-radius: 10px;
+        padding: 10px;
+        background: white;
+        margin: 10px 0;
+    }
+    .stButton button {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        padding: 12px 24px;
+        font-weight: bold;
+        transition: transform 0.2s;
+    }
+    .stButton button:hover {
+        transform: translateY(-2px);
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # Header
+    st.markdown('<h1 class="main-header">🗺️ 1421 Geographical Research AI</h1>', unsafe_allow_html=True)
+    st.markdown("### Ask questions about voyages, locations, and discoveries. Get answers with interactive maps!")
+
+    # Load resources
+    with st.spinner("🌐 Loading AI model and databases..."):
+        databases = load_vector_databases()
+        model = load_model()
+
+    # Sidebar
+    with st.sidebar:
+        st.header("🗄️ Research Databases")
+
+        if not databases:
+            st.error("No vector databases found!")
+            st.info("""
+            To create vector databases:
+            1. Run: python create_vector_dbs.py
+            2. Place files in: vector_databases/
+            """)
+
+            # Test mode option
+            if st.checkbox("Enable Test Mode", value=True):
+                st.session_state['test_mode'] = True
+                st.success("✅ Test mode enabled - using sample data")
+        else:
+            st.success(f"✅ Loaded {len(databases)} database(s)")
+            for db_name in databases.keys():
+                doc_count = len(databases[db_name]['documents'])
+                st.info(f"📁 {db_name} ({doc_count:,} documents)")
+
+        st.divider()
+
+        st.header("⚙️ Search Settings")
+        top_k = st.slider("Results to show:", 5, 50, 15)
+        min_confidence = st.slider("Min confidence:", 0.0, 1.0, 0.3, 0.05)
+
+        st.divider()
+
+        st.header("📍 Example Questions")
+
+        examples = {
+            "Zheng He's Voyages": "Where did Zheng He's treasure fleet sail to in 1421?",
+            "American Discovery": "What evidence suggests Chinese reached America before Columbus? Show me the locations.",
+            "Ancient Trade Ports": "Which ancient ports did Chinese explorers visit in Southeast Asia?",
+            "Pacific Crossing": "Could Chinese ships have crossed the Pacific Ocean? Map the possible route.",
+            "Ming Dynasty Maps": "What American locations are shown on ancient Chinese maps?",
+            "Archaeological Sites": "Where are potential Chinese artifacts found in the Americas?"
+        }
+
+        selected_example = st.selectbox(
+            "Choose an example:",
+            ["Select an example..."] + list(examples.keys())
+        )
+
+        if selected_example != "Select an example...":
+            st.session_state['query_text'] = examples[selected_example]
+            if st.button("Use This Example", use_container_width=True):
+                st.rerun()
+
+        st.divider()
+
+        if st.button("🔄 Clear & Refresh", type="secondary", use_container_width=True):
+            for key in ['query_locations', 'document_locations', 'results', 'current_query']:
+                if key in st.session_state:
+                    del st.session_state[key]
+            st.cache_resource.clear()
+            st.rerun()
+
+    # Main interface
+    st.header("🔍 Ask a Geographical Question")
+
+    # Query input
+    query = st.text_area(
+        "Enter your question about locations, voyages, or discoveries:",
+        value=st.session_state.get('query_text', ''),
+        height=120,
+        placeholder="e.g., What ancient locations did Gavin Menzies claim Chinese sailors discovered in America? Show me on a map.",
+        key="query_input"
+    )
+
+    col1, col2, col3 = st.columns([2, 1, 1])
+    with col2:
+        search_clicked = st.button("🔍 Search Documents", use_container_width=True)
+    with col3:
+        map_clicked = st.button("🗺️ Generate Map", type="primary", use_container_width=True)
+
+    # Process query
+    if (search_clicked or map_clicked) and query:
+        with st.spinner("🔍 Searching documents and extracting locations..."):
+            # Extract locations from query
+            query_locations_raw = extract_locations_from_text(query)
+            query_locations = []
+
+            for loc_name in query_locations_raw[:15]:  # Limit to 15 locations
+                geo_info = get_coordinates_for_location(loc_name)
+                if geo_info:
+                    query_locations.append(geo_info)
+
+            # Search documents
+            if databases and model:
+                results = search_documents(query, databases, model, top_k=top_k)
+                results = [r for r in results if r['similarity'] >= min_confidence]
+            else:
+                # Fallback to test data
+                results = []
+                if st.session_state.get('test_mode', True):
+                    # Sample test data
+                    results = [
+                        {
+                            'database': 'test_db',
+                            'document': 'Zheng He sailed from China to Malacca, Sumatra, Java, Sri Lanka, India, and East Africa between 1405 and 1433. Some controversial theories suggest his fleet may have reached the Americas via the Pacific Ocean, possibly landing in California or Peru.',
+                            'metadata': {'title': 'Zheng He Voyages Overview', 'source_type': 'historical'},
+                            'similarity': 0.85,
+                            'index': 0
+                        },
+                        {
+                            'database': 'test_db',
+                            'document': 'Gavin Menzies in his book "1421: The Year China Discovered America" claims Chinese ships mapped the world including America, Australia, and Antarctica. He points to the Piri Reis map and Kangnido map as evidence.',
+                            'metadata': {'title': '1421 Hypothesis Summary', 'source_type': 'controversial'},
+                            'similarity': 0.78,
+                            'index': 1
+                        },
+                        {
+                            'database': 'test_db',
+                            'document': 'Archaeological finds in America such as the Bimini Road, Chinese anchors in California, and Asian chicken bones in Chile are cited as potential evidence of pre-Columbian Chinese contact.',
+                            'metadata': {'title': 'Archaeological Evidence', 'source_type': 'archaeological'},
+                            'similarity': 0.72,
+                            'index': 2
+                        }
+                    ]
+
+            # Extract locations from results
+            document_locations = []
+            for i, result in enumerate(results[:10]):
+                doc_locations_raw = extract_locations_from_text(result['document'])
+                for loc_name in doc_locations_raw[:8]:  # Top 8 locations per doc
+                    geo_info = get_coordinates_for_location(loc_name)
+                    if geo_info:
+                        geo_info['document_index'] = i
+                        geo_info['relevance'] = result['similarity']
+                        geo_info['document_title'] = result['metadata'].get('title', f'Document {i}')
+                        document_locations.append(geo_info)
+
+            # Remove duplicates (by coordinates)
+            unique_doc_locations = []
+            seen_coords = set()
+            for loc in document_locations:
+                coord_key = f"{loc['latitude']:.2f},{loc['longitude']:.2f}"
+                if coord_key not in seen_coords:
+                    seen_coords.add(coord_key)
+                    unique_doc_locations.append(loc)
+
+            # Store in session state
+            st.session_state['query_locations'] = query_locations
+            st.session_state['document_locations'] = unique_doc_locations
+            st.session_state['results'] = results
+            st.session_state['current_query'] = query
+
+    # Display results if available
+    if 'current_query' in st.session_state:
+        query = st.session_state['current_query']
+        query_locations = st.session_state.get('query_locations', [])
+        document_locations = st.session_state.get('document_locations', [])
+        results = st.session_state.get('results', [])
+
+        # Stats row
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Query Locations", len(query_locations))
+        with col2:
+            st.metric("Document Locations", len(document_locations))
+        with col3:
+            st.metric("Documents Found", len(results))
+        with col4:
+            if results:
+                avg_confidence = np.mean([r['similarity'] for r in results])
+                st.metric("Avg Confidence", f"{avg_confidence:.1%}")
+
+        # Generate response
+        response = generate_response_with_locations(query, results, query_locations)
+
+        # Show location badges
+        if query_locations or document_locations:
+            st.subheader("📍 Location Overview")
+
+            if query_locations:
+                st.markdown("**From your question:**")
+                cols = st.columns(6)
+                for i, loc in enumerate(query_locations[:12]):
+                    with cols[i % 6]:
+                        st.markdown(f'<span class="location-badge query">{loc["name"][:15]}</span>',
+                                    unsafe_allow_html=True)
+
+            if document_locations:
+                st.markdown("**From documents:**")
+                cols = st.columns(6)
+                for i, loc in enumerate(document_locations[:18]):
+                    with cols[i % 6]:
+                        st.markdown(f'<span class="location-badge">{loc["name"][:15]}</span>', unsafe_allow_html=True)
+
+        # Two-column layout for response and map
+        col_response, col_map = st.columns([1, 1])
+
+        with col_response:
+            st.markdown(response)
+
+            # Show detailed location information
+            with st.expander("📋 Detailed Location Data", expanded=False):
+                if query_locations:
+                    st.write("**Query Locations:**")
+                    query_df = pd.DataFrame([
+                        {
+                            'Name': loc['name'],
+                            'Latitude': loc['latitude'],
+                            'Longitude': loc['longitude'],
+                            'Confidence': loc.get('confidence', 'N/A')
+                        }
+                        for loc in query_locations
+                    ])
+                    st.dataframe(query_df, use_container_width=True)
+
+                if document_locations:
+                    st.write("**Document Locations:**")
+                    doc_df = pd.DataFrame([
+                        {
+                            'Name': loc['name'],
+                            'Latitude': loc['latitude'],
+                            'Longitude': loc['longitude'],
+                            'Relevance': f"{loc.get('relevance', 0):.1%}",
+                            'Source': loc.get('document_title', 'Unknown')
+                        }
+                        for loc in document_locations
+                    ])
+                    st.dataframe(doc_df, use_container_width=True)
+
+        with col_map:
+            st.header("🗺️ Interactive Map")
+
+            if query_locations or document_locations:
+                # Create and display map
+                fig = create_plotly_map(query_locations, document_locations, query)
+
+                if fig:
+                    st.markdown('<div class="map-container">', unsafe_allow_html=True)
+                    st.plotly_chart(fig, use_container_width=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+
+                    # Additional map views
+                    with st.expander("🌋 Additional Map Views", expanded=False):
+                        # Density map
+                        density_fig = create_density_map(query_locations, document_locations)
+                        if density_fig:
+                            st.plotly_chart(density_fig, use_container_width=True)
+
+                        # Simple scatter for mobile
+                        if query_locations or document_locations:
+                            simple_df = pd.DataFrame({
+                                'Location': [loc['name'] for loc in (query_locations + document_locations)],
+                                'Latitude': [loc['latitude'] for loc in (query_locations + document_locations)],
+                                'Longitude': [loc['longitude'] for loc in (query_locations + document_locations)],
+                                'Type': ['Query'] * len(query_locations) + ['Document'] * len(document_locations)
+                            })
+
+                            scatter_fig = px.scatter(
+                                simple_df,
+                                x='Longitude',
+                                y='Latitude',
+                                color='Type',
+                                hover_data=['Location'],
+                                title="Location Coordinates"
+                            )
+                            st.plotly_chart(scatter_fig, use_container_width=True)
+
+                    # Export options
+                    col_export1, col_export2 = st.columns(2)
+                    with col_export1:
+                        if st.button("📥 Export Map Data", use_container_width=True):
+                            map_data_export = {
+                                'query': query,
+                                'timestamp': datetime.now().isoformat(),
+                                'query_locations': query_locations,
+                                'document_locations': document_locations,
+                                'total_locations': len(query_locations) + len(document_locations)
+                            }
+
+                            json_str = json.dumps(map_data_export, indent=2)
+                            st.download_button(
+                                label="Download JSON",
+                                data=json_str,
+                                file_name=f"1421_map_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                                mime="application/json",
+                                use_container_width=True
+                            )
+
+                    with col_export2:
+                        if st.button("🗺️ Save Map Image", use_container_width=True):
+                            st.info("Right-click on the map and select 'Save image as...'")
+                else:
+                    st.warning("Could not create map with available location data.")
+            else:
+                st.info("No locations found to display on map. Try a different query.")
+
+        # Show source documents
+        st.divider()
+        st.header("📚 Source Documents")
+
+        if results:
+            tabs = st.tabs([f"Doc {i + 1}" for i in range(min(len(results), 8))])
+
+            for i, (tab, result) in enumerate(zip(tabs, results[:8])):
+                with tab:
+                    # Header
+                    col_title, col_score = st.columns([3, 1])
+                    with col_title:
+                        title = result['metadata'].get('title', f'Document {result["index"]}')
+                        st.subheader(f"{title}")
+                    with col_score:
+                        st.metric("Confidence", f"{result['similarity']:.1%}")
+
+                    # Metadata
+                    cols = st.columns(4)
+                    with cols[0]:
+                        st.caption(f"**Source:** {result['metadata'].get('source_type', 'Unknown')}")
+                    with cols[1]:
+                        st.caption(f"**Database:** {result['database']}")
+                    with cols[2]:
+                        if 'author' in result['metadata']:
+                            st.caption(f"**Author:** {result['metadata']['author'][:30]}")
+
+                    # Extract and show locations
+                    doc_text = result['document']
+                    locations_in_doc = extract_locations_from_text(doc_text)
+
+                    if locations_in_doc:
+                        st.markdown("**📍 Locations mentioned in this document:**")
+                        location_cols = st.columns(4)
+                        for j, loc in enumerate(locations_in_doc[:12]):
+                            with location_cols[j % 4]:
+                                st.info(loc)
+
+                    # Document content with highlighting
+                    st.markdown("**📄 Content:**")
+
+                    # Simple text display with truncation
+                    display_text = doc_text[:1500] + ("..." if len(doc_text) > 1500 else "")
+                    st.text_area(
+                        "Document Text",
+                        value=display_text,
+                        height=200,
+                        disabled=True,
+                        label_visibility="collapsed"
+                    )
+
+                    # Show location coordinates if available
+                    doc_locations_coords = []
+                    for loc_name in locations_in_doc[:5]:
+                        geo_info = get_coordinates_for_location(loc_name)
+                        if geo_info:
+                            doc_locations_coords.append(geo_info)
+
+                    if doc_locations_coords:
+                        with st.expander("📌 Location Coordinates", expanded=False):
+                            for loc in doc_locations_coords:
+                                st.write(f"**{loc['name']}**: {loc['latitude']:.4f}, {loc['longitude']:.4f}")
+        else:
+            st.warning("No documents found matching your query.")
+
+    # Instructions if no query yet
+    else:
+        st.info("💡 **Try these example questions:**")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("""
+            **🌊 Voyage & Exploration:**
+            - "Show me Zheng He's voyage routes from China to Africa"
+            - "Where did Chinese explorers sail in the 15th century?"
+            - "Map the treasure fleet's journey to India and Arabia"
+            - "What ports did Ming dynasty ships visit in Southeast Asia?"
+            """)
+
+        with col2:
+            st.markdown("""
+            **🗺️ American Discoveries:**
+            - "What locations does Gavin Menzies claim Chinese discovered in America?"
+            - "Show me alleged Chinese archaeological sites in California"
+            - "Where are Ming dynasty artifacts supposedly found in South America?"
+            - "Map the possible Chinese route across the Pacific"
+            """)
+
+        # Quick database stats
+        if databases:
+            total_docs = sum(len(db['documents']) for db in databases.values())
+            st.success(f"✅ Ready to search {total_docs:,} documents across {len(databases)} databases")
+
+
+# Run the app
+if __name__ == "__main__":
+    main()
