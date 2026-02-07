@@ -499,10 +499,24 @@ async def health_check():
         "vector_docs": len(backend.documents) if backend.documents else 0
     }
 
+
+# In your current backend, find the get_stats() endpoint and update it:
 @app.get("/stats")
 async def get_stats():
-    """Get system statistics"""
-    return backend.get_database_stats()
+    """Get system statistics - FIXED VERSION"""
+    stats_data = backend.get_database_stats()
+
+    # Ensure all metrics are simple numbers
+    return {
+        'total_documents': stats_data.get('total_documents', 0),
+        'documents_by_source': stats_data.get('documents_by_source', {}),
+        'total_entities': stats_data.get('total_entities', 0),
+        'entities_by_type': stats_data.get('entities_by_type', {}),
+        'total_timeline_events': stats_data.get('total_timeline_events', 0),
+        'total_voyage_routes': stats_data.get('total_voyage_routes', 0),
+        'geocoded_locations': stats_data.get('geocoded_locations', 0),
+        'vector_documents': stats_data.get('vector_documents', 0)
+    }
 
 @app.post("/search")
 async def semantic_search(request: SearchRequest):
@@ -514,15 +528,91 @@ async def semantic_search(request: SearchRequest):
     )
     return {"query": request.query, "results": results, "count": len(results)}
 
+
+# In your backend (2_backend_api.py), update the ask endpoint:
+
 @app.post("/ask")
 async def ask_question(request: QuestionRequest):
-    """Ask question via RAG"""
-    response = backend.rag_query(
-        query=request.question,
-        include_sources=request.include_sources,
-        use_openai=True  # Always use OpenAI for better answers
-    )
-    return response
+    """Fast AI question answering"""
+    try:
+        # 1. Quick semantic search (reduced from 5 to 3 results)
+        search_results = backend.semantic_search(
+            query=request.question,
+            k=3  # Reduced for speed
+        )
+
+        if not search_results:
+            return {
+                "answer": "I couldn't find relevant information in the historical database. Try rephrasing your question.",
+                "sources": [],
+                "confidence": 0.0
+            }
+
+        # 2. Prepare minimal context
+        context_parts = []
+        for result in search_results[:2]:  # Only use top 2 for speed
+            doc_details = backend.get_document_details(result['document_id'])
+            if doc_details:
+                context_parts.append(
+                    f"[Source: {doc_details['title']}]\n"
+                    f"{doc_details['content'][:500]}"  # Reduced from 1000 chars
+                )
+
+        context = "\n\n".join(context_parts)
+
+        # 3. Fast OpenAI call with reduced tokens
+        try:
+            response = client.chat.completions.create(
+                model="gpt-3.5-turbo",  # Faster than GPT-4
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a historian. Answer concisely based only on the context."
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Context:\n{context}\n\nQuestion: {request.question}\n\nAnswer:"
+                    }
+                ],
+                max_tokens=300,  # Reduced from 500
+                temperature=0.7
+            )
+
+            answer = response.choices[0].message.content
+
+        except Exception as e:
+            print(f"OpenAI error: {e}")
+            # Fallback to simple answer
+            answer = f"Based on {len(search_results)} historical documents about '{request.question}':\n"
+            answer += f"The most relevant document is '{search_results[0]['title']}'."
+
+        # 4. Prepare sources
+        sources = []
+        if request.include_sources:
+            for result in search_results[:2]:  # Only top 2 sources
+                doc_details = backend.get_document_details(result['document_id'])
+                if doc_details:
+                    sources.append({
+                        'id': result['document_id'],
+                        'title': doc_details['title'],
+                        'author': doc_details['author'],
+                        'source_type': doc_details['source_type'],
+                        'url': doc_details.get('url')
+                    })
+
+        return {
+            "answer": answer,
+            "sources": sources,
+            "confidence": min(0.95, 0.5 + (len(search_results) / 5))
+        }
+
+    except Exception as e:
+        print(f"Error in ask endpoint: {e}")
+        return {
+            "answer": "I'm having trouble accessing the historical database right now. Please try again in a moment.",
+            "sources": [],
+            "confidence": 0.0
+        }
 
 @app.get("/entities")
 async def get_entities(entity_type: Optional[str] = None, limit: int = 50):
