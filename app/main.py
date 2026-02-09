@@ -1,6 +1,6 @@
 """
-1421 Historical Research System - Final Version
-With popup notifications, better UI, and example questions
+1421 Historical Research System - Final Working Version
+Simplified for Streamlit Cloud Compatibility
 """
 
 import streamlit as st
@@ -16,6 +16,8 @@ from datetime import datetime
 import time
 import threading
 import random
+import sys
+import os
 
 # ========== PAGE CONFIG ==========
 st.set_page_config(
@@ -25,13 +27,12 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ========== ENHANCED CSS STYLING ==========
+# ========== CSS STYLING ==========
 st.markdown("""
 <style>
 /* Main styling */
 .stApp {
     background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-    background-attachment: fixed;
 }
 
 .main .block-container {
@@ -49,7 +50,6 @@ st.markdown("""
     text-align: center;
     margin-bottom: 2rem;
     font-weight: 800;
-    text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
     background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -63,17 +63,10 @@ section[data-testid="stSidebar"] > div {
     padding-top: 2rem !important;
 }
 
-/* Sidebar navigation - BIGGER TEXT, CLICKABLE */
-.sidebar-nav {
-    display: flex;
-    flex-direction: column;
-    gap: 0.8rem;
-    margin-top: 1.5rem;
-}
-
-.nav-item {
+/* Navigation links */
+.nav-link {
+    display: block;
     background: transparent;
-    border: none;
     color: white !important;
     font-size: 1.3rem !important;
     font-weight: 600 !important;
@@ -82,16 +75,18 @@ section[data-testid="stSidebar"] > div {
     border-radius: 8px;
     transition: all 0.3s ease;
     cursor: pointer;
+    margin: 5px 0;
+    border: none;
     width: 100%;
 }
 
-.nav-item:hover {
+.nav-link:hover {
     background: rgba(212, 175, 55, 0.2) !important;
     transform: translateX(5px);
     border-left: 3px solid #d4af37 !important;
 }
 
-.nav-item.active {
+.nav-link.active {
     background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%) !important;
     color: #000000 !important;
     font-weight: 700 !important;
@@ -108,7 +103,7 @@ section[data-testid="stSidebar"] > div {
     border-radius: 12px;
     box-shadow: 0 8px 25px rgba(0,0,0,0.3);
     z-index: 1000;
-    animation: slideInRight 0.5s ease, fadeOut 0.5s ease 4.5s forwards;
+    animation: slideInRight 0.5s ease;
     border-left: 5px solid #ffffff;
     max-width: 400px;
 }
@@ -123,36 +118,15 @@ section[data-testid="stSidebar"] > div {
     to { opacity: 0; transform: translateY(-20px); }
 }
 
-.close-popup {
-    position: absolute;
-    top: 8px;
-    right: 12px;
-    background: rgba(255,255,255,0.3);
-    border: none;
-    color: white;
-    font-size: 16px;
-    cursor: pointer;
-    border-radius: 50%;
-    width: 24px;
-    height: 24px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.close-popup:hover {
-    background: rgba(255,255,255,0.5);
-}
-
 /* Question examples */
-.example-questions {
+.example-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
     gap: 15px;
     margin: 25px 0;
 }
 
-.example-question {
+.example-btn {
     background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
     border: 2px solid #d4af37;
     border-radius: 12px;
@@ -163,9 +137,11 @@ section[data-testid="stSidebar"] > div {
     font-size: 1.1rem;
     font-weight: 500;
     color: #333;
+    border: none;
+    width: 100%;
 }
 
-.example-question:hover {
+.example-btn:hover {
     background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%);
     color: white;
     transform: translateY(-3px);
@@ -182,12 +158,6 @@ section[data-testid="stSidebar"] > div {
     box-shadow: 0 4px 12px rgba(0,0,0,0.08);
 }
 
-.answer-text {
-    font-size: 1.2rem;
-    line-height: 1.8;
-    color: #333;
-}
-
 /* Metrics */
 [data-testid="stMetricValue"] {
     font-size: 2rem !important;
@@ -199,19 +169,6 @@ section[data-testid="stSidebar"] > div {
     font-weight: 600 !important;
     font-size: 1rem !important;
     color: #d4af37 !important;
-}
-
-/* Search box */
-.stTextArea textarea {
-    border: 3px solid #d4af37 !important;
-    border-radius: 12px !important;
-    font-size: 1.1rem !important;
-    padding: 15px !important;
-}
-
-.stTextArea textarea:focus {
-    border-color: #b8860b !important;
-    box-shadow: 0 0 0 3px rgba(184, 134, 11, 0.2) !important;
 }
 
 /* Buttons */
@@ -241,75 +198,28 @@ section[data-testid="stSidebar"] > div {
     border-bottom: 3px solid #d4af37;
     padding-bottom: 0.5rem;
 }
-
-/* Quick stats in dashboard */
-.quick-stats {
-    background: linear-gradient(135deg, #2c3e50 0%, #1a252f 100%);
-    border-radius: 15px;
-    padding: 20px;
-    color: white;
-    margin: 20px 0;
-}
-
-/* Responsive */
-@media (max-width: 768px) {
-    .main-header {
-        font-size: 2.2rem;
-    }
-    
-    .section-header {
-        font-size: 1.8rem !important;
-    }
-    
-    .nav-item {
-        font-size: 1.1rem !important;
-    }
-}
 </style>
 
 <script>
-// JavaScript for popup and example questions
-document.addEventListener('DOMContentLoaded', function() {
-    // Create popup if documents are loaded
-    setTimeout(function() {
-        const popup = document.getElementById('documentsLoadedPopup');
-        if (popup) {
-            popup.style.display = 'block';
-            
-            // Auto-remove after 5 seconds
-            setTimeout(function() {
-                popup.style.animation = 'fadeOut 0.5s ease forwards';
-                setTimeout(function() {
-                    if (popup.parentNode) {
-                        popup.parentNode.removeChild(popup);
-                    }
-                }, 500);
-            }, 5000);
-        }
-    }, 1000);
-    
-    // Handle example question clicks
-    const exampleQuestions = document.querySelectorAll('.example-question');
-    exampleQuestions.forEach(function(question) {
-        question.addEventListener('click', function() {
-            const questionText = this.getAttribute('data-question');
-            // Set the question in the textarea
-            const textarea = document.querySelector('textarea');
-            if (textarea) {
-                textarea.value = questionText;
-                // Trigger input event
-                textarea.dispatchEvent(new Event('input', { bubbles: true }));
+// Auto-close popup after 5 seconds
+setTimeout(function() {
+    var popup = document.getElementById('documentsLoadedPopup');
+    if (popup) {
+        popup.style.animation = 'fadeOut 0.5s ease forwards';
+        setTimeout(function() {
+            if (popup.parentNode) {
+                popup.parentNode.removeChild(popup);
             }
-        });
-    });
-});
+        }, 500);
+    }
+}, 5000);
 </script>
 """, unsafe_allow_html=True)
 
 # ========== THREAD-SAFE DATABASE CONNECTION ==========
 
 class ThreadSafeDatabase:
-    """Thread-safe SQLite database connection"""
+    """Thread-safe SQLite database connection for Streamlit"""
     
     def __init__(self, db_path):
         self.db_path = db_path
@@ -318,7 +228,7 @@ class ThreadSafeDatabase:
     def get_connection(self):
         """Get or create a thread-local database connection"""
         if not hasattr(self.local, 'conn'):
-            self.local.conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            self.local.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
             self.local.conn.row_factory = sqlite3.Row
         return self.local.conn
     
@@ -354,23 +264,26 @@ class ResearchSystem:
         try:
             # 1. Check if files exist
             if not self.db_path.exists():
-                print(f"❌ Database not found: {self.db_path}")
+                print(f"Database not found: {self.db_path}")
                 return False
             
             # 2. Initialize thread-safe database
             self.db = ThreadSafeDatabase(str(self.db_path))
-            print(f"✅ Database initialized: {self.db_path}")
+            print(f"Database initialized: {self.db_path}")
             
-            # 3. Load documents for cache
+            # 3. Test connection
+            cursor = self.db.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table';")
+            tables = cursor.fetchall()
+            print(f"Found {len(tables)} tables")
+            
+            # 4. Load documents for cache
             self.documents_cache = self.get_all_documents(limit=1000)
-            print(f"✅ Documents cached: {len(self.documents_cache)} documents")
+            print(f"Documents cached: {len(self.documents_cache)} documents")
             
             return True
             
         except Exception as e:
-            print(f"❌ Initialization error: {str(e)}")
-            import traceback
-            print(traceback.format_exc())
+            print(f"Initialization error: {str(e)}")
             return False
     
     def get_database_stats(self):
@@ -532,10 +445,10 @@ class ResearchSystem:
         
         return {'locations': locations, 'total': len(locations)}
     
-    def generate_ai_answer(self, question, context_documents):
-        """Generate an AI-style answer based on documents"""
+    def generate_answer(self, question, context_documents):
+        """Generate an answer based on documents"""
         if not context_documents:
-            return "I couldn't find specific information about that in the historical database."
+            return "I couldn't find specific information about that in the historical database. Try rephrasing your question or checking the example questions."
         
         # Combine document information
         document_summaries = []
@@ -572,10 +485,9 @@ def init_system():
 # ========== POPUP NOTIFICATION ==========
 
 def show_popup_notification(message):
-    """Show a popup notification that auto-closes"""
+    """Show a popup notification"""
     st.markdown(f"""
     <div id="documentsLoadedPopup" class="popup-notification">
-        <button class="close-popup" onclick="this.parentElement.style.display='none'">×</button>
         <div style="font-size: 18px; font-weight: 600;">{message}</div>
     </div>
     """, unsafe_allow_html=True)
@@ -613,7 +525,7 @@ def show_dashboard(system):
     with col1:
         query = st.text_input("Search the database:", placeholder="Enter keywords, titles, or authors...", label_visibility="collapsed")
     with col2:
-        search_btn = st.button("Search", use_container_width=True, type="primary")
+        search_btn = st.button("Search", type="primary", use_container_width=True)
     
     if search_btn and query:
         with st.spinner("Searching historical documents..."):
@@ -635,16 +547,15 @@ def show_dashboard(system):
                 st.info("No documents found. Try different keywords.")
 
 def show_ask_question(system):
-    """Ask Question page - NOW BELOW DASHBOARD"""
+    """Ask Question section"""
     st.markdown('<h2 class="section-header">🤔 Ask Historical Questions</h2>', unsafe_allow_html=True)
     
     st.write("""
     Ask questions about Chinese exploration, Zheng He's voyages, Ming Dynasty history, 
-    or any topic related to the 1421 theory. The system will search through historical 
-    documents to provide research-based answers.
+    or any topic related to the 1421 theory.
     """)
     
-    # Example questions grid
+    # Example questions
     st.subheader("💡 Try These Questions:")
     
     example_questions = [
@@ -667,8 +578,7 @@ def show_ask_question(system):
             if st.button(
                 f"❓ {question}",
                 key=f"example_{idx}",
-                use_container_width=True,
-                help="Click to auto-fill this question"
+                use_container_width=True
             ):
                 st.session_state.current_question = question
                 st.session_state.auto_submit = True
@@ -679,7 +589,7 @@ def show_ask_question(system):
     # Question input
     st.subheader("📝 Your Question")
     
-    # Initialize session state for question
+    # Initialize session state
     if 'current_question' not in st.session_state:
         st.session_state.current_question = ""
     if 'auto_submit' not in st.session_state:
@@ -697,7 +607,7 @@ def show_ask_question(system):
     with col1:
         ask_btn = st.button("🔍 Research & Answer", type="primary", use_container_width=True)
     
-    # Handle auto-submit from example questions
+    # Handle auto-submit
     if st.session_state.auto_submit:
         ask_btn = True
         question = st.session_state.current_question
@@ -710,19 +620,17 @@ def show_ask_question(system):
             results = system.search_documents(question, limit=10)
             
             if results:
-                # Generate AI-style answer
-                answer = system.generate_ai_answer(question, results)
+                # Generate answer
+                answer = system.generate_answer(question, results)
                 
                 # Display answer
                 st.markdown("""
                 <div class="answer-container">
-                    <div class="answer-text">
                 """, unsafe_allow_html=True)
                 
                 st.markdown(f"**Answer:** {answer}")
                 
                 st.markdown("""
-                    </div>
                 </div>
                 """, unsafe_allow_html=True)
                 
@@ -745,17 +653,6 @@ def show_ask_question(system):
                         
                         if i < len(results[:5]) - 1:
                             st.divider()
-                
-                # Save to session state
-                if 'question_history' not in st.session_state:
-                    st.session_state.question_history = []
-                
-                st.session_state.question_history.append({
-                    'question': question,
-                    'answer': answer,
-                    'sources_count': len(results),
-                    'timestamp': datetime.now().strftime("%H:%M")
-                })
                 
             else:
                 st.warning("""
@@ -884,16 +781,6 @@ def show_map_page(system):
                 hovertemplate='<b>%{text}</b><br>Mentions: %{marker.size}<extra></extra>'
             ))
             
-            # Add voyage routes (simulated)
-            if len(lats) > 2:
-                fig.add_trace(go.Scattergeo(
-                    lon=lons[:5],
-                    lat=lats[:5],
-                    mode='lines',
-                    line=dict(width=2, color='#d4af37', dash='dash'),
-                    name='Possible Voyage Route'
-                ))
-            
             fig.update_layout(
                 title="Chinese Exploration Voyage Map",
                 geo=dict(
@@ -975,17 +862,6 @@ def show_settings_page(system):
                     st.error(f"Database error: {str(e)}")
             else:
                 st.error("Database not initialized")
-    
-    # Question history
-    if 'question_history' in st.session_state and st.session_state.question_history:
-        st.divider()
-        st.subheader("Recent Questions")
-        
-        for qa in st.session_state.question_history[-5:]:
-            with st.expander(f"{qa['timestamp']} - {qa['question'][:50]}..."):
-                st.write(f"**Question:** {qa['question']}")
-                st.write(f"**Answer:** {qa['answer'][:200]}...")
-                st.write(f"**Sources found:** {qa['sources_count']}")
 
 # ========== CUSTOM SIDEBAR ==========
 
@@ -1000,9 +876,7 @@ def render_sidebar():
         </div>
         """, unsafe_allow_html=True)
         
-        # Custom navigation using buttons
-        st.markdown('<div class="sidebar-nav">', unsafe_allow_html=True)
-        
+        # Navigation
         pages = [
             ("📊 Dashboard", "dashboard"),
             ("📄 Research Documents", "documents"),
@@ -1013,9 +887,6 @@ def render_sidebar():
         current_page = st.session_state.get('current_page', 'dashboard')
         
         for label, page_id in pages:
-            is_active = current_page == page_id
-            button_class = "nav-item active" if is_active else "nav-item"
-            
             if st.button(
                 label,
                 key=f"nav_{page_id}",
@@ -1024,11 +895,9 @@ def render_sidebar():
                 st.session_state.current_page = page_id
                 st.rerun()
         
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        # Quick stats
         st.divider()
         
+        # Quick stats
         if 'system_stats' in st.session_state:
             stats = st.session_state.system_stats
             st.markdown("""
@@ -1080,17 +949,6 @@ def main():
         if db_path.exists():
             file_size = db_path.stat().st_size / (1024*1024)
             st.write(f"- File size: `{file_size:.2f} MB`")
-            
-            # Try to open database
-            try:
-                test_conn = sqlite3.connect(str(db_path))
-                cursor = test_conn.cursor()
-                cursor.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")
-                table_count = cursor.fetchone()[0]
-                test_conn.close()
-                st.write(f"- Tables in database: `{table_count}`")
-            except Exception as e:
-                st.write(f"- Database error: `{str(e)}`")
         
         st.stop()
     
@@ -1099,9 +957,9 @@ def main():
     if stats:
         st.session_state.system_stats = stats
         
-        # Show status in main area (not popup)
+        # Show status
         if stats['total_documents'] > 0:
-            st.success(f"✅ **System Status:** {stats['total_documents']} historical documents loaded and ready for research")
+            show_popup_notification(f"✅ System Ready: {stats['total_documents']} documents loaded")
     
     # Render sidebar
     render_sidebar()
@@ -1113,11 +971,10 @@ def main():
     # Main content area
     current_page = st.session_state.get('current_page', 'dashboard')
     
-    # Always show Dashboard first
+    # Show selected page
     if current_page == "dashboard":
         show_dashboard(system)
         st.divider()
-        # Ask Questions section is now part of Dashboard
         show_ask_question(system)
     elif current_page == "documents":
         show_documents_page(system)
