@@ -1,6 +1,6 @@
 """
-1421 Research System - Unified Version for Streamlit Cloud
-No FastAPI backend needed - everything runs in Streamlit
+1421 Historical Research System - Main Application
+FIXED VERSION: Thread-safe SQLite for Streamlit Cloud
 """
 
 import streamlit as st
@@ -13,17 +13,15 @@ import json
 import re
 from pathlib import Path
 from sentence_transformers import SentenceTransformer
-from typing import List, Dict, Any, Optional
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
+from datetime import datetime
 import time
-import pytz
-from collections import Counter
 import sys
 import os
+import threading
 
-# Set page config FIRST
+# ========== PAGE CONFIG ==========
 st.set_page_config(
     page_title="1421 Historical Research System",
     page_icon="🗺️",
@@ -34,48 +32,155 @@ st.set_page_config(
 # ========== CSS STYLING ==========
 st.markdown("""
 <style>
-/* Your CSS styling here */
+/* Main styling */
+.stApp {
+    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+}
+
+.main .block-container {
+    background-color: rgba(255, 255, 255, 0.95);
+    border-radius: 10px;
+    padding: 2rem;
+    margin-top: 1rem;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+/* Headers */
+.main-header {
+    font-size: 2.5rem;
+    color: #000000;
+    text-align: center;
+    margin-bottom: 1.5rem;
+    font-weight: 700;
+}
+
+/* Sidebar */
+section[data-testid="stSidebar"] > div {
+    background: linear-gradient(135deg, #2c3e50 0%, #1a252f 100%) !important;
+    border-right: 3px solid #d4af37;
+    padding-top: 1rem !important;
+}
+
+section[data-testid="stSidebar"] .stButton > button {
+    background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%) !important;
+    color: #000000 !important;
+    border: 2px solid #ffffff !important;
+    border-radius: 6px;
+    font-weight: 600 !important;
+    margin: 3px 0 !important;
+    padding: 0.4rem 0.8rem !important;
+    width: 100%;
+}
+
+/* Status badges */
+.status-badge {
+    display: inline-block;
+    padding: 10px 20px;
+    border-radius: 20px;
+    font-weight: 600;
+    font-size: 16px;
+    margin: 10px 0;
+    text-align: center;
+}
+
+.status-loaded {
+    background: #28a745;
+    color: white;
+}
+
+.status-error {
+    background: #dc3545;
+    color: white;
+}
+
+/* Answer container */
+.answer-container {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border-radius: 8px;
+    padding: 20px;
+    margin: 15px 0;
+    border-left: 4px solid #4a6491;
+}
+
+/* Metrics */
+[data-testid="stMetricValue"] {
+    font-size: 1.5rem !important;
+    font-weight: 700;
+}
+
+[data-testid="stMetricLabel"] {
+    font-weight: 600;
+    font-size: 0.9rem !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
-# ========== UNIFIED BACKEND CLASS ==========
+# ========== THREAD-SAFE DATABASE CONNECTION ==========
 
-class UnifiedResearchSystem:
-    """Combined backend that runs entirely within Streamlit"""
+class ThreadSafeDatabase:
+    """Thread-safe SQLite database connection"""
+    
+    def __init__(self, db_path):
+        self.db_path = db_path
+        self.local = threading.local()
+    
+    def get_connection(self):
+        """Get or create a thread-local database connection"""
+        if not hasattr(self.local, 'conn'):
+            self.local.conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            self.local.conn.row_factory = sqlite3.Row
+        return self.local.conn
+    
+    def execute(self, query, params=None):
+        """Execute a query and return cursor"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        if params:
+            cursor.execute(query, params)
+        else:
+            cursor.execute(query)
+        return cursor
+    
+    def close(self):
+        """Close all connections"""
+        if hasattr(self.local, 'conn'):
+            self.local.conn.close()
+            del self.local.conn
+
+# ========== UNIFIED RESEARCH SYSTEM ==========
+
+class ResearchSystem:
+    """Complete research system - thread-safe for Streamlit Cloud"""
     
     def __init__(self):
-        # Set paths for Streamlit Cloud
+        # Set paths
         self.base_dir = Path(__file__).parent.parent
-        self.data_dir = self.base_dir / "data"
-        
-        # Database path
-        self.db_path = self.data_dir / "knowledge_base.db"
-        self.vector_dir = self.data_dir / "vector_databases" / "main_index"
+        self.db_path = self.base_dir / "data" / "knowledge_base.db"
+        self.vector_dir = self.base_dir / "data" / "vector_databases" / "main_index"
         
         # Initialize components
-        self.conn = None
+        self.db = None
         self.index = None
         self.documents = []
         self.metadatas = []
         self.model = None
         
         # Load everything
-        self._initialize_system()
+        self._initialize()
     
-    def _initialize_system(self):
+    def _initialize(self):
         """Initialize all components"""
         try:
-            # 1. Connect to SQLite database
-            if self.db_path.exists():
-                self.conn = sqlite3.connect(str(self.db_path))
-                self.conn.row_factory = sqlite3.Row
-                st.session_state.db_loaded = True
-            else:
-                st.error(f"Database not found at: {self.db_path}")
-                st.session_state.db_loaded = False
-                return
+            # 1. Check if files exist
+            if not self.db_path.exists():
+                print(f"❌ Database not found: {self.db_path}")
+                return False
             
-            # 2. Load vector database
+            # 2. Initialize thread-safe database
+            self.db = ThreadSafeDatabase(str(self.db_path))
+            print(f"✅ Database initialized: {self.db_path}")
+            
+            # 3. Vector database
             index_file = self.vector_dir / "faiss_index.bin"
             metadata_file = self.vector_dir / "faiss_metadata.pkl"
             
@@ -85,181 +190,167 @@ class UnifiedResearchSystem:
                     metadata = pickle.load(f)
                     self.documents = metadata.get('documents', [])
                     self.metadatas = metadata.get('metadatas', [])
-                st.session_state.vector_loaded = True
+                print(f"✅ Vector database loaded: {len(self.documents)} documents")
             else:
-                st.warning(f"Vector database not found at: {self.vector_dir}")
-                st.session_state.vector_loaded = False
+                print(f"⚠️ Vector database not found: {self.vector_dir}")
             
-            # 3. Load embedding model (cache it)
+            # 4. Embedding model
             @st.cache_resource
-            def load_model():
+            def load_embedding_model():
                 return SentenceTransformer('all-MiniLM-L6-v2')
             
-            self.model = load_model()
+            self.model = load_embedding_model()
+            print("✅ Embedding model loaded")
             
-            st.session_state.system_initialized = True
+            return True
             
         except Exception as e:
-            st.error(f"Initialization error: {str(e)}")
-            st.session_state.system_initialized = False
+            print(f"❌ Initialization error: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
+            return False
     
     def get_database_stats(self):
-        """Get database statistics"""
-        if not self.conn:
+        """Get database statistics - THREAD-SAFE"""
+        if not self.db:
             return None
         
-        cursor = self.conn.cursor()
-        
-        cursor.execute("SELECT COUNT(*) FROM documents")
-        total_docs = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT source_type, COUNT(*) FROM documents GROUP BY source_type")
-        docs_by_source = dict(cursor.fetchall())
-        
-        cursor.execute("SELECT COUNT(*) FROM entities")
-        total_entities = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT entity_type, COUNT(*) FROM entities GROUP BY entity_type")
-        entities_by_type = dict(cursor.fetchall())
-        
-        return {
-            "total_documents": total_docs,
-            "documents_by_source": docs_by_source,
-            "total_entities": total_entities,
-            "entities_by_type": entities_by_type,
-            "vector_documents": len(self.documents) if self.documents else 0
-        }
+        try:
+            cursor = self.db.execute("SELECT COUNT(*) FROM documents")
+            total_docs = cursor.fetchone()[0]
+            
+            cursor = self.db.execute("SELECT source_type, COUNT(*) FROM documents GROUP BY source_type")
+            docs_by_source = dict(cursor.fetchall())
+            
+            cursor = self.db.execute("SELECT COUNT(*) FROM entities")
+            total_entities = cursor.fetchone()[0]
+            
+            cursor = self.db.execute("SELECT entity_type, COUNT(*) FROM entities GROUP BY entity_type")
+            entities_by_type = dict(cursor.fetchall())
+            
+            return {
+                "total_documents": total_docs,
+                "documents_by_source": docs_by_source,
+                "total_entities": total_entities,
+                "entities_by_type": entities_by_type,
+                "vector_documents": len(self.documents)
+            }
+        except Exception as e:
+            print(f"Error getting stats: {e}")
+            import traceback
+            print(traceback.format_exc())
+            return None
     
-    def get_all_documents(self, limit: int = 100, source_type: str = None):
-        """Get all documents from database"""
-        if not self.conn:
+    def get_all_documents(self, limit=100, source_type=None):
+        """Get all documents from database - THREAD-SAFE"""
+        if not self.db:
             return []
         
-        cursor = self.conn.cursor()
-        
-        if source_type and source_type != "All":
-            cursor.execute("""
-                SELECT * FROM documents 
-                WHERE source_type = ? 
-                ORDER BY id 
-                LIMIT ?
-            """, (source_type, limit))
-        else:
-            cursor.execute("""
-                SELECT * FROM documents 
-                ORDER BY id 
-                LIMIT ?
-            """, (limit,))
-        
-        rows = cursor.fetchall()
-        documents = [dict(row) for row in rows]
-        return documents
+        try:
+            if source_type and source_type != "All":
+                cursor = self.db.execute(
+                    "SELECT * FROM documents WHERE source_type = ? ORDER BY id LIMIT ?",
+                    (source_type, limit)
+                )
+            else:
+                cursor = self.db.execute(
+                    "SELECT * FROM documents ORDER BY id LIMIT ?",
+                    (limit,)
+                )
+            
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+        except Exception as e:
+            print(f"Error getting documents: {e}")
+            return []
     
-    def semantic_search(self, query: str, k: int = 10):
-        """Perform semantic search"""
+    def search_documents(self, query, limit=20):
+        """Search documents using SQL LIKE - THREAD-SAFE"""
+        if not self.db:
+            return []
+        
+        try:
+            search_pattern = f"%{query}%"
+            cursor = self.db.execute(
+                "SELECT * FROM documents WHERE title LIKE ? OR content LIKE ? OR author LIKE ? ORDER BY id LIMIT ?",
+                (search_pattern, search_pattern, search_pattern, limit)
+            )
+            
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+        except Exception as e:
+            print(f"Error searching documents: {e}")
+            return []
+    
+    def semantic_search(self, query, k=10):
+        """Semantic search using vector database"""
         if not self.index or not self.model:
             return []
         
         try:
-            # Encode query
-            query_embedding = self.model.encode(
-                [query], 
-                convert_to_numpy=True, 
-                normalize_embeddings=True
-            ).astype('float32')
-            
-            # Search
+            query_embedding = self.model.encode([query]).astype('float32')
             distances, indices = self.index.search(query_embedding, k)
             
             results = []
             for i, idx in enumerate(indices[0]):
                 if idx < len(self.metadatas):
                     doc_id = self.metadatas[idx]['id']
-                    doc_details = self.get_document_details(doc_id)
-                    
-                    if doc_details:
+                    doc = self.get_document_by_id(doc_id)
+                    if doc:
                         results.append({
                             'document_id': doc_id,
-                            'title': doc_details['title'],
-                            'author': doc_details['author'],
-                            'source_type': doc_details['source_type'],
-                            'url': doc_details.get('url', ''),
-                            'word_count': doc_details.get('word_count', 0),
-                            'snippet': doc_details.get('content', '')[:300] + "...",
-                            'similarity': float(1.0 / (1.0 + distances[0][i])),
-                            'distance': float(distances[0][i])
+                            'title': doc.get('title', 'Untitled'),
+                            'author': doc.get('author', 'Unknown'),
+                            'source_type': doc.get('source_type', 'Unknown'),
+                            'url': doc.get('url', ''),
+                            'word_count': doc.get('word_count', 0),
+                            'snippet': doc.get('content', '')[:300] + "...",
+                            'similarity': float(1.0 / (1.0 + distances[0][i]))
                         })
-            
             return results
-            
         except Exception as e:
-            st.error(f"Search error: {str(e)}")
+            print(f"Error in semantic search: {e}")
             return []
     
-    def get_document_details(self, doc_id: int):
-        """Get full document details"""
-        if not self.conn:
+    def get_document_by_id(self, doc_id):
+        """Get document by ID - THREAD-SAFE"""
+        if not self.db:
             return None
         
-        cursor = self.conn.cursor()
-        cursor.execute("SELECT * FROM documents WHERE id = ?", (doc_id,))
-        
-        row = cursor.fetchone()
-        if row:
-            return dict(row)
-        return None
+        try:
+            cursor = self.db.execute("SELECT * FROM documents WHERE id = ?", (doc_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        except:
+            return None
     
-    def search_documents_sql(self, search_term: str, limit: int = 50):
-        """Search documents using SQL LIKE (fallback)"""
-        if not self.conn:
+    def get_entities(self, entity_type=None, limit=50):
+        """Get entities from database - THREAD-SAFE"""
+        if not self.db:
             return []
         
-        cursor = self.conn.cursor()
-        search_pattern = f"%{search_term}%"
-        
-        cursor.execute("""
-            SELECT * FROM documents 
-            WHERE title LIKE ? OR content LIKE ? OR author LIKE ?
-            ORDER BY id 
-            LIMIT ?
-        """, (search_pattern, search_pattern, search_pattern, limit))
-        
-        rows = cursor.fetchall()
-        return [dict(row) for row in rows]
-    
-    def get_entities(self, entity_type: str = None, limit: int = 50):
-        """Get entities from database"""
-        if not self.conn:
+        try:
+            if entity_type:
+                cursor = self.db.execute(
+                    "SELECT entity_text, entity_type, COUNT(*) as count FROM entities WHERE entity_type = ? GROUP BY entity_text ORDER BY count DESC LIMIT ?",
+                    (entity_type, limit)
+                )
+            else:
+                cursor = self.db.execute(
+                    "SELECT entity_text, entity_type, COUNT(*) as count FROM entities GROUP BY entity_text, entity_type ORDER BY count DESC LIMIT ?",
+                    (limit,)
+                )
+            
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+        except:
             return []
-        
-        cursor = self.conn.cursor()
-        
-        if entity_type:
-            cursor.execute("""
-                SELECT entity_text, entity_type, COUNT(*) as count 
-                FROM entities 
-                WHERE entity_type = ? 
-                GROUP BY entity_text 
-                ORDER BY count DESC 
-                LIMIT ?
-            """, (entity_type, limit))
-        else:
-            cursor.execute("""
-                SELECT entity_text, entity_type, COUNT(*) as count 
-                FROM entities 
-                GROUP BY entity_text, entity_type 
-                ORDER BY count DESC 
-                LIMIT ?
-            """, (limit,))
-        
-        rows = cursor.fetchall()
-        return [dict(row) for row in rows]
     
     def get_map_locations(self):
-        """Get geographical locations"""
+        """Get geographical locations for map"""
         locations_data = self.get_entities(entity_type='LOCATION', limit=50)
         
-        # Mock coordinates for known locations
+        # Coordinates for known locations
         location_coords = {
             'China': (35.8617, 104.1954),
             'Beijing': (39.9042, 116.4074),
@@ -276,7 +367,10 @@ class UnifiedResearchSystem:
             'Indian Ocean': (-20, 80),
             'South China Sea': (12, 115),
             'Malacca': (2.1896, 102.2501),
-            'Calicut': (11.2588, 75.7804)
+            'Calicut': (11.2588, 75.7804),
+            'Hormuz': (27.1561, 56.2815),
+            'Mombasa': (-4.0435, 39.6682),
+            'Zanzibar': (-6.1659, 39.2026)
         }
         
         locations = []
@@ -297,16 +391,42 @@ class UnifiedResearchSystem:
 # ========== INITIALIZE SYSTEM ==========
 
 @st.cache_resource
-def initialize_system():
-    """Initialize the research system (cached)"""
-    system = UnifiedResearchSystem()
+def init_system():
+    """Initialize the research system"""
+    system = ResearchSystem()
+    
+    # Check if files exist
+    base_dir = Path(__file__).parent.parent
+    db_path = base_dir / "data" / "knowledge_base.db"
+    vector_dir = base_dir / "data" / "vector_databases" / "main_index"
+    
+    if not db_path.exists():
+        st.error(f"❌ Database file not found: {db_path}")
+        return None
+    
+    # Test database connection
+    try:
+        test_conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        cursor = test_conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")
+        table_count = cursor.fetchone()[0]
+        test_conn.close()
+        
+        if table_count == 0:
+            st.error("❌ Database exists but has no tables")
+            return None
+            
+    except Exception as e:
+        st.error(f"❌ Cannot open database: {str(e)}")
+        return None
+    
     return system
 
 # ========== PAGE FUNCTIONS ==========
 
 def show_dashboard(system):
     """Dashboard page"""
-    st.header("Research Dashboard")
+    st.header("Dashboard")
     
     # Get stats
     stats = system.get_database_stats()
@@ -316,7 +436,7 @@ def show_dashboard(system):
         with col1:
             st.metric("Total Documents", stats['total_documents'])
         with col2:
-            st.metric("Entities", stats['total_entities'])
+            st.metric("Total Entities", stats['total_entities'])
         with col3:
             st.metric("Vector Docs", stats['vector_documents'])
         with col4:
@@ -328,13 +448,13 @@ def show_dashboard(system):
     st.subheader("Quick Search")
     col1, col2 = st.columns([3, 1])
     with col1:
-        search_query = st.text_input("Search the database:", placeholder="Enter search terms...")
+        query = st.text_input("Search the database:", placeholder="Enter keywords...")
     with col2:
         search_btn = st.button("Search", use_container_width=True)
     
-    if search_btn and search_query:
+    if search_btn and query:
         with st.spinner("Searching..."):
-            results = system.semantic_search(search_query, k=10)
+            results = system.semantic_search(query, k=10)
             
             if results:
                 st.success(f"Found {len(results)} documents")
@@ -349,31 +469,25 @@ def show_dashboard(system):
                             st.markdown(f"[View Source]({result['url']})")
             else:
                 st.info("No results found. Trying keyword search...")
-                sql_results = system.search_documents_sql(search_query)
+                sql_results = system.search_documents(query)
                 if sql_results:
                     st.success(f"Found {len(sql_results)} documents using keyword search")
                 else:
                     st.warning("No documents found")
 
 def show_documents_page(system):
-    """Documents page"""
+    """Research Documents page"""
     st.header("Research Documents")
     
-    # Initialize session state for pagination
-    if 'doc_page' not in st.session_state:
-        st.session_state.doc_page = 0
-    if 'doc_source_filter' not in st.session_state:
-        st.session_state.doc_source_filter = "All"
-    
-    # Controls
-    col1, col2, col3 = st.columns([2, 1, 1])
+    # Search controls
+    col1, col2, col3 = st.columns([3, 1, 1])
     with col1:
-        search_term = st.text_input("Search documents:", placeholder="Title, author, or keywords")
+        search_query = st.text_input("Search documents:", placeholder="Title, author, or keywords")
     with col2:
         source_filter = st.selectbox(
-            "Filter by type",
+            "Document type",
             ["All", "Book", "Article", "Research Paper", "Website"],
-            key="doc_source_filter"
+            index=0
         )
     with col3:
         limit = st.selectbox("Results", [25, 50, 100], index=0)
@@ -381,22 +495,18 @@ def show_documents_page(system):
     # Action buttons
     col1, col2 = st.columns(2)
     with col1:
-        search_btn = st.button("Search Documents", type="primary", use_container_width=True)
+        search_clicked = st.button("Search Documents", type="primary", use_container_width=True)
     with col2:
-        show_all_btn = st.button("Show All Documents", use_container_width=True)
+        show_all_clicked = st.button("Show All Documents", use_container_width=True)
     
     # Load documents
     documents = []
-    
-    if search_btn and search_term:
-        with st.spinner("Searching documents..."):
-            # Try semantic search first
-            documents = system.semantic_search(search_term, k=limit)
+    if search_clicked and search_query:
+        with st.spinner("Searching..."):
+            documents = system.semantic_search(search_query, k=limit)
             if not documents:
-                # Fallback to SQL search
-                documents = system.search_documents_sql(search_term, limit=limit)
-    
-    elif show_all_btn or (not search_term and not search_btn):
+                documents = system.search_documents(search_query, limit=limit)
+    elif show_all_clicked:
         with st.spinner("Loading all documents..."):
             documents = system.get_all_documents(limit=limit, source_type=source_filter)
     
@@ -404,11 +514,12 @@ def show_documents_page(system):
     if documents:
         st.success(f"Loaded {len(documents)} documents")
         
-        # Create dataframe for display
-        df_data = []
+        # Create table data
+        table_data = []
         for doc in documents:
-            df_data.append({
-                'ID': doc.get('id') or doc.get('document_id', ''),
+            doc_id = doc.get('id') or doc.get('document_id') or ''
+            table_data.append({
+                'ID': doc_id,
                 'Title': doc.get('title', 'Untitled'),
                 'Author': doc.get('author', 'Unknown'),
                 'Type': doc.get('source_type', 'Unknown'),
@@ -416,7 +527,7 @@ def show_documents_page(system):
                 'URL': doc.get('url', '')[:50] + "..." if len(doc.get('url', '')) > 50 else doc.get('url', '')
             })
         
-        df = pd.DataFrame(df_data)
+        df = pd.DataFrame(table_data)
         
         # Display table
         st.dataframe(
@@ -437,18 +548,17 @@ def show_documents_page(system):
         # Export option
         csv = df.to_csv(index=False).encode('utf-8')
         st.download_button(
-            label="Download as CSV",
+            "Download as CSV",
             data=csv,
             file_name=f"documents_{datetime.now().strftime('%Y%m%d')}.csv",
             mime="text/csv",
             use_container_width=True
         )
-        
     else:
-        st.info("No documents to display. Use the search or 'Show All' button.")
+        st.info("Use the buttons above to load documents")
 
 def show_map_page(system):
-    """Map page"""
+    """Voyage Map page"""
     st.header("Voyage Map")
     
     with st.spinner("Loading geographical data..."):
@@ -463,13 +573,14 @@ def show_map_page(system):
             lats = [loc['latitude'] for loc in locations]
             lons = [loc['longitude'] for loc in locations]
             names = [loc['name'] for loc in locations]
+            counts = [loc['mention_count'] for loc in locations]
             
             fig.add_trace(go.Scattergeo(
                 lon=lons,
                 lat=lats,
                 mode='markers+text',
                 marker=dict(
-                    size=10,
+                    size=[min(c * 3, 25) for c in counts],
                     color='#FF5722',
                     line=dict(width=2, color='white')
                 ),
@@ -490,8 +601,7 @@ def show_map_page(system):
                     oceancolor='rgb(230, 245, 255)',
                     projection_type='natural earth'
                 ),
-                height=600,
-                showlegend=True
+                height=600
             )
             
             st.plotly_chart(fig, use_container_width=True)
@@ -504,7 +614,7 @@ def show_map_page(system):
             st.info("No location data available")
 
 def show_question_page(system):
-    """Question answering page"""
+    """Question Answering page"""
     st.header("Ask a Question")
     
     st.write("Enter a historical question about Chinese exploration:")
@@ -515,43 +625,42 @@ def show_question_page(system):
         placeholder="e.g., What was Zheng He's most significant voyage?"
     )
     
-    col1, col2 = st.columns([1, 3])
-    with col1:
-        ask_btn = st.button("Ask Question", type="primary", use_container_width=True)
-    
-    if ask_btn and question:
-        with st.spinner("Researching and analyzing..."):
-            # First, search for relevant documents
-            search_results = system.semantic_search(question, k=5)
-            
-            if search_results:
-                # Prepare context from top results
-                context_parts = []
-                for result in search_results[:3]:
-                    doc_id = result['document_id']
-                    doc_details = system.get_document_details(doc_id)
-                    if doc_details:
-                        context_parts.append(
-                            f"Source: {doc_details['title']} by {doc_details['author']}\n"
-                            f"Content: {doc_details.get('content', '')[:500]}"
-                        )
+    if st.button("Research and Answer", type="primary"):
+        if question:
+            with st.spinner("Researching and analyzing..."):
+                # Search for relevant documents
+                results = system.semantic_search(question, k=5)
                 
-                if context_parts:
-                    # For now, show the search results
-                    st.subheader("Answer Based on Research")
-                    st.info("Note: AI question answering requires OpenAI API integration")
+                if results:
+                    st.success(f"Found {len(results)} relevant documents")
                     
-                    st.write("**Relevant documents found:**")
-                    for i, result in enumerate(search_results[:3]):
-                        st.write(f"{i+1}. **{result['title']}**")
-                        st.write(f"   Author: {result['author']}")
-                        st.write(f"   Relevance: {result['similarity']:.1%}")
-                        st.write(f"   Excerpt: {result['snippet']}")
-                        st.divider()
+                    # Display answer based on documents
+                    st.subheader("Answer")
+                    
+                    # Create a summary from top documents
+                    answer_parts = []
+                    for i, result in enumerate(results[:3]):
+                        answer_parts.append(f"**{result['title']}** by {result['author']} discusses this topic. {result['snippet']}")
+                    
+                    answer = " ".join(answer_parts)
+                    
+                    st.markdown(f"""
+                    <div class='answer-container'>
+                    {answer}
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Show sources
+                    with st.expander("Sources"):
+                        for i, result in enumerate(results[:3]):
+                            st.write(f"{i+1}. **{result['title']}**")
+                            st.write(f"   Author: {result['author']}")
+                            st.write(f"   Type: {result['source_type']}")
+                            if result['url']:
+                                st.markdown(f"   [View Source]({result['url']})")
+                            st.divider()
                 else:
-                    st.warning("No relevant documents found in the database")
-            else:
-                st.warning("No results found for your question")
+                    st.warning("No relevant documents found for your question")
 
 def show_settings_page(system):
     """Settings page"""
@@ -574,95 +683,116 @@ def show_settings_page(system):
             st.write(f"- Database: {system.db_path}")
             st.write(f"- Vector DB: {system.vector_dir}")
     
-    # Database management
+    # Actions
     st.divider()
-    st.subheader("Database Management")
+    st.subheader("Actions")
     
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("Refresh Database", use_container_width=True):
-            st.rerun()
-    
-    with col2:
-        if st.button("Clear Cache", use_container_width=True):
+        if st.button("Refresh System", use_container_width=True):
             st.cache_resource.clear()
             st.success("Cache cleared")
             st.rerun()
     
-    # Debug information
-    with st.expander("Debug Information"):
-        st.write("**Session State:**")
-        st.json({k: str(v) for k, v in st.session_state.items()})
-        
-        st.write("**System Check:**")
-        checks = {
-            "Database connection": system.conn is not None,
-            "Vector index loaded": system.index is not None,
-            "Embedding model loaded": system.model is not None,
-            "Documents in vector DB": len(system.documents) > 0
-        }
-        
-        for check, status in checks.items():
-            st.write(f"- {check}: {'✅' if status else '❌'}")
+    with col2:
+        if st.button("Check Database", use_container_width=True):
+            if system.db:
+                st.success("Database connection working")
+            else:
+                st.error("Database connection failed")
 
-# ========== MAIN APP ==========
+# ========== SIMPLIFIED MAIN APPLICATION ==========
 
 def main():
-    """Main application"""
-    
-    # Initialize system
-    system = initialize_system()
-    
-    # Check if system initialized
-    if not st.session_state.get('system_initialized', False):
-        st.error("System initialization failed. Please check:")
-        st.write(f"1. Database exists at: {system.db_path}")
-        st.write(f"2. Vector database exists at: {system.vector_dir}")
-        st.write(f"3. Files are properly uploaded to Streamlit Cloud")
-        return
+    """Main application - SIMPLIFIED VERSION"""
     
     # Header
     st.markdown("<h1 class='main-header'>1421 Historical Research System</h1>", unsafe_allow_html=True)
     
-    # Status indicator
-    stats = system.get_database_stats()
-    if stats and stats['total_documents'] > 0:
-        st.success(f"✅ System Ready: {stats['total_documents']} documents loaded")
+    # Check if files exist FIRST
+    base_dir = Path(__file__).parent.parent
+    db_path = base_dir / "data" / "knowledge_base.db"
+    vector_dir = base_dir / "data" / "vector_databases" / "main_index"
     
-    # Sidebar navigation
+    with st.container():
+        col1, col2 = st.columns(2)
+        with col1:
+            db_exists = db_path.exists()
+            status = "✅" if db_exists else "❌"
+            st.write(f"{status} Database: `{db_path.name}`")
+            st.write(f"Path: `{db_path}`")
+            st.write(f"Exists: {db_exists}")
+            
+        with col2:
+            vector_exists = vector_dir.exists()
+            status = "✅" if vector_exists else "❌"
+            st.write(f"{status} Vector DB: `{vector_dir.name}`")
+            st.write(f"Exists: {vector_exists}")
+    
+    if not db_path.exists():
+        st.error("""
+        ## Database file not found!
+        
+        **Please make sure:**
+        1. The file `knowledge_base.db` is in the `data/` folder
+        2. It's uploaded to GitHub
+        3. File name is exactly `knowledge_base.db`
+        
+        **Current directory structure:**
+        """)
+        
+        # Show directory contents
+        import subprocess
+        try:
+            result = subprocess.run(['find', '.', '-type', 'f', '-name', '*.db'], 
+                                  capture_output=True, text=True)
+            st.code(result.stdout if result.stdout else "No .db files found")
+        except:
+            # Fallback to Python
+            db_files = list(base_dir.glob('**/*.db'))
+            st.code('\n'.join([str(f) for f in db_files]) if db_files else "No .db files found")
+        
+        st.stop()
+    
+    # Initialize system
+    with st.spinner("Initializing system..."):
+        system = init_system()
+    
+    if system is None:
+        st.error("Failed to initialize system. Check the logs above.")
+        st.stop()
+    
+    # Show status
+    stats = system.get_database_stats()
+    if stats:
+        st.success(f"✅ System Ready: {stats['total_documents']} documents loaded")
+    else:
+        st.warning("System loaded but could not get database stats")
+    
+    # Simple sidebar
     with st.sidebar:
         st.title("Navigation")
         
-        # Navigation buttons
-        pages = {
-            "Dashboard": show_dashboard,
-            "Research Documents": show_documents_page,
-            "Voyage Map": show_map_page,
-            "Ask Question": show_question_page,
-            "Settings": show_settings_page
-        }
+        page = st.radio(
+            "Go to:",
+            ["Dashboard", "Research Documents", "Voyage Map", "Ask Question", "Settings"],
+            label_visibility="collapsed"
+        )
         
-        for page_name in pages.keys():
-            if st.button(page_name, use_container_width=True, key=f"nav_{page_name}"):
-                st.session_state.current_page = page_name
-                st.rerun()
-        
-        # Set default page
-        if 'current_page' not in st.session_state:
-            st.session_state.current_page = "Dashboard"
+        st.session_state.current_page = page
         
         # Quick stats
         st.divider()
-        st.write("**Database Stats**")
+        st.write("**System Stats**")
         
         if stats:
             col1, col2 = st.columns(2)
             with col1:
                 st.metric("Documents", stats['total_documents'])
             with col2:
-                st.metric("Vector Docs", stats['vector_documents'])
+                st.metric("Vector DB", "Ready" if system.index else "Offline")
     
-    # Show current page
+    # Page routing
     pages = {
         "Dashboard": show_dashboard,
         "Research Documents": show_documents_page,
