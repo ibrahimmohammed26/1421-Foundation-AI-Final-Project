@@ -1,18 +1,16 @@
 """
 1421 Historical Research System - Main Application
-FIXED VERSION: Thread-safe SQLite for Streamlit Cloud
+FAISS-FREE VERSION for Streamlit Cloud
 """
 
 import streamlit as st
 import pandas as pd
 import numpy as np
 import sqlite3
-import faiss
 import pickle
 import json
 import re
 from pathlib import Path
-from sentence_transformers import SentenceTransformer
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
@@ -20,6 +18,8 @@ import time
 import sys
 import os
 import threading
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.feature_extraction.text import TfidfVectorizer
 
 # ========== PAGE CONFIG ==========
 st.set_page_config(
@@ -147,23 +147,92 @@ class ThreadSafeDatabase:
             self.local.conn.close()
             del self.local.conn
 
+# ========== SIMPLE SEMANTIC SEARCH (No FAISS) ==========
+
+class SimpleSemanticSearch:
+    """Simple semantic search using TF-IDF"""
+    
+    def __init__(self):
+        self.vectorizer = None
+        self.document_vectors = None
+        self.document_texts = []
+        self.document_metas = []
+    
+    def build_index(self, documents):
+        """Build TF-IDF index from documents"""
+        if not documents:
+            return False
+        
+        try:
+            # Extract text for indexing
+            self.document_texts = []
+            self.document_metas = []
+            
+            for doc in documents:
+                text = f"{doc.get('title', '')} {doc.get('content', '')}"
+                self.document_texts.append(text)
+                self.document_metas.append({
+                    'id': doc.get('id'),
+                    'title': doc.get('title', ''),
+                    'author': doc.get('author', ''),
+                    'source_type': doc.get('source_type', '')
+                })
+            
+            # Create TF-IDF vectors
+            self.vectorizer = TfidfVectorizer(max_features=1000, stop_words='english')
+            self.document_vectors = self.vectorizer.fit_transform(self.document_texts)
+            
+            return True
+        except Exception as e:
+            print(f"Error building index: {e}")
+            return False
+    
+    def search(self, query, k=10):
+        """Search for similar documents"""
+        if not self.vectorizer or not self.document_vectors.any():
+            return []
+        
+        try:
+            # Transform query to vector
+            query_vector = self.vectorizer.transform([query])
+            
+            # Calculate cosine similarities
+            similarities = cosine_similarity(query_vector, self.document_vectors).flatten()
+            
+            # Get top k results
+            top_indices = similarities.argsort()[-k:][::-1]
+            
+            results = []
+            for idx in top_indices:
+                if similarities[idx] > 0.1:  # Minimum similarity threshold
+                    meta = self.document_metas[idx]
+                    results.append({
+                        'document_id': meta['id'],
+                        'title': meta['title'],
+                        'author': meta['author'],
+                        'source_type': meta['source_type'],
+                        'similarity': float(similarities[idx])
+                    })
+            
+            return results
+        except Exception as e:
+            print(f"Error in search: {e}")
+            return []
+
 # ========== UNIFIED RESEARCH SYSTEM ==========
 
 class ResearchSystem:
-    """Complete research system - thread-safe for Streamlit Cloud"""
+    """Complete research system - FAISS-free for Streamlit Cloud"""
     
     def __init__(self):
         # Set paths
         self.base_dir = Path(__file__).parent.parent
         self.db_path = self.base_dir / "data" / "knowledge_base.db"
-        self.vector_dir = self.base_dir / "data" / "vector_databases" / "main_index"
         
         # Initialize components
         self.db = None
-        self.index = None
-        self.documents = []
-        self.metadatas = []
-        self.model = None
+        self.search_engine = SimpleSemanticSearch()
+        self.documents_cache = []
         
         # Load everything
         self._initialize()
@@ -180,27 +249,12 @@ class ResearchSystem:
             self.db = ThreadSafeDatabase(str(self.db_path))
             print(f"✅ Database initialized: {self.db_path}")
             
-            # 3. Vector database
-            index_file = self.vector_dir / "faiss_index.bin"
-            metadata_file = self.vector_dir / "faiss_metadata.pkl"
-            
-            if index_file.exists() and metadata_file.exists():
-                self.index = faiss.read_index(str(index_file))
-                with open(metadata_file, 'rb') as f:
-                    metadata = pickle.load(f)
-                    self.documents = metadata.get('documents', [])
-                    self.metadatas = metadata.get('metadatas', [])
-                print(f"✅ Vector database loaded: {len(self.documents)} documents")
-            else:
-                print(f"⚠️ Vector database not found: {self.vector_dir}")
-            
-            # 4. Embedding model
-            @st.cache_resource
-            def load_embedding_model():
-                return SentenceTransformer('all-MiniLM-L6-v2')
-            
-            self.model = load_embedding_model()
-            print("✅ Embedding model loaded")
+            # 3. Load documents for search index
+            documents = self.get_all_documents(limit=1000)
+            if documents:
+                self.documents_cache = documents
+                self.search_engine.build_index(documents)
+                print(f"✅ Search index built: {len(documents)} documents")
             
             return True
             
@@ -233,12 +287,10 @@ class ResearchSystem:
                 "documents_by_source": docs_by_source,
                 "total_entities": total_entities,
                 "entities_by_type": entities_by_type,
-                "vector_documents": len(self.documents)
+                "indexed_documents": len(self.documents_cache)
             }
         except Exception as e:
             print(f"Error getting stats: {e}")
-            import traceback
-            print(traceback.format_exc())
             return None
     
     def get_all_documents(self, limit=100, source_type=None):
@@ -277,40 +329,53 @@ class ResearchSystem:
             )
             
             rows = cursor.fetchall()
-            return [dict(row) for row in rows]
+            documents = [dict(row) for row in rows]
+            
+            # Add snippets
+            for doc in documents:
+                content = doc.get('content', '')
+                if query.lower() in content.lower():
+                    idx = content.lower().find(query.lower())
+                    start = max(0, idx - 100)
+                    end = min(len(content), idx + 200)
+                    doc['snippet'] = content[start:end] + "..."
+                else:
+                    doc['snippet'] = content[:300] + "..."
+            
+            return documents
         except Exception as e:
             print(f"Error searching documents: {e}")
             return []
     
     def semantic_search(self, query, k=10):
-        """Semantic search using vector database"""
-        if not self.index or not self.model:
-            return []
+        """Semantic search using TF-IDF"""
+        if not self.search_engine.vectorizer:
+            return self.search_documents(query, limit=k)
         
         try:
-            query_embedding = self.model.encode([query]).astype('float32')
-            distances, indices = self.index.search(query_embedding, k)
+            results = self.search_engine.search(query, k=k)
             
-            results = []
-            for i, idx in enumerate(indices[0]):
-                if idx < len(self.metadatas):
-                    doc_id = self.metadatas[idx]['id']
-                    doc = self.get_document_by_id(doc_id)
-                    if doc:
-                        results.append({
-                            'document_id': doc_id,
-                            'title': doc.get('title', 'Untitled'),
-                            'author': doc.get('author', 'Unknown'),
-                            'source_type': doc.get('source_type', 'Unknown'),
-                            'url': doc.get('url', ''),
-                            'word_count': doc.get('word_count', 0),
-                            'snippet': doc.get('content', '')[:300] + "...",
-                            'similarity': float(1.0 / (1.0 + distances[0][i]))
-                        })
-            return results
+            # Get full document details
+            enhanced_results = []
+            for result in results:
+                doc_id = result['document_id']
+                doc = self.get_document_by_id(doc_id)
+                if doc:
+                    enhanced_results.append({
+                        'document_id': doc_id,
+                        'title': doc.get('title', 'Untitled'),
+                        'author': doc.get('author', 'Unknown'),
+                        'source_type': doc.get('source_type', 'Unknown'),
+                        'url': doc.get('url', ''),
+                        'word_count': doc.get('word_count', 0),
+                        'snippet': doc.get('content', '')[:300] + "...",
+                        'similarity': result['similarity']
+                    })
+            
+            return enhanced_results
         except Exception as e:
             print(f"Error in semantic search: {e}")
-            return []
+            return self.search_documents(query, limit=k)
     
     def get_document_by_id(self, doc_id):
         """Get document by ID - THREAD-SAFE"""
@@ -394,32 +459,6 @@ class ResearchSystem:
 def init_system():
     """Initialize the research system"""
     system = ResearchSystem()
-    
-    # Check if files exist
-    base_dir = Path(__file__).parent.parent
-    db_path = base_dir / "data" / "knowledge_base.db"
-    vector_dir = base_dir / "data" / "vector_databases" / "main_index"
-    
-    if not db_path.exists():
-        st.error(f"❌ Database file not found: {db_path}")
-        return None
-    
-    # Test database connection
-    try:
-        test_conn = sqlite3.connect(str(db_path), check_same_thread=False)
-        cursor = test_conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")
-        table_count = cursor.fetchone()[0]
-        test_conn.close()
-        
-        if table_count == 0:
-            st.error("❌ Database exists but has no tables")
-            return None
-            
-    except Exception as e:
-        st.error(f"❌ Cannot open database: {str(e)}")
-        return None
-    
     return system
 
 # ========== PAGE FUNCTIONS ==========
@@ -438,7 +477,7 @@ def show_dashboard(system):
         with col2:
             st.metric("Total Entities", stats['total_entities'])
         with col3:
-            st.metric("Vector Docs", stats['vector_documents'])
+            st.metric("Indexed Docs", stats['indexed_documents'])
         with col4:
             st.metric("Sources", len(stats['documents_by_source']))
     
@@ -463,17 +502,13 @@ def show_dashboard(system):
                     with st.expander(f"{i+1}. {result['title']}"):
                         st.write(f"**Author:** {result['author']}")
                         st.write(f"**Type:** {result['source_type']}")
-                        st.write(f"**Relevance:** {result['similarity']:.1%}")
+                        if 'similarity' in result:
+                            st.write(f"**Relevance:** {result['similarity']:.1%}")
                         st.write(result['snippet'])
                         if result['url']:
                             st.markdown(f"[View Source]({result['url']})")
             else:
-                st.info("No results found. Trying keyword search...")
-                sql_results = system.search_documents(query)
-                if sql_results:
-                    st.success(f"Found {len(sql_results)} documents using keyword search")
-                else:
-                    st.warning("No documents found")
+                st.warning("No documents found")
 
 def show_documents_page(system):
     """Research Documents page"""
@@ -504,8 +539,6 @@ def show_documents_page(system):
     if search_clicked and search_query:
         with st.spinner("Searching..."):
             documents = system.semantic_search(search_query, k=limit)
-            if not documents:
-                documents = system.search_documents(search_query, limit=limit)
     elif show_all_clicked:
         with st.spinner("Loading all documents..."):
             documents = system.get_all_documents(limit=limit, source_type=source_filter)
@@ -676,12 +709,11 @@ def show_settings_page(system):
             st.write("**Database Status:**")
             st.write(f"- Documents: {stats['total_documents']}")
             st.write(f"- Entities: {stats['total_entities']}")
-            st.write(f"- Vector Index: {'Loaded' if system.index else 'Not loaded'}")
+            st.write(f"- Search Index: {'Ready' if len(system.documents_cache) > 0 else 'Building...'}")
         
         with col2:
             st.write("**File Paths:**")
             st.write(f"- Database: {system.db_path}")
-            st.write(f"- Vector DB: {system.vector_dir}")
     
     # Actions
     st.divider()
@@ -704,67 +736,46 @@ def show_settings_page(system):
 # ========== SIMPLIFIED MAIN APPLICATION ==========
 
 def main():
-    """Main application - SIMPLIFIED VERSION"""
+    """Main application"""
     
     # Header
     st.markdown("<h1 class='main-header'>1421 Historical Research System</h1>", unsafe_allow_html=True)
     
-    # Check if files exist FIRST
-    base_dir = Path(__file__).parent.parent
-    db_path = base_dir / "data" / "knowledge_base.db"
-    vector_dir = base_dir / "data" / "vector_databases" / "main_index"
-    
-    with st.container():
-        col1, col2 = st.columns(2)
-        with col1:
-            db_exists = db_path.exists()
-            status = "✅" if db_exists else "❌"
-            st.write(f"{status} Database: `{db_path.name}`")
-            st.write(f"Path: `{db_path}`")
-            st.write(f"Exists: {db_exists}")
-            
-        with col2:
-            vector_exists = vector_dir.exists()
-            status = "✅" if vector_exists else "❌"
-            st.write(f"{status} Vector DB: `{vector_dir.name}`")
-            st.write(f"Exists: {vector_exists}")
-    
-    if not db_path.exists():
-        st.error("""
-        ## Database file not found!
-        
-        **Please make sure:**
-        1. The file `knowledge_base.db` is in the `data/` folder
-        2. It's uploaded to GitHub
-        3. File name is exactly `knowledge_base.db`
-        
-        **Current directory structure:**
-        """)
-        
-        # Show directory contents
-        import subprocess
-        try:
-            result = subprocess.run(['find', '.', '-type', 'f', '-name', '*.db'], 
-                                  capture_output=True, text=True)
-            st.code(result.stdout if result.stdout else "No .db files found")
-        except:
-            # Fallback to Python
-            db_files = list(base_dir.glob('**/*.db'))
-            st.code('\n'.join([str(f) for f in db_files]) if db_files else "No .db files found")
-        
-        st.stop()
-    
     # Initialize system
-    with st.spinner("Initializing system..."):
+    with st.spinner("Initializing research system..."):
         system = init_system()
     
-    if system is None:
-        st.error("Failed to initialize system. Check the logs above.")
+    if system is None or not system.db:
+        st.error("""
+        ## System Initialization Failed
+        
+        **Please check:**
+        1. Database file exists at: `data/knowledge_base.db`
+        2. File is properly uploaded to GitHub
+        3. Database is not corrupted
+        
+        **For Streamlit Cloud:**
+        - Go to "Manage App" → "Advanced settings"
+        - Check the terminal logs for specific errors
+        - Make sure file structure is correct
+        """)
+        
+        # Show file check
+        base_dir = Path(__file__).parent.parent
+        db_path = base_dir / "data" / "knowledge_base.db"
+        
+        st.write("**File Check:**")
+        st.write(f"- Database path: `{db_path}`")
+        st.write(f"- Database exists: `{db_path.exists()}`")
+        
+        if db_path.exists():
+            st.write(f"- File size: {db_path.stat().st_size / (1024*1024):.2f} MB")
+        
         st.stop()
     
     # Show status
     stats = system.get_database_stats()
-    if stats:
+    if stats and stats['total_documents'] > 0:
         st.success(f"✅ System Ready: {stats['total_documents']} documents loaded")
     else:
         st.warning("System loaded but could not get database stats")
@@ -790,7 +801,7 @@ def main():
             with col1:
                 st.metric("Documents", stats['total_documents'])
             with col2:
-                st.metric("Vector DB", "Ready" if system.index else "Offline")
+                st.metric("Search Index", "Ready" if len(system.documents_cache) > 0 else "Building")
     
     # Page routing
     pages = {
