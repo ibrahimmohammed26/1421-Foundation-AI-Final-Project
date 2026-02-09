@@ -1,6 +1,6 @@
-"""
-1421 AI - Historical Research System
+"""1421 AI - Historical Research System
 Professional version with analytics and saved searches
+Enhanced with web search capability and improved saved searches system
 """
 
 import streamlit as st
@@ -19,6 +19,10 @@ import random
 import sys
 import os
 from collections import Counter
+import requests
+from typing import List, Dict, Optional, Tuple
+import urllib.parse
+from bs4 import BeautifulSoup
 
 # ========== PAGE CONFIG ==========
 st.set_page_config(
@@ -170,6 +174,27 @@ section[data-testid="stSidebar"] > div {
     box-shadow: 0 4px 12px rgba(0,0,0,0.08);
 }
 
+/* Source badges */
+.source-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin-right: 8px;
+    margin-bottom: 8px;
+}
+
+.badge-document {
+    background-color: #4a6491;
+    color: white;
+}
+
+.badge-web {
+    background-color: #28a745;
+    color: white;
+}
+
 /* Metrics */
 [data-testid="stMetricValue"] {
     font-size: 2rem !important;
@@ -201,23 +226,85 @@ section[data-testid="stSidebar"] > div {
     box-shadow: 0 6px 15px rgba(0,0,0,0.2) !important;
 }
 
-/* Saved searches */
-.saved-search-item {
+/* Saved searches sidebar */
+.saved-search-sidebar-item {
     background: rgba(255, 255, 255, 0.1);
     border-radius: 8px;
     padding: 12px;
     margin: 8px 0;
     border-left: 4px solid #d4af37;
+    cursor: pointer;
+    transition: all 0.3s ease;
 }
 
-.saved-search-item:hover {
+.saved-search-sidebar-item:hover {
     background: rgba(255, 255, 255, 0.2);
+    transform: translateX(5px);
 }
 
 .search-time {
     font-size: 0.8rem;
     color: #cccccc;
     margin-top: 5px;
+}
+
+.search-query {
+    font-size: 0.9rem;
+    color: #ffffff;
+    margin-bottom: 5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Saved searches page */
+.saved-search-page-item {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border-radius: 8px;
+    padding: 15px;
+    margin: 10px 0;
+    border-left: 6px solid #4a6491;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.search-query-page {
+    font-size: 1.1rem;
+    color: #2c3e50;
+    font-weight: 600;
+    margin-bottom: 5px;
+}
+
+.search-sources {
+    display: flex;
+    gap: 8px;
+    margin: 8px 0;
+}
+
+/* Answer display */
+.answer-text {
+    font-size: 1.1rem;
+    line-height: 1.6;
+    color: #333;
+    margin: 15px 0;
+}
+
+.chat-message {
+    padding: 15px 20px;
+    margin: 10px 0;
+    border-radius: 12px;
+    max-width: 85%;
+}
+
+.user-message {
+    background: linear-gradient(135deg, #4a6491 0%, #2c3e50 100%);
+    color: white;
+    margin-left: auto;
+}
+
+.assistant-message {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    color: #333;
+    border: 1px solid #ddd;
 }
 </style>
 
@@ -263,10 +350,208 @@ class ThreadSafeDatabase:
             cursor.execute(query)
         return cursor
 
+# ========== WEB SEARCH MODULE ==========
+
+class WebSearchModule:
+    """Module for performing web searches"""
+    
+    def __init__(self):
+        # Wikipedia API endpoint
+        self.wikipedia_api = "https://en.wikipedia.org/w/api.php"
+        # DuckDuckGo HTML endpoint (for fallback)
+        self.duckduckgo_url = "https://html.duckduckgo.com/html/"
+        
+    def search_wikipedia(self, query: str, limit: int = 3) -> List[Dict]:
+        """Search Wikipedia for historical information"""
+        try:
+            params = {
+                'action': 'query',
+                'list': 'search',
+                'srsearch': query,
+                'format': 'json',
+                'srlimit': limit
+            }
+            
+            response = requests.get(self.wikipedia_api, params=params, timeout=10)
+            data = response.json()
+            
+            results = []
+            if 'query' in data and 'search' in data['query']:
+                for item in data['query']['search'][:limit]:
+                    # Get page content for snippets
+                    content_params = {
+                        'action': 'query',
+                        'prop': 'extracts',
+                        'exintro': True,
+                        'explaintext': True,
+                        'pageids': item['pageid'],
+                        'format': 'json'
+                    }
+                    content_response = requests.get(self.wikipedia_api, params=content_params, timeout=10)
+                    content_data = content_response.json()
+                    
+                    page_content = ""
+                    if 'query' in content_data and 'pages' in content_data['query']:
+                        page = list(content_data['query']['pages'].values())[0]
+                        if 'extract' in page:
+                            page_content = page['extract'][:500]  # Limit content length
+                    
+                    results.append({
+                        'title': item['title'],
+                        'snippet': item['snippet'],
+                        'content': page_content,
+                        'url': f"https://en.wikipedia.org/?curid={item['pageid']}",
+                        'source': 'wikipedia',
+                        'timestamp': datetime.now().isoformat()
+                    })
+            
+            return results
+            
+        except Exception as e:
+            print(f"Wikipedia search error: {e}")
+            return []
+    
+    def search_duckduckgo(self, query: str, limit: int = 3) -> List[Dict]:
+        """Fallback search using DuckDuckGo"""
+        try:
+            params = {'q': query, 'kl': 'us-en'}
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+            
+            response = requests.post(self.duckduckgo_url, data=params, headers=headers, timeout=10)
+            
+            # Simple HTML parsing for results
+            results = []
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            for result in soup.find_all('a', class_='result__url', limit=limit):
+                title = result.get_text(strip=True)
+                url = result.get('href', '')
+                
+                # Find snippet
+                snippet_div = result.find_next('a', class_='result__snippet')
+                snippet = snippet_div.get_text(strip=True) if snippet_div else ""
+                
+                results.append({
+                    'title': title,
+                    'snippet': snippet,
+                    'url': url,
+                    'source': 'duckduckgo',
+                    'timestamp': datetime.now().isoformat()
+                })
+            
+            return results
+            
+        except Exception as e:
+            print(f"DuckDuckGo search error: {e}")
+            return []
+    
+    def search_web(self, query: str, limit: int = 3) -> List[Dict]:
+        """Combine multiple web sources for comprehensive search"""
+        all_results = []
+        
+        # Try Wikipedia first (more reliable for historical topics)
+        wiki_results = self.search_wikipedia(query, limit=2)
+        all_results.extend(wiki_results)
+        
+        # If not enough results, try DuckDuckGo
+        if len(all_results) < limit:
+            ddg_results = self.search_duckduckgo(query, limit=limit - len(all_results))
+            all_results.extend(ddg_results)
+        
+        return all_results[:limit]
+
+# ========== SAVED SEARCHES SYSTEM ==========
+
+class SavedSearchesSystem:
+    """System for managing saved searches with Q&A pairs"""
+    
+    @staticmethod
+    def save_search(question: str, answer: str, sources: List[str], 
+                    document_results: List[Dict], web_results: List[Dict]) -> Dict:
+        """Save a search with question and answer"""
+        if 'saved_searches' not in st.session_state:
+            st.session_state.saved_searches = []
+        
+        search_id = len(st.session_state.saved_searches) + 1
+        
+        search_entry = {
+            'id': search_id,
+            'question': question,
+            'answer': answer,
+            'sources': sources,  # List of source types used: ['documents', 'web', 'both']
+            'document_results_count': len(document_results),
+            'web_results_count': len(web_results),
+            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            'date': datetime.now().strftime("%Y-%m-%d"),
+            'time': datetime.now().strftime("%H:%M"),
+            'document_results': document_results[:3],  # Store first 3 documents
+            'web_results': web_results[:2]  # Store first 2 web results
+        }
+        
+        st.session_state.saved_searches.append(search_entry)
+        return search_entry
+    
+    @staticmethod
+    def get_all_saved_searches() -> List[Dict]:
+        """Get all saved searches"""
+        return st.session_state.get('saved_searches', [])
+    
+    @staticmethod
+    def delete_search(search_id: int) -> bool:
+        """Delete a saved search by ID"""
+        if 'saved_searches' in st.session_state:
+            initial_count = len(st.session_state.saved_searches)
+            st.session_state.saved_searches = [
+                s for s in st.session_state.saved_searches 
+                if s['id'] != search_id
+            ]
+            return len(st.session_state.saved_searches) < initial_count
+        return False
+    
+    @staticmethod
+    def clear_all_searches():
+        """Clear all saved searches"""
+        if 'saved_searches' in st.session_state:
+            st.session_state.saved_searches = []
+    
+    @staticmethod
+    def render_sidebar_saved_searches():
+        """Render saved searches in sidebar"""
+        saved_searches = SavedSearchesSystem.get_all_saved_searches()
+        
+        if saved_searches:
+            st.sidebar.markdown("---")
+            st.sidebar.markdown("### 📚 Saved Searches")
+            
+            # Show only the 5 most recent searches in sidebar
+            for search in saved_searches[-5:][::-1]:  # Show most recent first
+                with st.sidebar:
+                    col1, col2 = st.columns([4, 1])
+                    with col1:
+                        st.markdown(f"""
+                        <div class="saved-search-sidebar-item" onclick="this.style.background='rgba(212, 175, 55, 0.3)'; setTimeout(() => this.style.background='', 500)">
+                            <div class="search-query">{search['question'][:50]}{'...' if len(search['question']) > 50 else ''}</div>
+                            <div class="search-time">{search['time']} • {len(search['sources'])} sources</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    with col2:
+                        if st.button("↻", key=f"sidebar_reload_{search['id']}", help="Reload this search"):
+                            st.session_state.current_question = search['question']
+                            st.session_state.current_page = "dashboard"
+                            st.rerun()
+            
+            # Show total count and link to full page
+            st.sidebar.markdown(f"*Showing 5 of {len(saved_searches)} saved searches*")
+            if st.sidebar.button("View All Saved Searches", key="view_all_saved"):
+                st.session_state.current_page = "saved_searches"
+                st.rerun()
+
 # ========== RESEARCH SYSTEM ==========
 
 class ResearchSystem:
-    """Research system for historical documents"""
+    """Research system for historical documents with web integration"""
     
     def __init__(self):
         # Set paths
@@ -276,6 +561,8 @@ class ResearchSystem:
         # Initialize components
         self.db = None
         self.documents_cache = []
+        self.web_searcher = WebSearchModule()
+        self.saved_searches = SavedSearchesSystem()
         
         # Initialize analytics
         self.initialize_analytics()
@@ -293,7 +580,8 @@ class ResearchSystem:
                 'questions_asked': [],
                 'response_times': [],
                 'popular_topics': {},
-                'user_sessions': []
+                'user_sessions': [],
+                'sources_used': {'documents': 0, 'web': 0, 'both': 0}
             }
     
     def _initialize(self):
@@ -323,7 +611,8 @@ class ResearchSystem:
             print(f"Initialization error: {str(e)}")
             return False
     
-    def track_search(self, query, response_time, results_count):
+    def track_search(self, query: str, response_time: float, results_count: int, 
+                     sources_used: List[str]):
         """Track search analytics"""
         analytics = st.session_state.search_analytics
         
@@ -340,8 +629,17 @@ class ResearchSystem:
         analytics['questions_asked'].append({
             'question': query,
             'time': datetime.now().strftime("%H:%M:%S"),
-            'results': results_count
+            'results': results_count,
+            'sources': sources_used
         })
+        
+        # Track source usage
+        if 'both' in sources_used:
+            analytics['sources_used']['both'] += 1
+        elif 'documents' in sources_used:
+            analytics['sources_used']['documents'] += 1
+        elif 'web' in sources_used:
+            analytics['sources_used']['web'] += 1
         
         # Track topic popularity
         words = query.lower().split()
@@ -381,6 +679,9 @@ class ResearchSystem:
             cursor = self.db.execute("SELECT COUNT(DISTINCT entity_text) FROM entities WHERE entity_type = 'LOCATION'")
             geocoded_locations = cursor.fetchone()[0] or 25
             
+            # Get saved searches count
+            saved_searches_count = len(st.session_state.get('saved_searches', []))
+            
             return {
                 "total_documents": total_docs,
                 "documents_by_source": docs_by_source,
@@ -388,7 +689,8 @@ class ResearchSystem:
                 "entities_by_type": entities_by_type,
                 "timeline_events": timeline_events_approx,
                 "geocoded_locations": geocoded_locations,
-                "indexed_documents": len(self.documents_cache)
+                "indexed_documents": len(self.documents_cache),
+                "saved_searches": saved_searches_count
             }
         except Exception as e:
             print(f"Error getting stats: {e}")
@@ -417,7 +719,7 @@ class ResearchSystem:
             print(f"Error getting documents: {e}")
             return []
     
-    def search_documents(self, query, limit=20):
+    def search_documents(self, query: str, limit: int = 20) -> List[Dict]:
         """Search documents using SQL LIKE"""
         if not self.db:
             return []
@@ -447,6 +749,95 @@ class ResearchSystem:
         except Exception as e:
             print(f"Error searching documents: {e}")
             return []
+    
+    def search_web_information(self, query: str, limit: int = 3) -> List[Dict]:
+        """Search web for additional information"""
+        return self.web_searcher.search_web(query, limit)
+    
+    def generate_answer(self, question: str, document_results: List[Dict], 
+                       web_results: List[Dict]) -> Tuple[str, List[str]]:
+        """Generate an answer based on documents and web results"""
+        sources_used = []
+        
+        if not document_results and not web_results:
+            return "I couldn't find specific information about that in our historical database or on the web. Try rephrasing your question or checking the example questions.", []
+        
+        # Combine information from both sources
+        combined_info = []
+        
+        # Add document information
+        if document_results:
+            sources_used.append('documents')
+            for i, doc in enumerate(document_results[:2]):
+                summary = f"**From historical documents**: {doc.get('title', 'Unknown')} "
+                content = doc.get('snippet', doc.get('content', ''))
+                combined_info.append(f"{summary}{content}")
+        
+        # Add web information
+        if web_results:
+            sources_used.append('web')
+            for i, web in enumerate(web_results[:2]):
+                summary = f"**From web research**: {web.get('title', 'Unknown')} "
+                content = web.get('snippet', web.get('content', ''))
+                combined_info.append(f"{summary}{content}")
+        
+        # Create a natural response
+        responses = [
+            f"Based on historical research, {question.lower().replace('?', '')} can be understood through multiple sources. ",
+            f"Research indicates that {question.lower().replace('?', '')} ",
+            f"Historical records and contemporary research show that {question.lower().replace('?', '')} "
+        ]
+        
+        base_response = random.choice(responses)
+        
+        # Add combined insights
+        if combined_info:
+            base_response += " ".join(combined_info[:3])
+            
+            # Add source summary
+            if len(sources_used) > 1:
+                base_response += " This information comes from both historical documents and current web research."
+            elif 'documents' in sources_used:
+                base_response += " This evidence primarily comes from historical documents in the 1421 research database."
+            else:
+                base_response += " This information comes from web-based historical research."
+        
+        # If no sources were actually used (edge case)
+        if not sources_used:
+            sources_used = []
+        
+        return base_response, sources_used
+    
+    def perform_comprehensive_search(self, question: str) -> Dict:
+        """Perform comprehensive search using both documents and web"""
+        start_time = time.time()
+        
+        # Search documents
+        document_results = self.search_documents(question, limit=10)
+        
+        # Search web (with delay to be polite)
+        time.sleep(0.5)
+        web_results = self.search_web_information(question, limit=3)
+        
+        # Generate answer
+        answer, sources_used = self.generate_answer(question, document_results, web_results)
+        
+        response_time = time.time() - start_time
+        
+        # Track search
+        self.track_search(question, response_time, 
+                         len(document_results) + len(web_results), 
+                         sources_used)
+        
+        return {
+            'question': question,
+            'answer': answer,
+            'sources_used': sources_used,
+            'document_results': document_results,
+            'web_results': web_results,
+            'response_time': response_time,
+            'total_results': len(document_results) + len(web_results)
+        }
     
     def get_document_by_id(self, doc_id):
         """Get document by ID"""
@@ -523,35 +914,6 @@ class ResearchSystem:
                 })
         
         return {'locations': locations, 'total': len(locations)}
-    
-    def generate_answer(self, question, context_documents):
-        """Generate an answer based on documents"""
-        if not context_documents:
-            return "I couldn't find specific information about that in the historical database. Try rephrasing your question or checking the example questions."
-        
-        # Combine document information
-        document_summaries = []
-        for doc in context_documents[:3]:
-            summary = f"According to '{doc.get('title', 'Unknown')}' by {doc.get('author', 'Unknown')}: "
-            content = doc.get('content', '')
-            summary += content[:200] + "..." if len(content) > 200 else content
-            document_summaries.append(summary)
-        
-        # Create a natural response
-        responses = [
-            f"Based on historical research, {question.lower().replace('?', '')} is addressed in several sources. ",
-            f"Historical records indicate that {question.lower().replace('?', '')} ",
-            f"Research on this topic shows that {question.lower().replace('?', '')} "
-        ]
-        
-        base_response = random.choice(responses)
-        
-        # Add document insights
-        if document_summaries:
-            base_response += " ".join(document_summaries[:2])
-            base_response += " This evidence comes from historical documents in the 1421 research database."
-        
-        return base_response
 
 # ========== INITIALIZE SYSTEM ==========
 
@@ -586,7 +948,7 @@ def show_dashboard(system):
         with col1:
             st.metric("Total Documents", stats['total_documents'])
         with col2:
-            st.metric("Historical Entities", stats['total_entities'])
+            st.metric("Saved Searches", stats['saved_searches'])
         with col3:
             st.metric("Geocoded Locations", stats['geocoded_locations'])
         with col4:
@@ -642,81 +1004,125 @@ def show_dashboard(system):
         key="question_input"
     )
     
+    # Source selection
     col1, col2 = st.columns([1, 3])
     with col1:
         ask_btn = st.button("RESEARCH & ANSWER", type="primary", use_container_width=True)
+    with col2:
+        st.markdown("*System automatically uses both documents and web research*")
     
     # Process question
     if ask_btn and question:
-        start_time = time.time()
-        with st.spinner("Researching historical records..."):
-            # Search for relevant documents
-            results = system.search_documents(question, limit=10)
+        with st.spinner("Researching historical records and searching the web..."):
+            # Perform comprehensive search
+            search_result = system.perform_comprehensive_search(question)
             
-            # Track search
-            response_time = time.time() - start_time
-            system.track_search(question, response_time, len(results))
+            # Store in session for save functionality
+            st.session_state.last_search_result = search_result
             
-            if results:
-                # Generate answer
-                answer = system.generate_answer(question, results)
-                
-                # Display answer
+            if search_result['total_results'] > 0:
+                # Display answer in chat-like format
                 st.markdown("""
-                <div class="answer-container">
-                """, unsafe_allow_html=True)
-                
-                st.markdown(f"**Answer:** {answer}")
-                
-                st.markdown("""
+                <div class="chat-message user-message">
+                    <strong>You:</strong><br>
+                    {question}
                 </div>
-                """, unsafe_allow_html=True)
+                """.format(question=question), unsafe_allow_html=True)
                 
-                # Show sources
-                with st.expander(f"SOURCES ({len(results)} documents found)", expanded=True):
-                    st.write("**Relevant historical documents:**")
+                st.markdown("""
+                <div class="chat-message assistant-message">
+                    <strong>1421 AI:</strong><br>
+                    <div class="answer-text">
+                        {answer}
+                    </div>
+                </div>
+                """.format(answer=search_result['answer']), unsafe_allow_html=True)
+                
+                # Show sources badges
+                st.markdown("**Sources used:**")
+                if 'documents' in search_result['sources_used']:
+                    st.markdown('<span class="source-badge badge-document">📄 Documents</span>', unsafe_allow_html=True)
+                if 'web' in search_result['sources_used']:
+                    st.markdown('<span class="source-badge badge-web">🌐 Web</span>', unsafe_allow_html=True)
+                
+                # Show detailed sources
+                with st.expander(f"DETAILED SOURCES ({search_result['total_results']} results found)", expanded=True):
+                    # Document sources
+                    if search_result['document_results']:
+                        st.write("**Historical Documents:**")
+                        for i, result in enumerate(search_result['document_results'][:5]):
+                            st.markdown(f"**{i+1}. {result['title']}**")
+                            st.markdown(f"*Author: {result.get('author', 'Unknown')}*")
+                            st.markdown(f"*Type: {result.get('source_type', 'Unknown')}*")
+                            
+                            if result.get('url'):
+                                st.markdown(f"[View Source]({result['url']})")
+                            
+                            # Show relevance snippet
+                            if result.get('snippet'):
+                                st.markdown("**Relevant Excerpt:**")
+                                st.info(result['snippet'])
+                            
+                            if i < len(search_result['document_results'][:5]) - 1:
+                                st.divider()
                     
-                    for i, result in enumerate(results[:5]):
-                        st.markdown(f"**{i+1}. {result['title']}**")
-                        st.markdown(f"*Author: {result['author']}*")
-                        st.markdown(f"*Type: {result['source_type']}*")
-                        
-                        if result.get('url'):
-                            st.markdown(f"[View Source]({result['url']})")
-                        
-                        # Show relevance snippet
-                        if result.get('snippet'):
-                            st.markdown("**Relevant Excerpt:**")
-                            st.info(result['snippet'])
-                        
-                        if i < len(results[:5]) - 1:
+                    # Web sources
+                    if search_result['web_results']:
+                        if search_result['document_results']:
                             st.divider()
+                        st.write("**Web Research:**")
+                        for i, result in enumerate(search_result['web_results']):
+                            st.markdown(f"**{i+1}. {result['title']}**")
+                            st.markdown(f"*Source: {result.get('source', 'Web')}*")
+                            
+                            if result.get('url'):
+                                st.markdown(f"[View Source]({result['url']})")
+                            
+                            # Show snippet
+                            if result.get('snippet'):
+                                st.markdown("**Summary:**")
+                                st.info(result['snippet'])
+                            
+                            if i < len(search_result['web_results']) - 1:
+                                st.divider()
                 
-                # Save search
-                if 'saved_searches' not in st.session_state:
-                    st.session_state.saved_searches = []
+                # Save search functionality
+                st.divider()
+                col1, col2 = st.columns([1, 3])
+                with col1:
+                    save_search = st.button("💾 SAVE THIS SEARCH", use_container_width=True)
+                with col2:
+                    st.markdown("*Save question, answer, and sources for later reference*")
                 
-                save_search = st.checkbox("Save this search")
                 if save_search:
-                    search_entry = {
-                        'id': len(st.session_state.saved_searches) + 1,
-                        'query': question,
-                        'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        'results': len(results),
-                        'date': datetime.now().strftime("%Y-%m-%d"),
-                        'time': datetime.now().strftime("%H:%M")
-                    }
-                    st.session_state.saved_searches.append(search_entry)
-                    st.success(f"Search saved! Total saved searches: {len(st.session_state.saved_searches)}")
-                
+                    # Save the search using the SavedSearchesSystem
+                    search_entry = SavedSearchesSystem.save_search(
+                        question=question,
+                        answer=search_result['answer'],
+                        sources=search_result['sources_used'],
+                        document_results=search_result['document_results'],
+                        web_results=search_result['web_results']
+                    )
+                    
+                    st.success(f"""
+                    **Search saved successfully!**
+                    
+                    - **Time:** {search_entry['timestamp']}
+                    - **Sources:** {', '.join(search_entry['sources'])}
+                    - **Total results:** {search_entry['document_results_count'] + search_entry['web_results_count']}
+                    
+                    You can access this search in the navigation panel.
+                    """)
+                    
             else:
                 st.warning("""
-                **No specific documents found** for your question.
+                **No specific information found** for your question.
                 
                 Try:
                 - Using different keywords
                 - Asking more general questions about Chinese exploration
                 - Referring to the example questions above
+                - The system searches both historical documents and web sources
                 """)
 
 def show_documents_page(system):
@@ -750,7 +1156,7 @@ def show_documents_page(system):
         with st.spinner("Searching documents..."):
             documents = system.search_documents(search_query, limit=limit)
             response_time = time.time() - start_time
-            system.track_search(search_query, response_time, len(documents))
+            system.track_search(search_query, response_time, len(documents), ['documents'])
             if documents:
                 st.success(f"Found {len(documents)} documents")
     elif show_all_clicked:
@@ -901,8 +1307,18 @@ def show_analytics_page(system):
             unique_days = len(analytics['searches_by_day'])
             st.metric("Active Days", unique_days)
         with col4:
-            topics = len(analytics['popular_topics'])
-            st.metric("Topics Tracked", topics)
+            st.metric("Saved Searches", stats['saved_searches'])
+        
+        # Source Usage
+        st.subheader("Source Usage")
+        if analytics['sources_used']:
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Document Searches", analytics['sources_used']['documents'])
+            with col2:
+                st.metric("Web Searches", analytics['sources_used']['web'])
+            with col3:
+                st.metric("Combined Searches", analytics['sources_used']['both'])
         
         st.divider()
         
@@ -929,19 +1345,23 @@ def show_analytics_page(system):
                 st.plotly_chart(fig, use_container_width=True)
         
         with col2:
-            # Response Time Distribution
-            if analytics['response_times']:
-                fig = go.Figure(data=[
-                    go.Histogram(
-                        x=analytics['response_times'],
-                        nbinsx=20,
-                        marker_color='#28a745'
-                    )
-                ])
+            # Source Distribution Pie Chart
+            if analytics['sources_used']:
+                labels = ['Documents Only', 'Web Only', 'Both']
+                values = [
+                    analytics['sources_used']['documents'],
+                    analytics['sources_used']['web'],
+                    analytics['sources_used']['both']
+                ]
+                
+                fig = go.Figure(data=[go.Pie(
+                    labels=labels,
+                    values=values,
+                    hole=.3,
+                    marker=dict(colors=['#4a6491', '#28a745', '#d4af37'])
+                )])
                 fig.update_layout(
-                    title="Response Time Distribution",
-                    xaxis_title="Response Time (seconds)",
-                    yaxis_title="Frequency",
+                    title="Search Source Distribution",
                     height=300
                 )
                 st.plotly_chart(fig, use_container_width=True)
@@ -998,44 +1418,116 @@ def show_saved_searches_page():
     """Saved Searches page"""
     st.markdown('<h2 class="sub-header">SAVED SEARCHES</h2>', unsafe_allow_html=True)
     
-    if 'saved_searches' not in st.session_state:
-        st.session_state.saved_searches = []
+    saved_searches = SavedSearchesSystem.get_all_saved_searches()
     
-    if st.session_state.saved_searches:
-        st.write(f"**Total Saved Searches:** {len(st.session_state.saved_searches)}")
+    if saved_searches:
+        st.write(f"**Total Saved Searches:** {len(saved_searches)}")
         
-        for i, search in enumerate(st.session_state.saved_searches):
-            col1, col2, col3 = st.columns([3, 1, 1])
+        # Sort by most recent first
+        saved_searches_sorted = sorted(saved_searches, key=lambda x: x['timestamp'], reverse=True)
+        
+        for search in saved_searches_sorted:
+            st.markdown(f"""
+            <div class="saved-search-page-item">
+                <div class="search-query-page">{search['question']}</div>
+                <div class="search-time">Saved: {search['timestamp']}</div>
+                
+                <div class="search-sources">
+            """, unsafe_allow_html=True)
             
-            with col1:
+            # Show source badges
+            if 'documents' in search['sources']:
+                st.markdown('<span class="source-badge badge-document">📄 Documents: {}</span>'.format(
+                    search['document_results_count']), unsafe_allow_html=True)
+            if 'web' in search['sources']:
+                st.markdown('<span class="source-badge badge-web">🌐 Web: {}</span>'.format(
+                    search['web_results_count']), unsafe_allow_html=True)
+            
+            st.markdown("""
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Show answer preview
+            with st.expander("View Answer", expanded=False):
                 st.markdown(f"""
-                <div class="saved-search-item">
-                    <strong>{search['query'][:50]}{'...' if len(search['query']) > 50 else ''}</strong>
-                    <div class="search-time">
-                        Saved: {search['timestamp']} | Results: {search['results']}
-                    </div>
+                <div class="answer-text">
+                    {search['answer']}
                 </div>
                 """, unsafe_allow_html=True)
+                
+                # Action buttons
+                col1, col2, col3 = st.columns([2, 1, 1])
+                with col1:
+                    if st.button("SEARCH AGAIN", key=f"again_{search['id']}", use_container_width=True):
+                        st.session_state.current_question = search['question']
+                        st.session_state.current_page = "dashboard"
+                        st.rerun()
+                with col2:
+                    if st.button("VIEW DETAILS", key=f"details_{search['id']}", use_container_width=True):
+                        # Show detailed results
+                        st.info(f"**Detailed Results for:** {search['question']}")
+                        
+                        if search.get('document_results'):
+                            st.write("**Document Sources:**")
+                            for doc in search['document_results'][:3]:
+                                st.write(f"- {doc.get('title', 'Unknown')}")
+                        
+                        if search.get('web_results'):
+                            st.write("**Web Sources:**")
+                            for web in search['web_results'][:2]:
+                                st.write(f"- {web.get('title', 'Unknown')}")
+                with col3:
+                    if st.button("DELETE", key=f"delete_{search['id']}", type="secondary", use_container_width=True):
+                        if SavedSearchesSystem.delete_search(search['id']):
+                            st.success("Search deleted!")
+                            st.rerun()
             
-            with col2:
-                if st.button("SEARCH AGAIN", key=f"again_{search['id']}", use_container_width=True):
-                    st.session_state.current_question = search['query']
-                    st.session_state.current_page = "dashboard"
-                    st.rerun()
-            
-            with col3:
-                if st.button("DELETE", key=f"delete_{search['id']}", type="secondary", use_container_width=True):
-                    st.session_state.saved_searches = [s for s in st.session_state.saved_searches if s['id'] != search['id']]
-                    st.success("Search deleted!")
-                    st.rerun()
+            st.divider()
         
         # Clear all button
-        if st.button("CLEAR ALL SAVED SEARCHES", type="secondary", use_container_width=True):
-            st.session_state.saved_searches = []
+        if st.button("🗑️ CLEAR ALL SAVED SEARCHES", type="secondary", use_container_width=True):
+            SavedSearchesSystem.clear_all_searches()
             st.success("All saved searches cleared!")
             st.rerun()
+        
+        # Export option
+        st.divider()
+        if st.button("📥 EXPORT SAVED SEARCHES", use_container_width=True):
+            # Create export data
+            export_data = []
+            for search in saved_searches:
+                export_data.append({
+                    'ID': search['id'],
+                    'Question': search['question'],
+                    'Answer': search['answer'],
+                    'Timestamp': search['timestamp'],
+                    'Sources': ', '.join(search['sources']),
+                    'Document Results': search['document_results_count'],
+                    'Web Results': search['web_results_count']
+                })
+            
+            df = pd.DataFrame(export_data)
+            csv = df.to_csv(index=False).encode('utf-8')
+            
+            st.download_button(
+                "DOWNLOAD CSV",
+                data=csv,
+                file_name=f"saved_searches_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
     else:
-        st.info("No saved searches yet. Save searches from the Dashboard to see them here.")
+        st.info("""
+        **No saved searches yet.**
+        
+        To save a search:
+        1. Go to the Dashboard
+        2. Ask a question
+        3. Click the "SAVE THIS SEARCH" button below the answer
+        
+        Saved searches will appear here and in the navigation panel sidebar.
+        """)
 
 def show_settings_page(system):
     """Settings page"""
@@ -1049,7 +1541,7 @@ def show_settings_page(system):
         stats = system.get_database_stats()
         if stats:
             st.write(f"**Total Documents:** {stats['total_documents']}")
-            st.write(f"**Historical Entities:** {stats['total_entities']}")
+            st.write(f"**Saved Searches:** {stats['saved_searches']}")
             st.write(f"**Document Sources:** {len(stats['documents_by_source'])}")
             st.write(f"**Geocoded Locations:** {stats['geocoded_locations']}")
     
@@ -1058,6 +1550,30 @@ def show_settings_page(system):
         st.write(f"**Database Path:** `{system.db_path}`")
         st.write(f"**Database Connection:** {'Active' if system.db else 'Inactive'}")
         st.write(f"**Cached Documents:** {len(system.documents_cache)}")
+        st.write(f"**Web Search Module:** {'Active' if system.web_searcher else 'Inactive'}")
+    
+    st.divider()
+    
+    # Search Settings
+    st.subheader("Search Settings")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        default_source = st.selectbox(
+            "Default Search Source",
+            ["Auto (Documents + Web)", "Documents Only", "Web Only"],
+            index=0
+        )
+        st.caption("Auto mode uses both sources for comprehensive results")
+    
+    with col2:
+        web_search_limit = st.slider(
+            "Web Search Results Limit",
+            min_value=1,
+            max_value=5,
+            value=3,
+            help="Number of web results to fetch per search"
+        )
     
     st.divider()
     
@@ -1095,14 +1611,15 @@ def show_settings_page(system):
             'questions_asked': [],
             'response_times': [],
             'popular_topics': {},
-            'user_sessions': []
+            'user_sessions': [],
+            'sources_used': {'documents': 0, 'web': 0, 'both': 0}
         }
         st.success("Analytics data reset!")
 
 # ========== CUSTOM SIDEBAR ==========
 
 def render_sidebar():
-    """Render custom sidebar with clickable navigation"""
+    """Render custom sidebar with clickable navigation and saved searches"""
     with st.sidebar:
         # Logo/Title
         st.markdown("""
@@ -1114,12 +1631,12 @@ def render_sidebar():
         
         # Navigation
         pages = [
-            ("DASHBOARD", "dashboard"),
-            ("RESEARCH DOCUMENTS", "documents"),
-            ("FULL VOYAGE MAP", "map"),
-            ("ANALYTICS", "analytics"),
-            ("SAVED SEARCHES", "saved_searches"),
-            ("SETTINGS", "settings")
+            ("📊 DASHBOARD", "dashboard"),
+            ("📚 RESEARCH DOCUMENTS", "documents"),
+            ("🗺️ FULL VOYAGE MAP", "map"),
+            ("📈 ANALYTICS", "analytics"),
+            ("💾 SAVED SEARCHES", "saved_searches"),
+            ("⚙️ SETTINGS", "settings")
         ]
         
         current_page = st.session_state.get('current_page', 'dashboard')
@@ -1143,14 +1660,19 @@ def render_sidebar():
             <div style="background: rgba(255,255,255,0.1); padding: 15px; border-radius: 10px; margin-top: 20px;">
                 <h4 style="color: #d4af37; margin-bottom: 10px; font-size: 1rem;">SYSTEM STATUS</h4>
                 <p style="color: white; margin: 5px 0; font-size: 0.9rem;"><strong>Documents:</strong> {}</p>
+                <p style="color: white; margin: 5px 0; font-size: 0.9rem;"><strong>Saved Searches:</strong> {}</p>
                 <p style="color: white; margin: 5px 0; font-size: 0.9rem;"><strong>Locations:</strong> {}</p>
                 <p style="color: white; margin: 5px 0; font-size: 0.9rem;"><strong>Entities:</strong> {}</p>
             </div>
             """.format(
                 stats.get('total_documents', 0) if stats else 0,
+                stats.get('saved_searches', 0) if stats else 0,
                 stats.get('geocoded_locations', 25) if stats else 25,
                 stats.get('total_entities', 0) if stats else 0
             ), unsafe_allow_html=True)
+        
+        # Render saved searches in sidebar
+        SavedSearchesSystem.render_sidebar_saved_searches()
 
 # ========== MAIN APPLICATION ==========
 
@@ -1163,6 +1685,9 @@ def main():
         <h1 class="main-header">1421 AI - HISTORICAL RESEARCH SYSTEM</h1>
         <p style="font-size: 1.2rem; color: #666; max-width: 800px; margin: 0 auto;">
             A comprehensive research platform for studying Chinese exploration history and the 1421 theory
+        </p>
+        <p style="font-size: 1rem; color: #888; margin-top: 10px;">
+            Powered by document analysis + web research • ChatGPT-like interface • Saved searches system
         </p>
     </div>
     """, unsafe_allow_html=True)
@@ -1196,7 +1721,11 @@ def main():
         
         # Show popup notification
         if stats['total_documents'] > 0:
-            show_popup_notification(f"System Status: {stats['total_documents']} historical documents loaded and ready for research")
+            show_popup_notification(f"System Status: {stats['total_documents']} historical documents loaded • {stats['saved_searches']} saved searches • Web research active")
+    
+    # Initialize saved searches if not exists
+    if 'saved_searches' not in st.session_state:
+        st.session_state.saved_searches = []
     
     # Render sidebar
     render_sidebar()
