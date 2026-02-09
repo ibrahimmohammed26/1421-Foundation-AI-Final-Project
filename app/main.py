@@ -679,22 +679,32 @@ class ResearchSystem:
             cursor = self.db.execute("SELECT COUNT(DISTINCT entity_text) FROM entities WHERE entity_type = 'LOCATION'")
             geocoded_locations = cursor.fetchone()[0] or 25
             
-            # Get saved searches count
+            # Get saved searches count from session state
             saved_searches_count = len(st.session_state.get('saved_searches', []))
             
             return {
-                "total_documents": total_docs,
-                "documents_by_source": docs_by_source,
-                "total_entities": total_entities,
-                "entities_by_type": entities_by_type,
-                "timeline_events": timeline_events_approx,
-                "geocoded_locations": geocoded_locations,
+                "total_documents": total_docs if total_docs else 0,
+                "documents_by_source": docs_by_source if docs_by_source else {},
+                "total_entities": total_entities if total_entities else 0,
+                "entities_by_type": entities_by_type if entities_by_type else {},
+                "timeline_events": timeline_events_approx if timeline_events_approx else 0,
+                "geocoded_locations": geocoded_locations if geocoded_locations else 0,
                 "indexed_documents": len(self.documents_cache),
                 "saved_searches": saved_searches_count
             }
         except Exception as e:
             print(f"Error getting stats: {e}")
-            return None
+            # Return default stats if database query fails
+            return {
+                "total_documents": 0,
+                "documents_by_source": {},
+                "total_entities": 0,
+                "entities_by_type": {},
+                "timeline_events": 0,
+                "geocoded_locations": 0,
+                "indexed_documents": len(self.documents_cache),
+                "saved_searches": len(st.session_state.get('saved_searches', []))
+            }
     
     def get_all_documents(self, limit=100, source_type=None):
         """Get all documents from database"""
@@ -946,13 +956,13 @@ def show_dashboard(system):
         # Display stats in columns
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Total Documents", stats['total_documents'])
+            st.metric("Total Documents", stats.get('total_documents', 0))
         with col2:
-            st.metric("Saved Searches", stats['saved_searches'])
+            st.metric("Saved Searches", stats.get('saved_searches', 0))
         with col3:
-            st.metric("Geocoded Locations", stats['geocoded_locations'])
+            st.metric("Geocoded Locations", stats.get('geocoded_locations', 0))
         with col4:
-            st.metric("Database Status", "Active")
+            st.metric("Database Status", "Active" if system.db else "Inactive")
     
     st.divider()
     
@@ -1307,7 +1317,7 @@ def show_analytics_page(system):
             unique_days = len(analytics['searches_by_day'])
             st.metric("Active Days", unique_days)
         with col4:
-            st.metric("Saved Searches", stats['saved_searches'])
+            st.metric("Saved Searches", stats.get('saved_searches', 0))
         
         # Source Usage
         st.subheader("Source Usage")
@@ -1395,12 +1405,12 @@ def show_analytics_page(system):
         
         with col1:
             st.write("**Document Types:**")
-            for source_type, count in stats['documents_by_source'].items():
+            for source_type, count in stats.get('documents_by_source', {}).items():
                 st.write(f"- {source_type}: {count}")
         
         with col2:
             st.write("**Entity Types:**")
-            for entity_type, count in stats['entities_by_type'].items():
+            for entity_type, count in stats.get('entities_by_type', {}).items():
                 st.write(f"- {entity_type}: {count}")
         
         # Recent Searches
@@ -1540,10 +1550,10 @@ def show_settings_page(system):
         st.subheader("Database Information")
         stats = system.get_database_stats()
         if stats:
-            st.write(f"**Total Documents:** {stats['total_documents']}")
-            st.write(f"**Saved Searches:** {stats['saved_searches']}")
-            st.write(f"**Document Sources:** {len(stats['documents_by_source'])}")
-            st.write(f"**Geocoded Locations:** {stats['geocoded_locations']}")
+            st.write(f"**Total Documents:** {stats.get('total_documents', 0)}")
+            st.write(f"**Saved Searches:** {stats.get('saved_searches', 0)}")
+            st.write(f"**Document Sources:** {len(stats.get('documents_by_source', {}))}")
+            st.write(f"**Geocoded Locations:** {stats.get('geocoded_locations', 0)}")
     
     with col2:
         st.subheader("System Status")
@@ -1719,9 +1729,13 @@ def main():
     if stats:
         st.session_state.system_stats = stats
         
-        # Show popup notification
-        if stats['total_documents'] > 0:
-            show_popup_notification(f"System Status: {stats['total_documents']} historical documents loaded • {stats['saved_searches']} saved searches • Web research active")
+        # Show popup notification with safe access to stats
+        if stats.get('total_documents', 0) > 0:
+            saved_searches_count = stats.get('saved_searches', 0)
+            show_popup_notification(
+                f"System Status: {stats.get('total_documents', 0)} historical documents loaded • "
+                f"{saved_searches_count} saved searches • Web research active"
+            )
     
     # Initialize saved searches if not exists
     if 'saved_searches' not in st.session_state:
