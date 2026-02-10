@@ -33,6 +33,32 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# ========== INITIALIZE SESSION STATE ==========
+# Initialize all session state variables at the start
+if 'search_analytics' not in st.session_state:
+    st.session_state.search_analytics = {
+        'total_searches': 0,
+        'searches_by_day': {},
+        'searches_by_hour': {},
+        'questions_asked': [],
+        'response_times': [],
+        'popular_topics': {},
+        'user_sessions': [],
+        'sources_used': {'documents': 0, 'web': 0, 'both': 0}
+    }
+
+if 'saved_searches' not in st.session_state:
+    st.session_state.saved_searches = []
+
+if 'current_page' not in st.session_state:
+    st.session_state.current_page = "dashboard"
+
+if 'current_question' not in st.session_state:
+    st.session_state.current_question = ""
+
+if 'auto_search' not in st.session_state:
+    st.session_state.auto_search = False
+
 # ========== CSS STYLING ==========
 st.markdown("""
 <style>
@@ -109,10 +135,10 @@ section[data-testid="stSidebar"] > div {
     font-weight: 700 !important;
 }
 
-/* Status popup */
+/* Status popup - moved lower */
 .popup-notification {
     position: fixed;
-    top: 20px;
+    top: 100px;  /* Lowered from 20px to 100px */
     right: 20px;
     background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
     color: white;
@@ -197,7 +223,7 @@ section[data-testid="stSidebar"] > div {
     box-shadow: 0 6px 15px rgba(0,0,0,0.2) !important;
 }
 
-/* Saved searches sidebar */
+/* Saved searches sidebar - always visible */
 .saved-search-sidebar-item {
     background: rgba(255, 255, 255, 0.1);
     border-radius: 8px;
@@ -286,6 +312,17 @@ section[data-testid="stSidebar"] > div {
 .copy-button:hover {
     background: linear-gradient(135deg, #495057 0%, #343a40 100%);
     transform: translateY(-2px);
+}
+
+/* No saved searches message */
+.no-saved-searches {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 15px;
+    margin: 10px 0;
+    text-align: center;
+    color: #cccccc;
+    font-style: italic;
 }
 </style>
 
@@ -481,13 +518,13 @@ class SavedSearchesSystem:
     
     @staticmethod
     def render_sidebar_saved_searches():
-        """Render saved searches in sidebar (NOT as a separate page)"""
+        """Render saved searches in sidebar (always visible)"""
         saved_searches = SavedSearchesSystem.get_all_saved_searches()
         
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("### SAVED SEARCHES")
+        
         if saved_searches:
-            st.sidebar.markdown("---")
-            st.sidebar.markdown("### SAVED SEARCHES")
-            
             # Show only the 5 most recent searches in sidebar
             for search in saved_searches[-5:][::-1]:  # Show most recent first
                 with st.sidebar:
@@ -506,6 +543,13 @@ class SavedSearchesSystem:
                             st.rerun()
             
             st.sidebar.markdown(f"*Showing 5 of {len(saved_searches)} saved searches*")
+        else:
+            st.sidebar.markdown("""
+            <div class="no-saved-searches">
+                No saved searches yet.<br>
+                Save searches from the Dashboard.
+            </div>
+            """, unsafe_allow_html=True)
 
 # ========== RESEARCH SYSTEM ==========
 
@@ -522,26 +566,8 @@ class ResearchSystem:
         self.documents_cache = []
         self.web_searcher = WebSearchModule()
         
-        # Initialize analytics
-        self.initialize_analytics()
-        
         # Load everything
         self._initialize()
-    
-    def initialize_analytics(self):
-        """Initialize analytics tracking"""
-        # Initialize analytics in session state if not exists
-        if 'search_analytics' not in st.session_state:
-            st.session_state.search_analytics = {
-                'total_searches': 0,
-                'searches_by_day': {},
-                'searches_by_hour': {},
-                'questions_asked': [],
-                'response_times': [],
-                'popular_topics': {},
-                'user_sessions': [],
-                'sources_used': {'documents': 0, 'web': 0, 'both': 0}
-            }
     
     def _initialize(self):
         """Initialize all components"""
@@ -573,17 +599,8 @@ class ResearchSystem:
     def track_search(self, query: str, response_time: float, results_count: int, 
                      sources_used: List[str]):
         """Track search analytics"""
-        # Access analytics safely
-        analytics = st.session_state.get('search_analytics', {
-            'total_searches': 0,
-            'searches_by_day': {},
-            'searches_by_hour': {},
-            'questions_asked': [],
-            'response_times': [],
-            'popular_topics': {},
-            'user_sessions': [],
-            'sources_used': {'documents': 0, 'web': 0, 'both': 0}
-        })
+        # Access analytics safely (already initialized at module level)
+        analytics = st.session_state.search_analytics
         
         today = datetime.now().strftime("%Y-%m-%d")
         hour = datetime.now().strftime("%H:00")
@@ -621,9 +638,6 @@ class ResearchSystem:
             analytics['response_times'] = analytics['response_times'][-500:]
         if len(analytics['questions_asked']) > 100:
             analytics['questions_asked'] = analytics['questions_asked'][-50:]
-        
-        # Update session state
-        st.session_state.search_analytics = analytics
     
     def get_database_stats(self):
         """Get database statistics"""
@@ -1006,12 +1020,6 @@ def show_dashboard(system):
     st.divider()
     
     # Question input
-    if 'current_question' not in st.session_state:
-        st.session_state.current_question = ""
-    
-    if 'auto_search' not in st.session_state:
-        st.session_state.auto_search = False
-    
     question = st.text_area(
         "Your Question:",
         value=st.session_state.current_question,
@@ -1255,142 +1263,139 @@ def show_map_page(system):
         if map_data and map_data['locations']:
             locations = map_data['locations']
             
-            # Create two columns for map and timeline
-            col1, col2 = st.columns([2, 1])
+            # Create map
+            fig_map = go.Figure()
             
-            with col1:
-                # Create map
-                fig_map = go.Figure()
-                
-                lats = [loc['latitude'] for loc in locations]
-                lons = [loc['longitude'] for loc in locations]
-                names = [loc['name'] for loc in locations]
-                dates = [loc.get('date', 'Unknown') for loc in locations]
-                events = [loc.get('event', 'Historical location') for loc in locations]
-                counts = [loc['mention_count'] for loc in locations]
-                
+            lats = [loc['latitude'] for loc in locations]
+            lons = [loc['longitude'] for loc in locations]
+            names = [loc['name'] for loc in locations]
+            dates = [loc.get('date', 'Unknown') for loc in locations]
+            events = [loc.get('event', 'Historical location') for loc in locations]
+            counts = [loc['mention_count'] for loc in locations]
+            
+            fig_map.add_trace(go.Scattergeo(
+                lon=lons,
+                lat=lats,
+                mode='markers+text',
+                marker=dict(
+                    size=[min(c * 3, 25) for c in counts],
+                    color='#FF5722',
+                    line=dict(width=2, color='white')
+                ),
+                text=names,
+                textposition="top center",
+                name='Historical Locations',
+                hovertemplate='<b>%{text}</b><br>Date: %{customdata[0]}<br>Event: %{customdata[1]}<br>Mentions: %{marker.size}<extra></extra>',
+                customdata=list(zip(dates, events))
+            ))
+            
+            # Add voyage routes
+            if len(lats) > 2:
                 fig_map.add_trace(go.Scattergeo(
-                    lon=lons,
-                    lat=lats,
+                    lon=lons[:5],
+                    lat=lats[:5],
+                    mode='lines',
+                    line=dict(width=2, color='#d4af37', dash='dash'),
+                    name='Possible Voyage Route'
+                ))
+            
+            fig_map.update_layout(
+                title="Chinese Exploration Voyage Map",
+                geo=dict(
+                    showland=True,
+                    landcolor='rgb(243, 243, 243)',
+                    coastlinecolor='rgb(204, 204, 204)',
+                    showcountries=True,
+                    countrycolor='rgb(204, 204, 204)',
+                    showocean=True,
+                    oceancolor='rgb(230, 245, 255)',
+                    projection_type='natural earth',
+                    showlakes=True,
+                    lakecolor='rgb(230, 245, 255)'
+                ),
+                height=500,
+                showlegend=True,
+                margin=dict(l=0, r=0, t=40, b=0)
+            )
+            
+            st.plotly_chart(fig_map, use_container_width=True)
+            
+            # Timeline section (below map, above location details)
+            st.divider()
+            st.subheader("Historical Timeline")
+            
+            # Prepare timeline data
+            timeline_data = []
+            for loc in locations:
+                if 'date' in loc:
+                    # Parse date - could be range like "1405-1433" or single year "1405"
+                    date_str = loc['date']
+                    if '-' in date_str:
+                        start_year = date_str.split('-')[0]
+                        end_year = date_str.split('-')[1]
+                        try:
+                            start_year_int = int(start_year)
+                            end_year_int = int(end_year)
+                            year = start_year_int  # Use start year for positioning
+                            duration = end_year_int - start_year_int
+                        except:
+                            year = 1400  # Default
+                            duration = 10
+                    else:
+                        try:
+                            year = int(date_str)
+                            duration = 5  # Default duration for single year events
+                        except:
+                            year = 1400  # Default
+                            duration = 10
+                    
+                    timeline_data.append({
+                        'Year': year,
+                        'Event': f"{loc['name']}: {loc.get('event', 'Historical event')}",
+                        'Location': loc['name'],
+                        'Duration': duration
+                    })
+            
+            if timeline_data:
+                timeline_df = pd.DataFrame(timeline_data)
+                timeline_df = timeline_df.sort_values('Year')
+                
+                # Create timeline chart
+                fig_timeline = go.Figure()
+                
+                # Add events as points
+                fig_timeline.add_trace(go.Scatter(
+                    x=timeline_df['Year'],
+                    y=[1] * len(timeline_df),  # Constant y for now
                     mode='markers+text',
-                    marker=dict(
-                        size=[min(c * 3, 25) for c in counts],
-                        color='#FF5722',
-                        line=dict(width=2, color='white')
-                    ),
-                    text=names,
-                    textposition="top center",
-                    name='Historical Locations',
-                    hovertemplate='<b>%{text}</b><br>Date: %{customdata[0]}<br>Event: %{customdata[1]}<br>Mentions: %{marker.size}<extra></extra>',
-                    customdata=list(zip(dates, events))
+                    marker=dict(size=10, color='#d4af37'),
+                    text=timeline_df['Location'],
+                    textposition='top center',
+                    hovertemplate='<b>%{text}</b><br>Year: %{x}<br>Event: %{customdata}<extra></extra>',
+                    customdata=timeline_df['Event'],
+                    name='Historical Events'
                 ))
                 
-                # Add voyage routes
-                if len(lats) > 2:
-                    fig_map.add_trace(go.Scattergeo(
-                        lon=lons[:5],
-                        lat=lats[:5],
-                        mode='lines',
-                        line=dict(width=2, color='#d4af37', dash='dash'),
-                        name='Possible Voyage Route'
-                    ))
-                
-                fig_map.update_layout(
-                    title="Chinese Exploration Voyage Map",
-                    geo=dict(
-                        showland=True,
-                        landcolor='rgb(243, 243, 243)',
-                        coastlinecolor='rgb(204, 204, 204)',
-                        showcountries=True,
-                        countrycolor='rgb(204, 204, 204)',
-                        showocean=True,
-                        oceancolor='rgb(230, 245, 255)',
-                        projection_type='natural earth',
-                        showlakes=True,
-                        lakecolor='rgb(230, 245, 255)'
-                    ),
-                    height=500,
-                    showlegend=True,
-                    margin=dict(l=0, r=0, t=40, b=0)
+                fig_timeline.update_layout(
+                    title="Exploration Timeline (1400-1433)",
+                    xaxis_title="Year",
+                    yaxis=dict(showticklabels=False, showgrid=False, zeroline=False),
+                    height=400,
+                    showlegend=False,
+                    margin=dict(l=20, r=20, t=40, b=20)
                 )
                 
-                st.plotly_chart(fig_map, use_container_width=True)
-            
-            with col2:
-                # Create timeline graph
-                st.subheader("Historical Timeline")
+                st.plotly_chart(fig_timeline, use_container_width=True)
                 
-                # Prepare timeline data
-                timeline_data = []
-                for loc in locations:
-                    if 'date' in loc:
-                        # Parse date - could be range like "1405-1433" or single year "1405"
-                        date_str = loc['date']
-                        if '-' in date_str:
-                            start_year = date_str.split('-')[0]
-                            end_year = date_str.split('-')[1]
-                            try:
-                                start_year_int = int(start_year)
-                                end_year_int = int(end_year)
-                                year = start_year_int  # Use start year for positioning
-                                duration = end_year_int - start_year_int
-                            except:
-                                year = 1400  # Default
-                                duration = 10
-                        else:
-                            try:
-                                year = int(date_str)
-                                duration = 5  # Default duration for single year events
-                            except:
-                                year = 1400  # Default
-                                duration = 10
-                        
-                        timeline_data.append({
-                            'Year': year,
-                            'Event': f"{loc['name']}: {loc.get('event', 'Historical event')}",
-                            'Location': loc['name'],
-                            'Duration': duration
-                        })
-                
-                if timeline_data:
-                    timeline_df = pd.DataFrame(timeline_data)
-                    timeline_df = timeline_df.sort_values('Year')
-                    
-                    # Create timeline chart
-                    fig_timeline = go.Figure()
-                    
-                    # Add events as points
-                    fig_timeline.add_trace(go.Scatter(
-                        x=timeline_df['Year'],
-                        y=[1] * len(timeline_df),  # Constant y for now
-                        mode='markers+text',
-                        marker=dict(size=10, color='#d4af37'),
-                        text=timeline_df['Location'],
-                        textposition='top center',
-                        hovertemplate='<b>%{text}</b><br>Year: %{x}<br>Event: %{customdata}<extra></extra>',
-                        customdata=timeline_df['Event'],
-                        name='Historical Events'
-                    ))
-                    
-                    fig_timeline.update_layout(
-                        title="Exploration Timeline (1400-1433)",
-                        xaxis_title="Year",
-                        yaxis=dict(showticklabels=False, showgrid=False, zeroline=False),
-                        height=400,
-                        showlegend=False,
-                        margin=dict(l=20, r=20, t=40, b=20)
-                    )
-                    
-                    st.plotly_chart(fig_timeline, use_container_width=True)
-                    
-                    # Show timeline table
-                    with st.expander("Timeline Details", expanded=False):
-                        timeline_table = timeline_df[['Year', 'Location', 'Event']].sort_values('Year')
-                        st.dataframe(timeline_table, use_container_width=True, hide_index=True)
-                else:
-                    st.info("No timeline data available for locations.")
+                # Show timeline table
+                with st.expander("Timeline Details", expanded=False):
+                    timeline_table = timeline_df[['Year', 'Location', 'Event']].sort_values('Year')
+                    st.dataframe(timeline_table, use_container_width=True, hide_index=True)
+            else:
+                st.info("No timeline data available for locations.")
             
-            # Location table
+            # Location details (below timeline)
+            st.divider()
             with st.expander("LOCATION DETAILS", expanded=False):
                 loc_df = pd.DataFrame(locations)
                 if 'date' in loc_df.columns and 'event' in loc_df.columns:
@@ -1419,6 +1424,7 @@ def show_analytics_page(system):
     """Analytics page"""
     st.markdown('<h2 class="sub-header">ANALYTICS DASHBOARD</h2>', unsafe_allow_html=True)
     
+    # Access analytics from session state (already initialized)
     analytics = st.session_state.search_analytics
     stats = system.get_database_stats()
     
@@ -1661,7 +1667,7 @@ def render_sidebar():
             ("SETTINGS", "settings")
         ]
         
-        current_page = st.session_state.get('current_page', 'dashboard')
+        current_page = st.session_state.current_page
         
         for label, page_id in pages:
             if st.button(
@@ -1693,7 +1699,7 @@ def render_sidebar():
                 stats.get('total_entities', 0) if stats else 0
             ), unsafe_allow_html=True)
         
-        # Render saved searches in sidebar (NOT as a separate page)
+        # Render saved searches in sidebar (always visible, below system status)
         SavedSearchesSystem.render_sidebar_saved_searches()
 
 # ========== MAIN APPLICATION ==========
@@ -1749,23 +1755,11 @@ def main():
                 f"{saved_searches_count} saved searches • Web research active"
             )
     
-    # Initialize saved searches if not exists
-    if 'saved_searches' not in st.session_state:
-        st.session_state.saved_searches = []
-    
-    # Initialize auto_search flag
-    if 'auto_search' not in st.session_state:
-        st.session_state.auto_search = False
-    
     # Render sidebar
     render_sidebar()
     
-    # Set default page
-    if 'current_page' not in st.session_state:
-        st.session_state.current_page = "dashboard"
-    
     # Main content area
-    current_page = st.session_state.get('current_page', 'dashboard')
+    current_page = st.session_state.current_page
     
     # Show selected page
     if current_page == "dashboard":
