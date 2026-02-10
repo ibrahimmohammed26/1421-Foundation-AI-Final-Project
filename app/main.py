@@ -59,6 +59,9 @@ if 'current_question' not in st.session_state:
 if 'auto_search' not in st.session_state:
     st.session_state.auto_search = False
 
+if 'show_all_documents' not in st.session_state:
+    st.session_state.show_all_documents = False
+
 # ========== CSS STYLING ==========
 st.markdown("""
 <style>
@@ -272,9 +275,19 @@ section[data-testid="stSidebar"] > div {
 /* Answer display */
 .answer-text {
     font-size: 1.1rem;
-    line-height: 1.6;
+    line-height: 1.8;
     color: #333;
-    margin: 15px 0;
+    margin: 20px 0;
+    padding: 10px 0;
+}
+
+.answer-text p {
+    margin-bottom: 15px;
+}
+
+.answer-text strong {
+    color: #2c3e50;
+    font-weight: 700;
 }
 
 .chat-message {
@@ -323,6 +336,51 @@ section[data-testid="stSidebar"] > div {
     text-align: center;
     color: #cccccc;
     font-style: italic;
+}
+
+/* Improved source display */
+.source-section {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 15px;
+    margin: 10px 0;
+    border-left: 4px solid #4a6491;
+}
+
+.source-title {
+    color: #2c3e50;
+    font-weight: 600;
+    margin-bottom: 8px;
+    font-size: 1rem;
+}
+
+.source-snippet {
+    color: #666;
+    font-size: 0.9rem;
+    line-height: 1.5;
+    margin-top: 8px;
+}
+
+.source-url {
+    color: #4a6491;
+    font-size: 0.8rem;
+    margin-top: 5px;
+}
+
+/* Document loading message */
+.document-loading {
+    background: #fff3cd;
+    border: 1px solid #ffc107;
+    border-radius: 8px;
+    padding: 15px;
+    margin: 15px 0;
+    color: #856404;
+}
+
+/* Yellow font for SAVED SEARCHES header */
+.saved-searches-header {
+    color: #FFD700 !important; /* Yellow color */
+    font-weight: 700 !important;
 }
 </style>
 
@@ -385,10 +443,16 @@ class WebSearchModule:
     def __init__(self):
         # Initialize OpenAI client (you need to set OPENAI_API_KEY in your environment)
         self.openai_client = None
-        if 'OPENAI_API_KEY' in st.secrets:
-            self.openai_client = openai.OpenAI(api_key=st.secrets['OPENAI_API_KEY'])
-        elif 'OPENAI_API_KEY' in os.environ:
-            self.openai_client = openai.OpenAI(api_key=os.environ['OPENAI_API_KEY'])
+        try:
+            if 'OPENAI_API_KEY' in st.secrets:
+                self.openai_client = openai.OpenAI(api_key=st.secrets['OPENAI_API_KEY'])
+            elif 'OPENAI_API_KEY' in os.environ:
+                self.openai_client = openai.OpenAI(api_key=os.environ['OPENAI_API_KEY'])
+            else:
+                self.openai_client = None
+        except Exception as e:
+            print(f"OpenAI initialization error: {e}")
+            self.openai_client = None
         
     def search_google(self, query: str, limit: int = 3) -> List[Dict]:
         """Search Google for information"""
@@ -445,7 +509,7 @@ class WebSearchModule:
         
         try:
             response = self.openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",  # Using 3.5-turbo for cost efficiency
+                model="gpt-3.5-turbo",
                 messages=[
                     {"role": "system", "content": "You are a historical research assistant specializing in Chinese exploration history and the 1421 theory. Provide accurate, well-researched answers based on available information."},
                     {"role": "user", "content": prompt}
@@ -522,7 +586,7 @@ class SavedSearchesSystem:
         saved_searches = SavedSearchesSystem.get_all_saved_searches()
         
         st.sidebar.markdown("---")
-        st.sidebar.markdown("### SAVED SEARCHES")
+        st.sidebar.markdown('<h3 class="saved-searches-header">SAVED SEARCHES</h3>', unsafe_allow_html=True)
         
         if saved_searches:
             # Show only the 5 most recent searches in sidebar
@@ -722,7 +786,14 @@ class ResearchSystem:
                     )
             
             rows = cursor.fetchall()
-            return [dict(row) for row in rows]
+            documents = [dict(row) for row in rows]
+            
+            # Add word count for each document
+            for doc in documents:
+                content = doc.get('content', '')
+                doc['word_count'] = len(content.split()) if content else 
+            
+            return documents
         except Exception as e:
             print(f"Error getting documents: {e}")
             return []
@@ -742,16 +813,18 @@ class ResearchSystem:
             rows = cursor.fetchall()
             documents = [dict(row) for row in rows]
             
-            # Add snippets
+            # Add snippets and word count
             for doc in documents:
                 content = doc.get('content', '')
+                doc['word_count'] = len(content.split()) if content else 0
+                
                 if query.lower() in content.lower():
                     idx = content.lower().find(query.lower())
                     start = max(0, idx - 100)
                     end = min(len(content), idx + 200)
                     doc['snippet'] = content[start:end] + "..."
                 else:
-                    doc['snippet'] = content[:300] + "..."
+                    doc['snippet'] = content[:300] + "..." if content else ""
             
             return documents
         except Exception as e:
@@ -777,17 +850,19 @@ class ResearchSystem:
         if document_results:
             sources_used.append('documents')
             for i, doc in enumerate(document_results[:2]):
-                summary = f"From historical documents: {doc.get('title', 'Unknown')} "
+                title = doc.get('title', 'Unknown document')
                 content = doc.get('snippet', doc.get('content', ''))
-                combined_info.append(f"{summary}{content}")
+                if content:
+                    combined_info.append(f"**From historical documents ({title}):** {content}")
         
         # Add web information
         if web_results:
             sources_used.append('web')
             for i, web in enumerate(web_results[:2]):
-                summary = f"From web research: {web.get('title', 'Unknown')} "
+                title = web.get('title', 'Unknown source')
                 content = web.get('snippet', web.get('content', ''))
-                combined_info.append(f"{summary}{content}")
+                if content:
+                    combined_info.append(f"**From web research ({title}):** {content}")
         
         # Try to generate answer using OpenAI if available
         if self.web_searcher.openai_client:
@@ -802,6 +877,7 @@ class ResearchSystem:
                 {' '.join([web.get('snippet', web.get('content', ''))[:300] for web in web_results[:2]])}
                 
                 Please provide a comprehensive answer based on the available information.
+                Format the answer with good spacing and readability.
                 """
                 
                 ai_answer = self.web_searcher.generate_with_openai(prompt)
@@ -811,26 +887,26 @@ class ResearchSystem:
                 print(f"OpenAI generation failed: {e}")
                 # Fall through to simple generation
         
-        # Fallback to simple answer generation
+        # Fallback to simple answer generation with better formatting
         responses = [
-            f"Based on historical research, {question.lower().replace('?', '')} can be understood through multiple sources. ",
-            f"Research indicates that {question.lower().replace('?', '')} ",
-            f"Historical records and contemporary research show that {question.lower().replace('?', '')} "
+            f"Based on historical research, **{question.replace('?', '')}** can be understood through multiple sources.\n\n",
+            f"Research indicates that **{question.replace('?', '')}** reveals several important findings.\n\n",
+            f"Historical records and contemporary research show that **{question.replace('?', '')}** has been studied extensively.\n\n"
         ]
         
         base_response = random.choice(responses)
         
-        # Add combined insights
+        # Add combined insights with better formatting
         if combined_info:
-            base_response += " ".join(combined_info[:3])
+            base_response += "\n\n".join(combined_info)
             
             # Add source summary
             if len(sources_used) > 1:
-                base_response += " This information comes from both historical documents and current web research."
+                base_response += "\n\n**Sources:** This information comes from both historical documents and current web research."
             elif 'documents' in sources_used:
-                base_response += " This evidence primarily comes from historical documents in the 1421 research database."
+                base_response += "\n\n**Sources:** This evidence primarily comes from historical documents in the 1421 research database."
             else:
-                base_response += " This information comes from web-based historical research."
+                base_response += "\n\n**Sources:** This information comes from web-based historical research."
         
         # If no sources were actually used (edge case)
         if not sources_used:
@@ -993,7 +1069,7 @@ def show_dashboard(system):
     
     st.write("Enter a question about Chinese exploration, Zheng He's voyages, or the 1421 theory:")
     
-    # Fewer example questions (5 instead of 10)
+    # Example questions
     st.write("Example Questions:")
     
     example_questions = [
@@ -1066,11 +1142,11 @@ def show_dashboard(system):
                         {answer}
                     </div>
                 </div>
-                """.format(answer=search_result['answer']), unsafe_allow_html=True)
+                """.format(answer=search_result['answer'].replace('\n', '<br>')), unsafe_allow_html=True)
                 
                 # Add copy button
                 st.markdown(f"""
-                <button class="copy-button" onclick="copyAnswerToClipboard(`{search_result['answer'].replace('`', "'")}`)">Copy Answer</button>
+                <button class="copy-button" onclick="copyAnswerToClipboard(`{search_result['answer'].replace('`', "'").replace('\\n', '\\\\n')}`)">Copy Answer</button>
                 """, unsafe_allow_html=True)
                 
                 # Show sources badges
@@ -1081,7 +1157,7 @@ def show_dashboard(system):
                     st.markdown('<span class="source-badge badge-web">Web</span>', unsafe_allow_html=True)
                 
                 # Show detailed sources
-                with st.expander(f"DETAILED SOURCES ({search_result['total_results']} results found)", expanded=True):
+                with st.expander(f"DETAILED SOURCES ({search_result['total_results']} results found)", expanded=False):
                     # Document sources
                     if search_result['document_results']:
                         st.write("**Historical Documents:**")
@@ -1163,8 +1239,8 @@ def show_documents_page(system):
     """Research Documents page"""
     st.markdown('<h2 class="sub-header">RESEARCH DOCUMENTS</h2>', unsafe_allow_html=True)
     
-    # Search controls - all on the same level
-    col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
+    # Search controls
+    col1, col2, col3 = st.columns([3, 2, 1])
     with col1:
         search_query = st.text_input("Search documents:", placeholder="Title, author, or keywords...", label_visibility="collapsed")
     with col2:
@@ -1175,39 +1251,45 @@ def show_documents_page(system):
             label_visibility="collapsed"
         )
     with col3:
-        # Show all documents by default (no limit)
-        show_all = st.checkbox("Show all documents", value=True, help="Show all documents without limit")
-        if not show_all:
-            limit = st.selectbox("Results limit", ["25", "50", "100", "500"], index=0, label_visibility="collapsed")
-            limit = int(limit) if limit else None
-        else:
-            limit = None
-    with col4:
-        search_clicked = st.button("SEARCH", type="primary", use_container_width=True)
+        limit_options = {"25": 25, "50": 50, "100": 100, "All": None}
+        limit_choice = st.selectbox("Show", ["25", "50", "100", "All"], index=2, label_visibility="collapsed")
+        limit = limit_options[limit_choice]
     
     # Action buttons
     col1, col2 = st.columns(2)
     with col1:
+        search_clicked = st.button("SEARCH DOCUMENTS", type="primary", use_container_width=True)
+    with col2:
         show_all_clicked = st.button("SHOW ALL DOCUMENTS", use_container_width=True)
     
-    # Load documents
+    # Initialize documents list
     documents = []
+    search_performed = False
+    
+    # Load documents based on action
     if search_clicked and search_query:
         start_time = time.time()
         with st.spinner("Searching documents..."):
-            documents = system.search_documents(search_query, limit=limit if limit else 100)
+            documents = system.search_documents(search_query, limit=limit if limit else 1000)
             response_time = time.time() - start_time
             system.track_search(search_query, response_time, len(documents), ['documents'])
             if documents:
                 st.success(f"Found {len(documents)} documents")
-    elif show_all_clicked:
-        with st.spinner("Loading all documents..."):
-            documents = system.get_all_documents(limit=limit, source_type=source_filter if source_filter != "All" else None)
-            if documents:
-                st.success(f"Loaded {len(documents)} documents")
+                search_performed = True
+    
+    elif show_all_clicked or (not search_clicked and not search_query):
+        # Show loading message
+        st.markdown('<div class="document-loading">Click "SHOW ALL DOCUMENTS" to load all documents</div>', unsafe_allow_html=True)
+        
+        if show_all_clicked:
+            with st.spinner("Loading all documents..."):
+                documents = system.get_all_documents(limit=limit, source_type=source_filter if source_filter != "All" else None)
+                if documents:
+                    st.success(f"Loaded {len(documents)} documents")
+                    search_performed = True
     
     # Display results
-    if documents:
+    if search_performed and documents:
         # Create table data
         table_data = []
         for doc in documents:
@@ -1232,7 +1314,7 @@ def show_documents_page(system):
                 "Author": st.column_config.TextColumn("Author", width="medium"),
                 "Type": st.column_config.TextColumn("Type", width="small"),
                 "Words": st.column_config.NumberColumn("Words", width="small"),
-                "URL": st.column_config.TextColumn("URL", width="medium")
+                "URL": st.column_config.LinkColumn("URL", width="medium")
             },
             use_container_width=True,
             height=500,
@@ -1248,7 +1330,7 @@ def show_documents_page(system):
             mime="text/csv",
             use_container_width=True
         )
-    elif search_clicked or show_all_clicked:
+    elif search_clicked and not documents:
         st.info("No documents found. Try different search terms or filters.")
 
 def show_map_page(system):
@@ -1320,7 +1402,7 @@ def show_map_page(system):
             
             st.plotly_chart(fig_map, use_container_width=True)
             
-            # Timeline section (below map, above location details)
+            # Timeline section
             st.divider()
             st.subheader("Historical Timeline")
             
@@ -1328,32 +1410,23 @@ def show_map_page(system):
             timeline_data = []
             for loc in locations:
                 if 'date' in loc:
-                    # Parse date - could be range like "1405-1433" or single year "1405"
                     date_str = loc['date']
                     if '-' in date_str:
                         start_year = date_str.split('-')[0]
-                        end_year = date_str.split('-')[1]
                         try:
-                            start_year_int = int(start_year)
-                            end_year_int = int(end_year)
-                            year = start_year_int  # Use start year for positioning
-                            duration = end_year_int - start_year_int
+                            year = int(start_year)
                         except:
-                            year = 1400  # Default
-                            duration = 10
+                            year = 1400
                     else:
                         try:
                             year = int(date_str)
-                            duration = 5  # Default duration for single year events
                         except:
-                            year = 1400  # Default
-                            duration = 10
+                            year = 1400
                     
                     timeline_data.append({
                         'Year': year,
                         'Event': f"{loc['name']}: {loc.get('event', 'Historical event')}",
-                        'Location': loc['name'],
-                        'Duration': duration
+                        'Location': loc['name']
                     })
             
             if timeline_data:
@@ -1363,10 +1436,9 @@ def show_map_page(system):
                 # Create timeline chart
                 fig_timeline = go.Figure()
                 
-                # Add events as points
                 fig_timeline.add_trace(go.Scatter(
                     x=timeline_df['Year'],
-                    y=[1] * len(timeline_df),  # Constant y for now
+                    y=[1] * len(timeline_df),
                     mode='markers+text',
                     marker=dict(size=10, color='#d4af37'),
                     text=timeline_df['Location'],
@@ -1391,10 +1463,8 @@ def show_map_page(system):
                 with st.expander("Timeline Details", expanded=False):
                     timeline_table = timeline_df[['Year', 'Location', 'Event']].sort_values('Year')
                     st.dataframe(timeline_table, use_container_width=True, hide_index=True)
-            else:
-                st.info("No timeline data available for locations.")
             
-            # Location details (below timeline)
+            # Location details
             st.divider()
             with st.expander("LOCATION DETAILS", expanded=False):
                 loc_df = pd.DataFrame(locations)
@@ -1411,12 +1481,6 @@ def show_map_page(system):
                         use_container_width=True,
                         hide_index=True
                     )
-                else:
-                    st.dataframe(
-                        loc_df[['name', 'type', 'mention_count']].sort_values('mention_count', ascending=False),
-                        use_container_width=True,
-                        hide_index=True
-                    )
         else:
             st.info("No geographical location data available in the database.")
 
@@ -1424,7 +1488,7 @@ def show_analytics_page(system):
     """Analytics page"""
     st.markdown('<h2 class="sub-header">ANALYTICS DASHBOARD</h2>', unsafe_allow_html=True)
     
-    # Access analytics from session state (already initialized)
+    # Access analytics from session state
     analytics = st.session_state.search_analytics
     stats = system.get_database_stats()
     
@@ -1570,7 +1634,12 @@ def show_settings_page(system):
         st.write(f"**Database Connection:** {'Active' if system.db else 'Inactive'}")
         st.write(f"**Cached Documents:** {len(system.documents_cache)}")
         st.write(f"**Web Search Module:** {'Active' if system.web_searcher else 'Inactive'}")
-        st.write(f"**OpenAI Integration:** {'Active' if system.web_searcher.openai_client else 'Inactive (API key not set)'}")
+        
+        # FIXED: Handle the case where openai_client might not exist
+        openai_status = 'Inactive (API key not set)'
+        if hasattr(system.web_searcher, 'openai_client'):
+            openai_status = 'Active' if system.web_searcher.openai_client else 'Inactive (API key not set)'
+        st.write(f"**OpenAI Integration:** {openai_status}")
     
     st.divider()
     
@@ -1658,7 +1727,7 @@ def render_sidebar():
         </div>
         """, unsafe_allow_html=True)
         
-        # Navigation (removed Saved Searches as a page)
+        # Navigation
         pages = [
             ("DASHBOARD", "dashboard"),
             ("RESEARCH DOCUMENTS", "documents"),
