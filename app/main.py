@@ -1,6 +1,5 @@
 """1421 AI - Historical Research System
 Professional version with analytics and saved searches
-Enhanced with web search capability and improved saved searches system
 """
 
 import streamlit as st
@@ -23,6 +22,8 @@ import requests
 from typing import List, Dict, Optional, Tuple
 import urllib.parse
 from bs4 import BeautifulSoup
+from googlesearch import search as google_search
+import openai
 
 # ========== PAGE CONFIG ==========
 st.set_page_config(
@@ -134,36 +135,6 @@ section[data-testid="stSidebar"] > div {
     to { opacity: 0; transform: translateY(-20px); }
 }
 
-/* Example questions */
-.example-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-    gap: 15px;
-    margin: 25px 0;
-}
-
-.example-btn {
-    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-    border: 2px solid #d4af37;
-    border-radius: 12px;
-    padding: 18px;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    text-align: center;
-    font-size: 1rem;
-    font-weight: 500;
-    color: #333;
-    border: none;
-    width: 100%;
-}
-
-.example-btn:hover {
-    background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%);
-    color: white;
-    transform: translateY(-3px);
-    box-shadow: 0 6px 15px rgba(212, 175, 55, 0.3);
-}
-
 /* Answer container */
 .answer-container {
     background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
@@ -257,27 +228,19 @@ section[data-testid="stSidebar"] > div {
     white-space: nowrap;
 }
 
-/* Saved searches page */
-.saved-search-page-item {
-    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+/* Temporary success message */
+.temp-success {
+    background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+    color: white;
+    padding: 12px 15px;
     border-radius: 8px;
-    padding: 15px;
     margin: 10px 0;
-    border-left: 6px solid #4a6491;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    animation: fadeIn 0.3s ease, fadeOut 0.3s ease 3s forwards;
 }
 
-.search-query-page {
-    font-size: 1.1rem;
-    color: #2c3e50;
-    font-weight: 600;
-    margin-bottom: 5px;
-}
-
-.search-sources {
-    display: flex;
-    gap: 8px;
-    margin: 8px 0;
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 
 /* Answer display */
@@ -353,114 +316,87 @@ class ThreadSafeDatabase:
 # ========== WEB SEARCH MODULE ==========
 
 class WebSearchModule:
-    """Module for performing web searches"""
+    """Module for performing web searches using Google"""
     
     def __init__(self):
-        # Wikipedia API endpoint
-        self.wikipedia_api = "https://en.wikipedia.org/w/api.php"
-        # DuckDuckGo HTML endpoint (for fallback)
-        self.duckduckgo_url = "https://html.duckduckgo.com/html/"
+        # Initialize OpenAI client (you need to set OPENAI_API_KEY in your environment)
+        self.openai_client = None
+        if 'OPENAI_API_KEY' in st.secrets:
+            self.openai_client = openai.OpenAI(api_key=st.secrets['OPENAI_API_KEY'])
+        elif 'OPENAI_API_KEY' in os.environ:
+            self.openai_client = openai.OpenAI(api_key=os.environ['OPENAI_API_KEY'])
         
-    def search_wikipedia(self, query: str, limit: int = 3) -> List[Dict]:
-        """Search Wikipedia for historical information"""
+    def search_google(self, query: str, limit: int = 3) -> List[Dict]:
+        """Search Google for information"""
         try:
-            params = {
-                'action': 'query',
-                'list': 'search',
-                'srsearch': query,
-                'format': 'json',
-                'srlimit': limit
-            }
-            
-            response = requests.get(self.wikipedia_api, params=params, timeout=10)
-            data = response.json()
-            
             results = []
-            if 'query' in data and 'search' in data['query']:
-                for item in data['query']['search'][:limit]:
-                    # Get page content for snippets
-                    content_params = {
-                        'action': 'query',
-                        'prop': 'extracts',
-                        'exintro': True,
-                        'explaintext': True,
-                        'pageids': item['pageid'],
-                        'format': 'json'
-                    }
-                    content_response = requests.get(self.wikipedia_api, params=content_params, timeout=10)
-                    content_data = content_response.json()
+            # Use googlesearch-python to get search results
+            search_results = list(google_search(query, num_results=limit, lang='en'))
+            
+            for i, url in enumerate(search_results[:limit]):
+                # Try to get page content
+                try:
+                    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+                    response = requests.get(url, headers=headers, timeout=5)
+                    soup = BeautifulSoup(response.content, 'html.parser')
                     
-                    page_content = ""
-                    if 'query' in content_data and 'pages' in content_data['query']:
-                        page = list(content_data['query']['pages'].values())[0]
-                        if 'extract' in page:
-                            page_content = page['extract'][:500]  # Limit content length
+                    # Get title
+                    title = soup.title.string if soup.title else "Web Page"
+                    
+                    # Get first paragraph as snippet
+                    paragraphs = soup.find_all('p')
+                    snippet = ""
+                    for p in paragraphs:
+                        if len(p.text.strip()) > 100:
+                            snippet = p.text[:200] + "..."
+                            break
                     
                     results.append({
-                        'title': item['title'],
-                        'snippet': item['snippet'],
-                        'content': page_content,
-                        'url': f"https://en.wikipedia.org/?curid={item['pageid']}",
-                        'source': 'wikipedia',
+                        'title': title,
+                        'snippet': snippet,
+                        'url': url,
+                        'source': 'web',
+                        'timestamp': datetime.now().isoformat()
+                    })
+                except:
+                    # If we can't fetch the page, just store the URL
+                    results.append({
+                        'title': f"Search Result {i+1}",
+                        'snippet': f"Web page about {query}",
+                        'url': url,
+                        'source': 'web',
                         'timestamp': datetime.now().isoformat()
                     })
             
             return results
             
         except Exception as e:
-            print(f"Wikipedia search error: {e}")
+            print(f"Google search error: {e}")
             return []
     
-    def search_duckduckgo(self, query: str, limit: int = 3) -> List[Dict]:
-        """Fallback search using DuckDuckGo"""
+    def generate_with_openai(self, prompt: str, max_tokens: int = 500) -> str:
+        """Generate text using OpenAI API"""
+        if not self.openai_client:
+            return None
+        
         try:
-            params = {'q': query, 'kl': 'us-en'}
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-            
-            response = requests.post(self.duckduckgo_url, data=params, headers=headers, timeout=10)
-            
-            # Simple HTML parsing for results
-            results = []
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            for result in soup.find_all('a', class_='result__url', limit=limit):
-                title = result.get_text(strip=True)
-                url = result.get('href', '')
-                
-                # Find snippet
-                snippet_div = result.find_next('a', class_='result__snippet')
-                snippet = snippet_div.get_text(strip=True) if snippet_div else ""
-                
-                results.append({
-                    'title': title,
-                    'snippet': snippet,
-                    'url': url,
-                    'source': 'duckduckgo',
-                    'timestamp': datetime.now().isoformat()
-                })
-            
-            return results
-            
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4",  # or "gpt-3.5-turbo" if you want to save costs
+                messages=[
+                    {"role": "system", "content": "You are a historical research assistant specializing in Chinese exploration history and the 1421 theory. Provide accurate, well-researched answers based on available information."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=max_tokens,
+                temperature=0.7
+            )
+            return response.choices[0].message.content
         except Exception as e:
-            print(f"DuckDuckGo search error: {e}")
-            return []
+            print(f"OpenAI API error: {e}")
+            return None
     
     def search_web(self, query: str, limit: int = 3) -> List[Dict]:
-        """Combine multiple web sources for comprehensive search"""
-        all_results = []
-        
-        # Try Wikipedia first (more reliable for historical topics)
-        wiki_results = self.search_wikipedia(query, limit=2)
-        all_results.extend(wiki_results)
-        
-        # If not enough results, try DuckDuckGo
-        if len(all_results) < limit:
-            ddg_results = self.search_duckduckgo(query, limit=limit - len(all_results))
-            all_results.extend(ddg_results)
-        
-        return all_results[:limit]
+        """Search web for information using Google"""
+        return self.search_google(query, limit)
 
 # ========== SAVED SEARCHES SYSTEM ==========
 
@@ -518,12 +454,12 @@ class SavedSearchesSystem:
     
     @staticmethod
     def render_sidebar_saved_searches():
-        """Render saved searches in sidebar"""
+        """Render saved searches in sidebar (NOT as a separate page)"""
         saved_searches = SavedSearchesSystem.get_all_saved_searches()
         
         if saved_searches:
             st.sidebar.markdown("---")
-            st.sidebar.markdown("### 📚 Saved Searches")
+            st.sidebar.markdown("### Saved Searches")
             
             # Show only the 5 most recent searches in sidebar
             for search in saved_searches[-5:][::-1]:  # Show most recent first
@@ -542,11 +478,7 @@ class SavedSearchesSystem:
                             st.session_state.current_page = "dashboard"
                             st.rerun()
             
-            # Show total count and link to full page
             st.sidebar.markdown(f"*Showing 5 of {len(saved_searches)} saved searches*")
-            if st.sidebar.button("View All Saved Searches", key="view_all_saved"):
-                st.session_state.current_page = "saved_searches"
-                st.rerun()
 
 # ========== RESEARCH SYSTEM ==========
 
@@ -779,7 +711,7 @@ class ResearchSystem:
         if document_results:
             sources_used.append('documents')
             for i, doc in enumerate(document_results[:2]):
-                summary = f"**From historical documents**: {doc.get('title', 'Unknown')} "
+                summary = f"From historical documents: {doc.get('title', 'Unknown')} "
                 content = doc.get('snippet', doc.get('content', ''))
                 combined_info.append(f"{summary}{content}")
         
@@ -787,11 +719,29 @@ class ResearchSystem:
         if web_results:
             sources_used.append('web')
             for i, web in enumerate(web_results[:2]):
-                summary = f"**From web research**: {web.get('title', 'Unknown')} "
+                summary = f"From web research: {web.get('title', 'Unknown')} "
                 content = web.get('snippet', web.get('content', ''))
                 combined_info.append(f"{summary}{content}")
         
-        # Create a natural response
+        # Try to generate answer using OpenAI if available
+        if self.web_searcher.openai_client:
+            prompt = f"""
+            Question: {question}
+            
+            Context from documents:
+            {' '.join([doc.get('snippet', doc.get('content', ''))[:300] for doc in document_results[:2]])}
+            
+            Context from web:
+            {' '.join([web.get('snippet', web.get('content', ''))[:300] for web in web_results[:2]])}
+            
+            Please provide a comprehensive answer based on the available information.
+            """
+            
+            ai_answer = self.web_searcher.generate_with_openai(prompt)
+            if ai_answer:
+                return ai_answer, sources_used
+        
+        # Fallback to simple answer generation
         responses = [
             f"Based on historical research, {question.lower().replace('?', '')} can be understood through multiple sources. ",
             f"Research indicates that {question.lower().replace('?', '')} ",
@@ -971,23 +921,18 @@ def show_dashboard(system):
     
     st.write("Enter a question about Chinese exploration, Zheng He's voyages, or the 1421 theory:")
     
-    # Example questions
-    st.write("**Example Questions:**")
+    # Fewer example questions (5 instead of 10)
+    st.write("Example Questions:")
     
     example_questions = [
         "What was Zheng He's most significant voyage?",
-        "How does Gavin Menzies support his 1421 theory?",
         "What evidence exists for Chinese ships in America before Columbus?",
-        "Describe Ming Dynasty naval technology and shipbuilding",
+        "Describe Ming Dynasty naval technology",
         "What were the main purposes of Chinese treasure fleets?",
-        "How did Chinese navigation compare to European methods?",
-        "What was the size of Zheng He's treasure ships?",
-        "How did Chinese exploration influence world maps?",
-        "What artifacts support pre-Columbian Chinese contact with America?",
-        "How did the Ming Dynasty's policies change after Zheng He's voyages?"
+        "How did Chinese navigation compare to European methods?"
     ]
     
-    # Create grid of example questions
+    # Create buttons for example questions
     cols = st.columns(2)
     for idx, question in enumerate(example_questions):
         with cols[idx % 2]:
@@ -1002,7 +947,6 @@ def show_dashboard(system):
     st.divider()
     
     # Question input
-    # Initialize session state
     if 'current_question' not in st.session_state:
         st.session_state.current_question = ""
     
@@ -1051,9 +995,9 @@ def show_dashboard(system):
                 # Show sources badges
                 st.markdown("**Sources used:**")
                 if 'documents' in search_result['sources_used']:
-                    st.markdown('<span class="source-badge badge-document">📄 Documents</span>', unsafe_allow_html=True)
+                    st.markdown('<span class="source-badge badge-document">Documents</span>', unsafe_allow_html=True)
                 if 'web' in search_result['sources_used']:
-                    st.markdown('<span class="source-badge badge-web">🌐 Web</span>', unsafe_allow_html=True)
+                    st.markdown('<span class="source-badge badge-web">Web</span>', unsafe_allow_html=True)
                 
                 # Show detailed sources
                 with st.expander(f"DETAILED SOURCES ({search_result['total_results']} results found)", expanded=True):
@@ -1100,7 +1044,7 @@ def show_dashboard(system):
                 st.divider()
                 col1, col2 = st.columns([1, 3])
                 with col1:
-                    save_search = st.button("💾 SAVE THIS SEARCH", use_container_width=True)
+                    save_search = st.button("SAVE THIS SEARCH", use_container_width=True)
                 with col2:
                     st.markdown("*Save question, answer, and sources for later reference*")
                 
@@ -1114,15 +1058,14 @@ def show_dashboard(system):
                         web_results=search_result['web_results']
                     )
                     
-                    st.success(f"""
-                    **Search saved successfully!**
-                    
-                    - **Time:** {search_entry['timestamp']}
-                    - **Sources:** {', '.join(search_entry['sources'])}
-                    - **Total results:** {search_entry['document_results_count'] + search_entry['web_results_count']}
-                    
-                    You can access this search in the navigation panel.
-                    """)
+                    # Show temporary success message that disappears
+                    st.markdown(f"""
+                    <div class="temp-success">
+                        <strong>Search saved!</strong><br>
+                        Time: {search_entry['timestamp']} | 
+                        Sources: {', '.join(search_entry['sources'])}
+                    </div>
+                    """, unsafe_allow_html=True)
                     
             else:
                 st.warning("""
@@ -1424,121 +1367,6 @@ def show_analytics_page(system):
     else:
         st.info("No analytics data available yet. Start searching to generate analytics.")
 
-def show_saved_searches_page():
-    """Saved Searches page"""
-    st.markdown('<h2 class="sub-header">SAVED SEARCHES</h2>', unsafe_allow_html=True)
-    
-    saved_searches = SavedSearchesSystem.get_all_saved_searches()
-    
-    if saved_searches:
-        st.write(f"**Total Saved Searches:** {len(saved_searches)}")
-        
-        # Sort by most recent first
-        saved_searches_sorted = sorted(saved_searches, key=lambda x: x['timestamp'], reverse=True)
-        
-        for search in saved_searches_sorted:
-            st.markdown(f"""
-            <div class="saved-search-page-item">
-                <div class="search-query-page">{search['question']}</div>
-                <div class="search-time">Saved: {search['timestamp']}</div>
-                
-                <div class="search-sources">
-            """, unsafe_allow_html=True)
-            
-            # Show source badges
-            if 'documents' in search['sources']:
-                st.markdown('<span class="source-badge badge-document">📄 Documents: {}</span>'.format(
-                    search['document_results_count']), unsafe_allow_html=True)
-            if 'web' in search['sources']:
-                st.markdown('<span class="source-badge badge-web">🌐 Web: {}</span>'.format(
-                    search['web_results_count']), unsafe_allow_html=True)
-            
-            st.markdown("""
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # Show answer preview
-            with st.expander("View Answer", expanded=False):
-                st.markdown(f"""
-                <div class="answer-text">
-                    {search['answer']}
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # Action buttons
-                col1, col2, col3 = st.columns([2, 1, 1])
-                with col1:
-                    if st.button("SEARCH AGAIN", key=f"again_{search['id']}", use_container_width=True):
-                        st.session_state.current_question = search['question']
-                        st.session_state.current_page = "dashboard"
-                        st.rerun()
-                with col2:
-                    if st.button("VIEW DETAILS", key=f"details_{search['id']}", use_container_width=True):
-                        # Show detailed results
-                        st.info(f"**Detailed Results for:** {search['question']}")
-                        
-                        if search.get('document_results'):
-                            st.write("**Document Sources:**")
-                            for doc in search['document_results'][:3]:
-                                st.write(f"- {doc.get('title', 'Unknown')}")
-                        
-                        if search.get('web_results'):
-                            st.write("**Web Sources:**")
-                            for web in search['web_results'][:2]:
-                                st.write(f"- {web.get('title', 'Unknown')}")
-                with col3:
-                    if st.button("DELETE", key=f"delete_{search['id']}", type="secondary", use_container_width=True):
-                        if SavedSearchesSystem.delete_search(search['id']):
-                            st.success("Search deleted!")
-                            st.rerun()
-            
-            st.divider()
-        
-        # Clear all button
-        if st.button("🗑️ CLEAR ALL SAVED SEARCHES", type="secondary", use_container_width=True):
-            SavedSearchesSystem.clear_all_searches()
-            st.success("All saved searches cleared!")
-            st.rerun()
-        
-        # Export option
-        st.divider()
-        if st.button("📥 EXPORT SAVED SEARCHES", use_container_width=True):
-            # Create export data
-            export_data = []
-            for search in saved_searches:
-                export_data.append({
-                    'ID': search['id'],
-                    'Question': search['question'],
-                    'Answer': search['answer'],
-                    'Timestamp': search['timestamp'],
-                    'Sources': ', '.join(search['sources']),
-                    'Document Results': search['document_results_count'],
-                    'Web Results': search['web_results_count']
-                })
-            
-            df = pd.DataFrame(export_data)
-            csv = df.to_csv(index=False).encode('utf-8')
-            
-            st.download_button(
-                "DOWNLOAD CSV",
-                data=csv,
-                file_name=f"saved_searches_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
-    else:
-        st.info("""
-        **No saved searches yet.**
-        
-        To save a search:
-        1. Go to the Dashboard
-        2. Ask a question
-        3. Click the "SAVE THIS SEARCH" button below the answer
-        
-        Saved searches will appear here and in the navigation panel sidebar.
-        """)
-
 def show_settings_page(system):
     """Settings page"""
     st.markdown('<h2 class="sub-header">SYSTEM SETTINGS</h2>', unsafe_allow_html=True)
@@ -1561,6 +1389,7 @@ def show_settings_page(system):
         st.write(f"**Database Connection:** {'Active' if system.db else 'Inactive'}")
         st.write(f"**Cached Documents:** {len(system.documents_cache)}")
         st.write(f"**Web Search Module:** {'Active' if system.web_searcher else 'Inactive'}")
+        st.write(f"**OpenAI Integration:** {'Active' if system.web_searcher.openai_client else 'Inactive (API key not set)'}")
     
     st.divider()
     
@@ -1625,6 +1454,15 @@ def show_settings_page(system):
             'sources_used': {'documents': 0, 'web': 0, 'both': 0}
         }
         st.success("Analytics data reset!")
+    
+    # Clear saved searches
+    st.divider()
+    st.subheader("Saved Searches Management")
+    
+    if st.button("CLEAR ALL SAVED SEARCHES", type="secondary", use_container_width=True):
+        SavedSearchesSystem.clear_all_searches()
+        st.success("All saved searches cleared!")
+        st.rerun()
 
 # ========== CUSTOM SIDEBAR ==========
 
@@ -1639,14 +1477,13 @@ def render_sidebar():
         </div>
         """, unsafe_allow_html=True)
         
-        # Navigation
+        # Navigation (removed Saved Searches as a page)
         pages = [
-            ("📊 DASHBOARD", "dashboard"),
-            ("📚 RESEARCH DOCUMENTS", "documents"),
-            ("🗺️ FULL VOYAGE MAP", "map"),
-            ("📈 ANALYTICS", "analytics"),
-            ("💾 SAVED SEARCHES", "saved_searches"),
-            ("⚙️ SETTINGS", "settings")
+            ("DASHBOARD", "dashboard"),
+            ("RESEARCH DOCUMENTS", "documents"),
+            ("FULL VOYAGE MAP", "map"),
+            ("ANALYTICS", "analytics"),
+            ("SETTINGS", "settings")
         ]
         
         current_page = st.session_state.get('current_page', 'dashboard')
@@ -1681,7 +1518,7 @@ def render_sidebar():
                 stats.get('total_entities', 0) if stats else 0
             ), unsafe_allow_html=True)
         
-        # Render saved searches in sidebar
+        # Render saved searches in sidebar (NOT as a separate page)
         SavedSearchesSystem.render_sidebar_saved_searches()
 
 # ========== MAIN APPLICATION ==========
@@ -1697,7 +1534,7 @@ def main():
             A comprehensive research platform for studying Chinese exploration history and the 1421 theory
         </p>
         <p style="font-size: 1rem; color: #888; margin-top: 10px;">
-            Powered by document analysis + web research • ChatGPT-like interface • Saved searches system
+            Powered by document analysis + web research • ChatGPT-like interface • Saved searches
         </p>
     </div>
     """, unsafe_allow_html=True)
@@ -1760,8 +1597,6 @@ def main():
         show_map_page(system)
     elif current_page == "analytics":
         show_analytics_page(system)
-    elif current_page == "saved_searches":
-        show_saved_searches_page()
     elif current_page == "settings":
         show_settings_page(system)
 
