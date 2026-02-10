@@ -59,8 +59,8 @@ if 'current_question' not in st.session_state:
 if 'auto_search' not in st.session_state:
     st.session_state.auto_search = False
 
-if 'show_all_documents' not in st.session_state:
-    st.session_state.show_all_documents = False
+if 'chat_history' not in st.session_state:
+    st.session_state.chat_history = []
 
 # ========== CSS STYLING ==========
 st.markdown("""
@@ -290,40 +290,66 @@ section[data-testid="stSidebar"] > div {
     font-weight: 700;
 }
 
+/* Chat messages - DeepSeek style */
 .chat-message {
-    padding: 15px 20px;
-    margin: 10px 0;
+    padding: 20px;
+    margin: 15px 0;
     border-radius: 12px;
-    max-width: 85%;
+    max-width: 100%;
+    animation: fadeIn 0.3s ease;
 }
 
 .user-message {
     background: linear-gradient(135deg, #4a6491 0%, #2c3e50 100%);
     color: white;
-    margin-left: auto;
+    margin-right: 20%;
+    margin-left: 0;
+    border-bottom-right-radius: 4px;
 }
 
 .assistant-message {
     background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
     color: #333;
     border: 1px solid #ddd;
+    margin-left: 20%;
+    margin-right: 0;
+    border-bottom-left-radius: 4px;
 }
 
-/* Copy button */
-.copy-button {
+/* Action buttons row */
+.action-buttons {
+    display: flex;
+    gap: 10px;
+    margin-top: 15px;
+    margin-bottom: 20px;
+}
+
+/* Copy and Save buttons */
+.copy-button, .save-button {
     background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
     color: white;
     border: none;
     border-radius: 6px;
-    padding: 6px 12px;
+    padding: 8px 16px;
     font-size: 0.9rem;
     cursor: pointer;
     transition: all 0.3s ease;
-    margin-left: 10px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.save-button {
+    background: linear-gradient(135deg, #4a6491 0%, #2c3e50 100%);
 }
 
 .copy-button:hover {
     background: linear-gradient(135deg, #495057 0%, #343a40 100%);
+    transform: translateY(-2px);
+}
+
+.save-button:hover {
+    background: linear-gradient(135deg, #2c3e50 0%, #1a252f 100%);
     transform: translateY(-2px);
 }
 
@@ -365,6 +391,7 @@ section[data-testid="stSidebar"] > div {
     color: #4a6491;
     font-size: 0.8rem;
     margin-top: 5px;
+    word-break: break-all;
 }
 
 /* Document loading message */
@@ -381,6 +408,32 @@ section[data-testid="stSidebar"] > div {
 .saved-searches-header {
     color: #FFD700 !important; /* Yellow color */
     font-weight: 700 !important;
+}
+
+/* Timeline controls */
+.timeline-controls {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin: 15px 0;
+    padding: 10px;
+    background: #f8f9fa;
+    border-radius: 8px;
+}
+
+/* Clear chat button */
+.clear-chat-btn {
+    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+    color: white !important;
+    border: none !important;
+    border-radius: 8px;
+    padding: 8px 16px !important;
+    font-size: 0.9rem !important;
+    margin-bottom: 15px;
+}
+
+.clear-chat-btn:hover {
+    background: linear-gradient(135deg, #c82333 0%, #bd2130 100%);
 }
 </style>
 
@@ -405,6 +458,13 @@ function copyAnswerToClipboard(answerText) {
     }, function(err) {
         console.error('Could not copy text: ', err);
     });
+}
+
+// Save answer function
+function saveAnswerToStorage(question, answer, sources) {
+    // This function would save to your storage system
+    // For now, we'll show an alert
+    alert('Search saved!');
 }
 </script>
 """, unsafe_allow_html=True)
@@ -475,21 +535,35 @@ class WebSearchModule:
                     paragraphs = soup.find_all('p')
                     snippet = ""
                     for p in paragraphs:
-                        if len(p.text.strip()) > 100:
-                            snippet = p.text[:200] + "..."
+                        text = p.text.strip()
+                        if len(text) > 100:
+                            snippet = text[:300] + "..."
                             break
                     
+                    if not snippet:
+                        # If no paragraphs, get meta description
+                        meta_desc = soup.find('meta', attrs={'name': 'description'})
+                        if meta_desc and meta_desc.get('content'):
+                            snippet = meta_desc['content'][:300] + "..."
+                        else:
+                            snippet = f"Content about {query}"
+                    
+                    # Clean up the title and snippet
+                    title = title.replace('\n', ' ').replace('\r', ' ').strip()
+                    snippet = snippet.replace('\n', ' ').replace('\r', ' ').strip()
+                    
                     results.append({
-                        'title': title,
+                        'title': title[:150],
                         'snippet': snippet,
                         'url': url,
                         'source': 'web',
                         'timestamp': datetime.now().isoformat()
                     })
-                except:
+                except Exception as e:
+                    print(f"Error fetching page {url}: {e}")
                     # If we can't fetch the page, just store the URL
                     results.append({
-                        'title': f"Search Result {i+1}",
+                        'title': f"Web Result {i+1}",
                         'snippet': f"Web page about {query}",
                         'url': url,
                         'source': 'web',
@@ -511,7 +585,7 @@ class WebSearchModule:
             response = self.openai_client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
-                    {"role": "system", "content": "You are a historical research assistant specializing in Chinese exploration history and the 1421 theory. Provide accurate, well-researched answers based on available information."},
+                    {"role": "system", "content": "You are a historical research assistant specializing in Chinese exploration history and the 1421 theory. Provide accurate, well-researched answers based on available information. Format answers clearly without URLs in the main text. Use bullet points or paragraphs for readability."},
                     {"role": "user", "content": prompt}
                 ],
                 max_tokens=max_tokens,
@@ -788,7 +862,7 @@ class ResearchSystem:
             rows = cursor.fetchall()
             documents = [dict(row) for row in rows]
             
-            # Add word count for each document - FIXED SYNTAX ERROR HERE
+            # Add word count for each document
             for doc in documents:
                 content = doc.get('content', '')
                 doc['word_count'] = len(content.split()) if content else 0
@@ -853,6 +927,8 @@ class ResearchSystem:
                 title = doc.get('title', 'Unknown document')
                 content = doc.get('snippet', doc.get('content', ''))
                 if content:
+                    # Clean content
+                    content = content.replace('\n', ' ').replace('\r', ' ').strip()
                     combined_info.append(f"**From historical documents ({title}):** {content}")
         
         # Add web information
@@ -862,6 +938,8 @@ class ResearchSystem:
                 title = web.get('title', 'Unknown source')
                 content = web.get('snippet', web.get('content', ''))
                 if content:
+                    # Clean content
+                    content = content.replace('\n', ' ').replace('\r', ' ').strip()
                     combined_info.append(f"**From web research ({title}):** {content}")
         
         # Try to generate answer using OpenAI if available
@@ -878,10 +956,14 @@ class ResearchSystem:
                 
                 Please provide a comprehensive answer based on the available information.
                 Format the answer with good spacing and readability.
+                Do NOT include URLs in the main answer text.
+                Use clear paragraphs and bullet points if helpful.
                 """
                 
                 ai_answer = self.web_searcher.generate_with_openai(prompt)
                 if ai_answer:
+                    # Remove any URLs from the AI answer
+                    ai_answer = re.sub(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', '', ai_answer)
                     return ai_answer, sources_used
             except Exception as e:
                 print(f"OpenAI generation failed: {e}")
@@ -981,36 +1063,84 @@ class ResearchSystem:
     
     def get_map_locations(self):
         """Get geographical locations for map"""
-        locations_data = self.get_entities(entity_type='LOCATION', limit=50)
+        # Get timeline data from documents first
+        timeline_data = []
+        locations_data = self.get_entities(entity_type='LOCATION', limit=100)
+        
+        # Try to get dates from documents
+        if self.db:
+            try:
+                cursor = self.db.execute(
+                    "SELECT content FROM documents WHERE content LIKE '%14%' LIMIT 50"
+                )
+                rows = cursor.fetchall()
+                for row in rows:
+                    content = row[0]
+                    # Look for dates in content
+                    date_patterns = [
+                        r'\b(13\d{2}|14\d{2}|15\d{2})\b',  # Years 1300-1599
+                        r'\b\d{1,2}\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\b',
+                    ]
+                    
+                    for pattern in date_patterns:
+                        dates = re.findall(pattern, content)
+                        if dates:
+                            # Extract location mentions near dates
+                            location_words = ['China', 'Beijing', 'Nanjing', 'India', 'Africa', 'Calicut', 'Malacca', 'Sumatra', 'Java', 'Sri Lanka']
+                            for loc in location_words:
+                                if loc.lower() in content.lower():
+                                    timeline_data.append({
+                                        'year': int(dates[0]) if isinstance(dates[0], str) and dates[0].isdigit() else 1400,
+                                        'location': loc,
+                                        'event': f"Mention of {loc} in historical records"
+                                    })
+            except:
+                pass
         
         # Coordinates for known locations with historical dates
         location_coords = {
-            'China': (35.8617, 104.1954, '1368-1644', 'Ming Dynasty'),
+            'China': (35.8617, 104.1954, '1368-1644', 'Ming Dynasty founded'),
             'Beijing': (39.9042, 116.4074, '1403', 'Capital moved to Beijing'),
             'Nanjing': (32.0603, 118.7969, '1368-1421', 'Early Ming capital'),
             'Shanghai': (31.2304, 121.4737, '1400s', 'Important port city'),
-            'India': (20.5937, 78.9629, '1405-1433', 'Zheng He visited'),
-            'Sri Lanka': (7.8731, 80.7718, '1409', 'Zheng He visited'),
-            'Sumatra': (-0.5897, 101.3431, '1407', 'Zheng He visited'),
-            'Java': (-7.6145, 110.7123, '1407', 'Zheng He visited'),
-            'Africa': (8.7832, 34.5085, '1417-1419', 'Zheng He reached Africa'),
+            'India': (20.5937, 78.9629, '1405-1433', 'Zheng He visited multiple times'),
+            'Sri Lanka': (7.8731, 80.7718, '1409', 'Zheng He visited and left inscriptions'),
+            'Sumatra': (-0.5897, 101.3431, '1407', 'Zheng He visited on first voyage'),
+            'Java': (-7.6145, 110.7123, '1407', 'Zheng He visited on first voyage'),
+            'Africa': (8.7832, 34.5085, '1417-1419', 'Zheng He reached East Africa'),
             'America': (37.0902, -95.7129, '1421', 'Possible pre-Columbian contact'),
             'California': (36.7783, -119.4179, '1421', 'Possible landing site'),
-            'Pacific Ocean': (0, -160, '1405-1433', 'Voyage routes'),
-            'Indian Ocean': (-20, 80, '1405-1433', 'Main trade route'),
-            'South China Sea': (12, 115, '1405-1433', 'Departure route'),
-            'Malacca': (2.1896, 102.2501, '1409', 'Strategic trading port'),
-            'Calicut': (11.2588, 75.7804, '1406', 'Major Indian port'),
-            'Hormuz': (27.1561, 56.2815, '1414', 'Persian Gulf port'),
-            'Mombasa': (-4.0435, 39.6682, '1418', 'East African trade'),
-            'Zanzibar': (-6.1659, 39.2026, '1419', 'Trade with Africa')
+            'Pacific Ocean': (0, -160, '1405-1433', 'Voyage routes through Pacific'),
+            'Indian Ocean': (-20, 80, '1405-1433', 'Main trade route for treasure fleets'),
+            'South China Sea': (12, 115, '1405-1433', 'Departure route from China'),
+            'Malacca': (2.1896, 102.2501, '1409', 'Strategic trading port established'),
+            'Calicut': (11.2588, 75.7804, '1406', 'Major Indian port visited by Zheng He'),
+            'Hormuz': (27.1561, 56.2815, '1414', 'Persian Gulf port visited'),
+            'Mombasa': (-4.0435, 39.6682, '1418', 'East African trade center'),
+            'Zanzibar': (-6.1659, 39.2026, '1419', 'Trade with African kingdoms')
         }
         
         locations = []
+        timeline_events = []
+        
         for entity in locations_data:
             loc_name = entity['entity_text']
             if loc_name in location_coords:
                 lat, lon, date, event = location_coords[loc_name]
+                
+                # Parse date for timeline
+                year = 1400
+                if '-' in date:
+                    try:
+                        year = int(date.split('-')[0])
+                    except:
+                        year = 1400
+                else:
+                    try:
+                        year = int(date)
+                    except:
+                        year = 1400
+                
                 locations.append({
                     'name': loc_name,
                     'latitude': lat,
@@ -1018,10 +1148,28 @@ class ResearchSystem:
                     'date': date,
                     'event': event,
                     'type': 'city',
-                    'mention_count': entity['count']
+                    'mention_count': entity['count'],
+                    'year': year
+                })
+                
+                timeline_events.append({
+                    'year': year,
+                    'location': loc_name,
+                    'event': event,
+                    'date': date
                 })
         
-        return {'locations': locations, 'total': len(locations)}
+        # Add timeline data from documents
+        timeline_events.extend(timeline_data)
+        
+        # Sort timeline events by year
+        timeline_events.sort(key=lambda x: x['year'])
+        
+        return {
+            'locations': locations, 
+            'total': len(locations),
+            'timeline_events': timeline_events
+        }
 
 # ========== INITIALIZE SYSTEM ==========
 
@@ -1095,11 +1243,102 @@ def show_dashboard(system):
     
     st.divider()
     
-    # Question input
+    # Clear chat history button
+    if st.button("🧹 Clear Chat History", key="clear_chat", use_container_width=True, 
+                 help="Clear all previous questions and answers"):
+        st.session_state.chat_history = []
+        st.rerun()
+    
+    # Display chat history (DeepSeek style)
+    for chat in st.session_state.chat_history:
+        # User message
+        st.markdown(f"""
+        <div class="chat-message user-message">
+            <strong>You:</strong><br>
+            {chat['question']}
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Assistant message
+        st.markdown(f"""
+        <div class="chat-message assistant-message">
+            <strong>1421 AI:</strong><br>
+            <div class="answer-text">
+                {chat['answer'].replace('\n', '<br>')}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Action buttons row
+        st.markdown(f"""
+        <div class="action-buttons">
+            <button class="copy-button" onclick="copyAnswerToClipboard(`{chat['answer'].replace('`', "'").replace('\\n', '\\\\n')}`)">
+                📋 Copy Answer
+            </button>
+            <button class="save-button" onclick="saveAnswerToStorage(`{chat['question'].replace('`', "'")}`, `{chat['answer'].replace('`', "'").replace('\\n', '\\\\n')}`, `{','.join(chat['sources_used'])}`)">
+                💾 Save Search
+            </button>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Show sources badges
+        st.markdown("**Sources used:**")
+        if 'documents' in chat['sources_used']:
+            st.markdown('<span class="source-badge badge-document">Documents</span>', unsafe_allow_html=True)
+        if 'web' in chat['sources_used']:
+            st.markdown('<span class="source-badge badge-web">Web</span>', unsafe_allow_html=True)
+        
+        # Show detailed sources (collapsed by default)
+        with st.expander(f"DETAILED SOURCES ({chat['total_results']} results found)", expanded=False):
+            # Document sources
+            if chat.get('document_results'):
+                st.write("**Historical Documents:**")
+                for i, result in enumerate(chat['document_results'][:5]):
+                    st.markdown(f"**{i+1}. {result.get('title', 'Unknown')}**")
+                    if result.get('author'):
+                        st.markdown(f"*Author: {result['author']}*")
+                    if result.get('source_type'):
+                        st.markdown(f"*Type: {result['source_type']}*")
+                    
+                    if result.get('url'):
+                        st.markdown(f"[View Source]({result['url']})")
+                    
+                    # Show relevance snippet
+                    if result.get('snippet'):
+                        st.markdown("**Relevant Excerpt:**")
+                        st.info(result['snippet'])
+                    
+                    if i < len(chat['document_results'][:5]) - 1:
+                        st.divider()
+            
+            # Web sources
+            if chat.get('web_results'):
+                if chat.get('document_results'):
+                    st.divider()
+                st.write("**Web Research:**")
+                for i, result in enumerate(chat['web_results']):
+                    st.markdown(f"**{i+1}. {result.get('title', 'Unknown')}**")
+                    st.markdown(f"*Source: {result.get('source', 'Web')}*")
+                    
+                    if result.get('url'):
+                        st.markdown(f"[View Source]({result['url']})")
+                    
+                    # Show snippet
+                    if result.get('snippet'):
+                        st.markdown("**Summary:**")
+                        st.info(result['snippet'])
+                    
+                    if i < len(chat['web_results']) - 1:
+                        st.divider()
+        
+        st.divider()
+    
+    # Question input (always at the bottom)
+    st.markdown("### New Question")
     question = st.text_area(
         "Your Question:",
         value=st.session_state.current_question,
-        height=120,
+        height=100,
         placeholder="Type your question here or click an example above...",
         key="question_input"
     )
@@ -1107,7 +1346,7 @@ def show_dashboard(system):
     # Source selection
     col1, col2 = st.columns([1, 3])
     with col1:
-        ask_btn = st.button("RESEARCH & ANSWER", type="primary", use_container_width=True)
+        ask_btn = st.button("🔍 RESEARCH & ANSWER", type="primary", use_container_width=True)
     with col2:
         st.markdown("*System automatically uses both documents and web research*")
     
@@ -1123,117 +1362,20 @@ def show_dashboard(system):
             # Perform comprehensive search
             search_result = system.perform_comprehensive_search(question)
             
-            # Store in session for save functionality
-            st.session_state.last_search_result = search_result
+            # Add to chat history
+            st.session_state.chat_history.append(search_result)
             
-            if search_result['total_results'] > 0:
-                # Display answer in chat-like format
-                st.markdown("""
-                <div class="chat-message user-message">
-                    <strong>You:</strong><br>
-                    {question}
-                </div>
-                """.format(question=question), unsafe_allow_html=True)
-                
-                st.markdown("""
-                <div class="chat-message assistant-message">
-                    <strong>1421 AI:</strong><br>
-                    <div class="answer-text">
-                        {answer}
-                    </div>
-                </div>
-                """.format(answer=search_result['answer'].replace('\n', '<br>')), unsafe_allow_html=True)
-                
-                # Add copy button
-                st.markdown(f"""
-                <button class="copy-button" onclick="copyAnswerToClipboard(`{search_result['answer'].replace('`', "'").replace('\\n', '\\\\n')}`)">Copy Answer</button>
-                """, unsafe_allow_html=True)
-                
-                # Show sources badges
-                st.markdown("**Sources used:**")
-                if 'documents' in search_result['sources_used']:
-                    st.markdown('<span class="source-badge badge-document">Documents</span>', unsafe_allow_html=True)
-                if 'web' in search_result['sources_used']:
-                    st.markdown('<span class="source-badge badge-web">Web</span>', unsafe_allow_html=True)
-                
-                # Show detailed sources
-                with st.expander(f"DETAILED SOURCES ({search_result['total_results']} results found)", expanded=False):
-                    # Document sources
-                    if search_result['document_results']:
-                        st.write("**Historical Documents:**")
-                        for i, result in enumerate(search_result['document_results'][:5]):
-                            st.markdown(f"**{i+1}. {result['title']}**")
-                            st.markdown(f"*Author: {result.get('author', 'Unknown')}*")
-                            st.markdown(f"*Type: {result.get('source_type', 'Unknown')}*")
-                            
-                            if result.get('url'):
-                                st.markdown(f"[View Source]({result['url']})")
-                            
-                            # Show relevance snippet
-                            if result.get('snippet'):
-                                st.markdown("**Relevant Excerpt:**")
-                                st.info(result['snippet'])
-                            
-                            if i < len(search_result['document_results'][:5]) - 1:
-                                st.divider()
-                    
-                    # Web sources
-                    if search_result['web_results']:
-                        if search_result['document_results']:
-                            st.divider()
-                        st.write("**Web Research:**")
-                        for i, result in enumerate(search_result['web_results']):
-                            st.markdown(f"**{i+1}. {result['title']}**")
-                            st.markdown(f"*Source: {result.get('source', 'Web')}*")
-                            
-                            if result.get('url'):
-                                st.markdown(f"[View Source]({result['url']})")
-                            
-                            # Show snippet
-                            if result.get('snippet'):
-                                st.markdown("**Summary:**")
-                                st.info(result['snippet'])
-                            
-                            if i < len(search_result['web_results']) - 1:
-                                st.divider()
-                
-                # Save search functionality
-                st.divider()
-                col1, col2 = st.columns([1, 3])
-                with col1:
-                    save_search = st.button("SAVE THIS SEARCH", use_container_width=True)
-                with col2:
-                    st.markdown("*Save question, answer, and sources for later reference*")
-                
-                if save_search:
-                    # Save the search using the SavedSearchesSystem
-                    search_entry = SavedSearchesSystem.save_search(
-                        question=question,
-                        answer=search_result['answer'],
-                        sources=search_result['sources_used'],
-                        document_results=search_result['document_results'],
-                        web_results=search_result['web_results']
-                    )
-                    
-                    # Show temporary success message that disappears
-                    st.markdown(f"""
-                    <div class="temp-success">
-                        <strong>Search saved!</strong><br>
-                        Time: {search_entry['timestamp']} | 
-                        Sources: {', '.join(search_entry['sources'])}
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-            else:
-                st.warning("""
-                **No specific information found** for your question.
-                
-                Try:
-                - Using different keywords
-                - Asking more general questions about Chinese exploration
-                - Referring to the example questions above
-                - The system searches both historical documents and web sources
-                """)
+            # Save to saved searches
+            search_entry = SavedSearchesSystem.save_search(
+                question=question,
+                answer=search_result['answer'],
+                sources=search_result['sources_used'],
+                document_results=search_result['document_results'],
+                web_results=search_result['web_results']
+            )
+            
+            # Force rerun to show new message
+            st.rerun()
 
 def show_documents_page(system):
     """Research Documents page"""
@@ -1252,7 +1394,7 @@ def show_documents_page(system):
         )
     with col3:
         limit_options = {"25": 25, "50": 50, "100": 100, "All": None}
-        limit_choice = st.selectbox("Show", ["25", "50", "100", "All"], index=2, label_visibility="collapsed")
+        limit_choice = st.selectbox("Show", ["25", "50", "100", "All"], index=3, label_visibility="collapsed")
         limit = limit_options[limit_choice]
     
     # Action buttons
@@ -1260,7 +1402,7 @@ def show_documents_page(system):
     with col1:
         search_clicked = st.button("SEARCH DOCUMENTS", type="primary", use_container_width=True)
     with col2:
-        show_all_clicked = st.button("SHOW ALL DOCUMENTS", use_container_width=True)
+        show_docs_clicked = st.button("SHOW DOCUMENTS", use_container_width=True)
     
     # Initialize documents list
     documents = []
@@ -1276,17 +1418,15 @@ def show_documents_page(system):
             if documents:
                 st.success(f"Found {len(documents)} documents")
                 search_performed = True
-    
-    elif show_all_clicked or (not search_clicked and not search_query):
-        # Show loading message
-        st.markdown('<div class="document-loading">Click "SHOW ALL DOCUMENTS" to load all documents</div>', unsafe_allow_html=True)
-        
-        if show_all_clicked:
-            with st.spinner("Loading all documents..."):
-                documents = system.get_all_documents(limit=limit, source_type=source_filter if source_filter != "All" else None)
-                if documents:
-                    st.success(f"Loaded {len(documents)} documents")
-                    search_performed = True
+    elif show_docs_clicked:
+        with st.spinner("Loading documents..."):
+            documents = system.get_all_documents(limit=limit, source_type=source_filter if source_filter != "All" else None)
+            if documents:
+                st.success(f"Loaded {len(documents)} documents")
+                search_performed = True
+    else:
+        # Show initial message
+        st.info("Enter a search query or click 'SHOW DOCUMENTS' to load all documents.")
     
     # Display results
     if search_performed and documents:
@@ -1334,7 +1474,7 @@ def show_documents_page(system):
         st.info("No documents found. Try different search terms or filters.")
 
 def show_map_page(system):
-    """Full Voyage Map page"""
+    """Full Voyage Map page with animation"""
     st.markdown('<h2 class="sub-header">FULL VOYAGE MAP</h2>', unsafe_allow_html=True)
     
     st.write("Explore geographical locations mentioned in historical documents about Chinese exploration.")
@@ -1344,45 +1484,75 @@ def show_map_page(system):
         
         if map_data and map_data['locations']:
             locations = map_data['locations']
+            timeline_events = map_data['timeline_events']
             
-            # Create map
+            # Create animation controls
+            st.markdown("### Voyage Timeline Animation")
+            col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+            
+            with col1:
+                start_year = st.slider("Start Year", 1368, 1433, 1405, key="map_start_year")
+            with col2:
+                play_animation = st.button("▶️ Play", use_container_width=True)
+            with col3:
+                pause_animation = st.button("⏸️ Pause", use_container_width=True)
+            with col4:
+                reset_animation = st.button("🔄 Reset", use_container_width=True)
+            
+            # Filter locations by year for animation
+            filtered_locations = [loc for loc in locations if loc.get('year', 1400) >= start_year]
+            
+            # Create animated map
             fig_map = go.Figure()
             
-            lats = [loc['latitude'] for loc in locations]
-            lons = [loc['longitude'] for loc in locations]
-            names = [loc['name'] for loc in locations]
-            dates = [loc.get('date', 'Unknown') for loc in locations]
-            events = [loc.get('event', 'Historical location') for loc in locations]
-            counts = [loc['mention_count'] for loc in locations]
-            
-            fig_map.add_trace(go.Scattergeo(
-                lon=lons,
-                lat=lats,
-                mode='markers+text',
-                marker=dict(
-                    size=[min(c * 3, 25) for c in counts],
-                    color='#FF5722',
-                    line=dict(width=2, color='white')
-                ),
-                text=names,
-                textposition="top center",
-                name='Historical Locations',
-                hovertemplate='<b>%{text}</b><br>Date: %{customdata[0]}<br>Event: %{customdata[1]}<br>Mentions: %{marker.size}<extra></extra>',
-                customdata=list(zip(dates, events))
-            ))
-            
-            # Add voyage routes
-            if len(lats) > 2:
+            if filtered_locations:
+                lats = [loc['latitude'] for loc in filtered_locations]
+                lons = [loc['longitude'] for loc in filtered_locations]
+                names = [loc['name'] for loc in filtered_locations]
+                dates = [loc.get('date', 'Unknown') for loc in filtered_locations]
+                events = [loc.get('event', 'Historical location') for loc in filtered_locations]
+                years = [loc.get('year', 1400) for loc in filtered_locations]
+                counts = [loc['mention_count'] for loc in filtered_locations]
+                
+                # Add voyage route if we have multiple locations
+                if len(lats) > 2:
+                    # Sort by year to create chronological route
+                    sorted_locs = sorted(zip(lats, lons, years, names), key=lambda x: x[2])
+                    route_lats = [loc[0] for loc in sorted_locs]
+                    route_lons = [loc[1] for loc in sorted_locs]
+                    
+                    fig_map.add_trace(go.Scattergeo(
+                        lon=route_lons,
+                        lat=route_lats,
+                        mode='lines',
+                        line=dict(width=2, color='#d4af37', dash='dash'),
+                        name='Voyage Route',
+                        hovertemplate='<b>Voyage Path</b><br>Year: %{customdata}<extra></extra>',
+                        customdata=[loc[2] for loc in sorted_locs]
+                    ))
+                
+                # Add location markers
                 fig_map.add_trace(go.Scattergeo(
-                    lon=lons[:5],
-                    lat=lats[:5],
-                    mode='lines',
-                    line=dict(width=2, color='#d4af37', dash='dash'),
-                    name='Possible Voyage Route'
+                    lon=lons,
+                    lat=lats,
+                    mode='markers+text',
+                    marker=dict(
+                        size=[min(c * 3, 30) for c in counts],
+                        color=years,
+                        colorscale='Viridis',
+                        colorbar=dict(title="Year"),
+                        line=dict(width=2, color='white'),
+                        symbol='circle'
+                    ),
+                    text=names,
+                    textposition="top center",
+                    name='Historical Locations',
+                    hovertemplate='<b>%{text}</b><br>Date: %{customdata[0]}<br>Event: %{customdata[1]}<br>Year: %{marker.color}<extra></extra>',
+                    customdata=list(zip(dates, events))
                 ))
             
             fig_map.update_layout(
-                title="Chinese Exploration Voyage Map",
+                title=f"Chinese Exploration Voyage Map (From {start_year})",
                 geo=dict(
                     showland=True,
                     landcolor='rgb(243, 243, 243)',
@@ -1395,7 +1565,7 @@ def show_map_page(system):
                     showlakes=True,
                     lakecolor='rgb(230, 245, 255)'
                 ),
-                height=500,
+                height=600,
                 showlegend=True,
                 margin=dict(l=0, r=0, t=40, b=0)
             )
@@ -1406,83 +1576,97 @@ def show_map_page(system):
             st.divider()
             st.subheader("Historical Timeline")
             
-            # Prepare timeline data
-            timeline_data = []
-            for loc in locations:
-                if 'date' in loc:
-                    date_str = loc['date']
-                    if '-' in date_str:
-                        start_year = date_str.split('-')[0]
-                        try:
-                            year = int(start_year)
-                        except:
-                            year = 1400
-                    else:
-                        try:
-                            year = int(date_str)
-                        except:
-                            year = 1400
-                    
-                    timeline_data.append({
-                        'Year': year,
-                        'Event': f"{loc['name']}: {loc.get('event', 'Historical event')}",
-                        'Location': loc['name']
-                    })
-            
-            if timeline_data:
-                timeline_df = pd.DataFrame(timeline_data)
-                timeline_df = timeline_df.sort_values('Year')
+            if timeline_events:
+                # Create timeline dataframe
+                timeline_df = pd.DataFrame(timeline_events)
+                timeline_df = timeline_df.sort_values('year')
                 
-                # Create timeline chart
+                # Create interactive timeline chart
                 fig_timeline = go.Figure()
                 
+                # Add events as bars
+                for i, event in enumerate(timeline_events):
+                    fig_timeline.add_trace(go.Scatter(
+                        x=[event['year'], event['year']],
+                        y=[i, i+0.8],
+                        mode='lines',
+                        line=dict(width=10, color='#d4af37'),
+                        name=event['location'],
+                        hoverinfo='text',
+                        text=f"<b>{event['location']}</b><br>Year: {event['year']}<br>{event['event']}",
+                        showlegend=False
+                    ))
+                
+                # Add year markers
                 fig_timeline.add_trace(go.Scatter(
-                    x=timeline_df['Year'],
-                    y=[1] * len(timeline_df),
+                    x=timeline_df['year'],
+                    y=[0.5] * len(timeline_df),
                     mode='markers+text',
-                    marker=dict(size=10, color='#d4af37'),
-                    text=timeline_df['Location'],
+                    marker=dict(size=8, color='#4a6491'),
+                    text=timeline_df['location'],
                     textposition='top center',
-                    hovertemplate='<b>%{text}</b><br>Year: %{x}<br>Event: %{customdata}<extra></extra>',
-                    customdata=timeline_df['Event'],
-                    name='Historical Events'
+                    hoverinfo='text',
+                    textfont=dict(size=10),
+                    hovertemplate='<b>%{text}</b><br>Year: %{x}<extra></extra>',
+                    name='Locations'
                 ))
                 
                 fig_timeline.update_layout(
-                    title="Exploration Timeline (1400-1433)",
+                    title="Exploration Timeline (1368-1433)",
                     xaxis_title="Year",
-                    yaxis=dict(showticklabels=False, showgrid=False, zeroline=False),
-                    height=400,
+                    yaxis=dict(
+                        showticklabels=False,
+                        showgrid=False,
+                        zeroline=False,
+                        range=[0, len(timeline_events) + 1]
+                    ),
+                    height=max(400, len(timeline_events) * 20),
                     showlegend=False,
-                    margin=dict(l=20, r=20, t=40, b=20)
+                    margin=dict(l=20, r=20, t=40, b=20),
+                    hovermode='closest'
                 )
                 
                 st.plotly_chart(fig_timeline, use_container_width=True)
                 
                 # Show timeline table
-                with st.expander("Timeline Details", expanded=False):
-                    timeline_table = timeline_df[['Year', 'Location', 'Event']].sort_values('Year')
-                    st.dataframe(timeline_table, use_container_width=True, hide_index=True)
+                with st.expander("📋 Timeline Details", expanded=True):
+                    # Group events by year
+                    events_by_year = {}
+                    for event in timeline_events:
+                        year = event['year']
+                        if year not in events_by_year:
+                            events_by_year[year] = []
+                        events_by_year[year].append(event)
+                    
+                    # Display events by year
+                    for year in sorted(events_by_year.keys()):
+                        st.markdown(f"### {year}")
+                        for event in events_by_year[year]:
+                            st.markdown(f"**{event['location']}**: {event['event']}")
+                        st.divider()
+            else:
+                st.info("No timeline data available. The system will extract timeline information from documents as you add more content.")
             
             # Location details
             st.divider()
-            with st.expander("LOCATION DETAILS", expanded=False):
+            with st.expander("📍 LOCATION DETAILS", expanded=False):
                 loc_df = pd.DataFrame(locations)
                 if 'date' in loc_df.columns and 'event' in loc_df.columns:
-                    display_df = loc_df[['name', 'date', 'event', 'mention_count']].sort_values('mention_count', ascending=False)
+                    display_df = loc_df[['name', 'date', 'event', 'year', 'mention_count']].sort_values('year')
                     st.dataframe(
                         display_df,
                         column_config={
                             "name": "Location",
-                            "date": "Date",
+                            "date": "Date Range",
                             "event": "Historical Event",
+                            "year": "Year",
                             "mention_count": "Mentions"
                         },
                         use_container_width=True,
                         hide_index=True
                     )
         else:
-            st.info("No geographical location data available in the database.")
+            st.info("No geographical location data available in the database. Add more documents with location information to populate the map.")
 
 def show_analytics_page(system):
     """Analytics page"""
@@ -1635,7 +1819,7 @@ def show_settings_page(system):
         st.write(f"**Cached Documents:** {len(system.documents_cache)}")
         st.write(f"**Web Search Module:** {'Active' if system.web_searcher else 'Inactive'}")
         
-        # FIXED: Handle the case where openai_client might not exist
+        # Handle OpenAI client status
         openai_status = 'Inactive (API key not set)'
         if hasattr(system.web_searcher, 'openai_client'):
             openai_status = 'Active' if system.web_searcher.openai_client else 'Inactive (API key not set)'
@@ -1713,6 +1897,15 @@ def show_settings_page(system):
         SavedSearchesSystem.clear_all_searches()
         st.success("All saved searches cleared!")
         st.rerun()
+    
+    # Clear chat history
+    st.divider()
+    st.subheader("Chat Management")
+    
+    if st.button("CLEAR CHAT HISTORY", type="secondary", use_container_width=True):
+        st.session_state.chat_history = []
+        st.success("Chat history cleared!")
+        st.rerun()
 
 # ========== CUSTOM SIDEBAR ==========
 
@@ -1759,13 +1952,13 @@ def render_sidebar():
                 <p style="color: white; margin: 5px 0; font-size: 0.9rem;"><strong>Documents:</strong> {}</p>
                 <p style="color: white; margin: 5px 0; font-size: 0.9rem;"><strong>Saved Searches:</strong> {}</p>
                 <p style="color: white; margin: 5px 0; font-size: 0.9rem;"><strong>Locations:</strong> {}</p>
-                <p style="color: white; margin: 5px 0; font-size: 0.9rem;"><strong>Entities:</strong> {}</p>
+                <p style="color: white; margin: 5px 0; font-size: 0.9rem;"><strong>Chat History:</strong> {}</p>
             </div>
             """.format(
                 stats.get('total_documents', 0) if stats else 0,
                 stats.get('saved_searches', 0) if stats else 0,
                 stats.get('geocoded_locations', 25) if stats else 25,
-                stats.get('total_entities', 0) if stats else 0
+                len(st.session_state.get('chat_history', []))
             ), unsafe_allow_html=True)
         
         # Render saved searches in sidebar (always visible, below system status)
