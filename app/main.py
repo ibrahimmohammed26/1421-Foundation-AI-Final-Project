@@ -788,10 +788,10 @@ class ResearchSystem:
             rows = cursor.fetchall()
             documents = [dict(row) for row in rows]
             
-            # Add word count for each document
+            # Add word count for each document - FIXED SYNTAX ERROR HERE
             for doc in documents:
                 content = doc.get('content', '')
-                doc['word_count'] = len(content.split()) if content else 
+                doc['word_count'] = len(content.split()) if content else 0
             
             return documents
         except Exception as e:
