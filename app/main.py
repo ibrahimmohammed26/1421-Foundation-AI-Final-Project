@@ -269,6 +269,24 @@ section[data-testid="stSidebar"] > div {
     color: #333;
     border: 1px solid #ddd;
 }
+
+/* Copy button */
+.copy-button {
+    background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    margin-left: 10px;
+}
+
+.copy-button:hover {
+    background: linear-gradient(135deg, #495057 0%, #343a40 100%);
+    transform: translateY(-2px);
+}
 </style>
 
 <script>
@@ -284,6 +302,15 @@ setTimeout(function() {
         }, 500);
     }
 }, 5000);
+
+// Copy answer function
+function copyAnswerToClipboard(answerText) {
+    navigator.clipboard.writeText(answerText).then(function() {
+        alert('Answer copied to clipboard!');
+    }, function(err) {
+        console.error('Could not copy text: ', err);
+    });
+}
 </script>
 """, unsafe_allow_html=True)
 
@@ -381,7 +408,7 @@ class WebSearchModule:
         
         try:
             response = self.openai_client.chat.completions.create(
-                model="gpt-4",  # or "gpt-3.5-turbo" if you want to save costs
+                model="gpt-3.5-turbo",  # Using 3.5-turbo for cost efficiency
                 messages=[
                     {"role": "system", "content": "You are a historical research assistant specializing in Chinese exploration history and the 1421 theory. Provide accurate, well-researched answers based on available information."},
                     {"role": "user", "content": prompt}
@@ -459,7 +486,7 @@ class SavedSearchesSystem:
         
         if saved_searches:
             st.sidebar.markdown("---")
-            st.sidebar.markdown("### Saved Searches")
+            st.sidebar.markdown("### SAVED SEARCHES")
             
             # Show only the 5 most recent searches in sidebar
             for search in saved_searches[-5:][::-1]:  # Show most recent first
@@ -467,7 +494,7 @@ class SavedSearchesSystem:
                     col1, col2 = st.columns([4, 1])
                     with col1:
                         st.markdown(f"""
-                        <div class="saved-search-sidebar-item" onclick="this.style.background='rgba(212, 175, 55, 0.3)'; setTimeout(() => this.style.background='', 500)">
+                        <div class="saved-search-sidebar-item">
                             <div class="search-query">{search['question'][:50]}{'...' if len(search['question']) > 50 else ''}</div>
                             <div class="search-time">{search['time']} • {len(search['sources'])} sources</div>
                         </div>
@@ -475,7 +502,7 @@ class SavedSearchesSystem:
                     with col2:
                         if st.button("↻", key=f"sidebar_reload_{search['id']}", help="Reload this search"):
                             st.session_state.current_question = search['question']
-                            st.session_state.current_page = "dashboard"
+                            st.session_state.auto_search = True
                             st.rerun()
             
             st.sidebar.markdown(f"*Showing 5 of {len(saved_searches)} saved searches*")
@@ -494,7 +521,6 @@ class ResearchSystem:
         self.db = None
         self.documents_cache = []
         self.web_searcher = WebSearchModule()
-        self.saved_searches = SavedSearchesSystem()
         
         # Initialize analytics
         self.initialize_analytics()
@@ -504,6 +530,7 @@ class ResearchSystem:
     
     def initialize_analytics(self):
         """Initialize analytics tracking"""
+        # Initialize analytics in session state if not exists
         if 'search_analytics' not in st.session_state:
             st.session_state.search_analytics = {
                 'total_searches': 0,
@@ -546,7 +573,17 @@ class ResearchSystem:
     def track_search(self, query: str, response_time: float, results_count: int, 
                      sources_used: List[str]):
         """Track search analytics"""
-        analytics = st.session_state.search_analytics
+        # Access analytics safely
+        analytics = st.session_state.get('search_analytics', {
+            'total_searches': 0,
+            'searches_by_day': {},
+            'searches_by_hour': {},
+            'questions_asked': [],
+            'response_times': [],
+            'popular_topics': {},
+            'user_sessions': [],
+            'sources_used': {'documents': 0, 'web': 0, 'both': 0}
+        })
         
         today = datetime.now().strftime("%Y-%m-%d")
         hour = datetime.now().strftime("%H:00")
@@ -584,6 +621,9 @@ class ResearchSystem:
             analytics['response_times'] = analytics['response_times'][-500:]
         if len(analytics['questions_asked']) > 100:
             analytics['questions_asked'] = analytics['questions_asked'][-50:]
+        
+        # Update session state
+        st.session_state.search_analytics = analytics
     
     def get_database_stats(self):
         """Get database statistics"""
@@ -609,7 +649,8 @@ class ResearchSystem:
             
             # Get locations count
             cursor = self.db.execute("SELECT COUNT(DISTINCT entity_text) FROM entities WHERE entity_type = 'LOCATION'")
-            geocoded_locations = cursor.fetchone()[0] or 25
+            geocoded_locations_result = cursor.fetchone()
+            geocoded_locations = geocoded_locations_result[0] if geocoded_locations_result else 25
             
             # Get saved searches count from session state
             saved_searches_count = len(st.session_state.get('saved_searches', []))
@@ -638,22 +679,33 @@ class ResearchSystem:
                 "saved_searches": len(st.session_state.get('saved_searches', []))
             }
     
-    def get_all_documents(self, limit=100, source_type=None):
+    def get_all_documents(self, limit=None, source_type=None):
         """Get all documents from database"""
         if not self.db:
             return []
         
         try:
             if source_type and source_type != "All":
-                cursor = self.db.execute(
-                    "SELECT * FROM documents WHERE source_type = ? ORDER BY id LIMIT ?",
-                    (source_type, limit)
-                )
+                if limit:
+                    cursor = self.db.execute(
+                        "SELECT * FROM documents WHERE source_type = ? ORDER BY id LIMIT ?",
+                        (source_type, limit)
+                    )
+                else:
+                    cursor = self.db.execute(
+                        "SELECT * FROM documents WHERE source_type = ? ORDER BY id",
+                        (source_type,)
+                    )
             else:
-                cursor = self.db.execute(
-                    "SELECT * FROM documents ORDER BY id LIMIT ?",
-                    (limit,)
-                )
+                if limit:
+                    cursor = self.db.execute(
+                        "SELECT * FROM documents ORDER BY id LIMIT ?",
+                        (limit,)
+                    )
+                else:
+                    cursor = self.db.execute(
+                        "SELECT * FROM documents ORDER BY id"
+                    )
             
             rows = cursor.fetchall()
             return [dict(row) for row in rows]
@@ -725,21 +777,25 @@ class ResearchSystem:
         
         # Try to generate answer using OpenAI if available
         if self.web_searcher.openai_client:
-            prompt = f"""
-            Question: {question}
-            
-            Context from documents:
-            {' '.join([doc.get('snippet', doc.get('content', ''))[:300] for doc in document_results[:2]])}
-            
-            Context from web:
-            {' '.join([web.get('snippet', web.get('content', ''))[:300] for web in web_results[:2]])}
-            
-            Please provide a comprehensive answer based on the available information.
-            """
-            
-            ai_answer = self.web_searcher.generate_with_openai(prompt)
-            if ai_answer:
-                return ai_answer, sources_used
+            try:
+                prompt = f"""
+                Question: {question}
+                
+                Context from documents:
+                {' '.join([doc.get('snippet', doc.get('content', ''))[:300] for doc in document_results[:2]])}
+                
+                Context from web:
+                {' '.join([web.get('snippet', web.get('content', ''))[:300] for web in web_results[:2]])}
+                
+                Please provide a comprehensive answer based on the available information.
+                """
+                
+                ai_answer = self.web_searcher.generate_with_openai(prompt)
+                if ai_answer:
+                    return ai_answer, sources_used
+            except Exception as e:
+                print(f"OpenAI generation failed: {e}")
+                # Fall through to simple generation
         
         # Fallback to simple answer generation
         responses = [
@@ -837,38 +893,40 @@ class ResearchSystem:
         """Get geographical locations for map"""
         locations_data = self.get_entities(entity_type='LOCATION', limit=50)
         
-        # Coordinates for known locations
+        # Coordinates for known locations with historical dates
         location_coords = {
-            'China': (35.8617, 104.1954),
-            'Beijing': (39.9042, 116.4074),
-            'Nanjing': (32.0603, 118.7969),
-            'Shanghai': (31.2304, 121.4737),
-            'India': (20.5937, 78.9629),
-            'Sri Lanka': (7.8731, 80.7718),
-            'Sumatra': (-0.5897, 101.3431),
-            'Java': (-7.6145, 110.7123),
-            'Africa': (8.7832, 34.5085),
-            'America': (37.0902, -95.7129),
-            'California': (36.7783, -119.4179),
-            'Pacific Ocean': (0, -160),
-            'Indian Ocean': (-20, 80),
-            'South China Sea': (12, 115),
-            'Malacca': (2.1896, 102.2501),
-            'Calicut': (11.2588, 75.7804),
-            'Hormuz': (27.1561, 56.2815),
-            'Mombasa': (-4.0435, 39.6682),
-            'Zanzibar': (-6.1659, 39.2026)
+            'China': (35.8617, 104.1954, '1368-1644', 'Ming Dynasty'),
+            'Beijing': (39.9042, 116.4074, '1403', 'Capital moved to Beijing'),
+            'Nanjing': (32.0603, 118.7969, '1368-1421', 'Early Ming capital'),
+            'Shanghai': (31.2304, 121.4737, '1400s', 'Important port city'),
+            'India': (20.5937, 78.9629, '1405-1433', 'Zheng He visited'),
+            'Sri Lanka': (7.8731, 80.7718, '1409', 'Zheng He visited'),
+            'Sumatra': (-0.5897, 101.3431, '1407', 'Zheng He visited'),
+            'Java': (-7.6145, 110.7123, '1407', 'Zheng He visited'),
+            'Africa': (8.7832, 34.5085, '1417-1419', 'Zheng He reached Africa'),
+            'America': (37.0902, -95.7129, '1421', 'Possible pre-Columbian contact'),
+            'California': (36.7783, -119.4179, '1421', 'Possible landing site'),
+            'Pacific Ocean': (0, -160, '1405-1433', 'Voyage routes'),
+            'Indian Ocean': (-20, 80, '1405-1433', 'Main trade route'),
+            'South China Sea': (12, 115, '1405-1433', 'Departure route'),
+            'Malacca': (2.1896, 102.2501, '1409', 'Strategic trading port'),
+            'Calicut': (11.2588, 75.7804, '1406', 'Major Indian port'),
+            'Hormuz': (27.1561, 56.2815, '1414', 'Persian Gulf port'),
+            'Mombasa': (-4.0435, 39.6682, '1418', 'East African trade'),
+            'Zanzibar': (-6.1659, 39.2026, '1419', 'Trade with Africa')
         }
         
         locations = []
         for entity in locations_data:
             loc_name = entity['entity_text']
             if loc_name in location_coords:
-                lat, lon = location_coords[loc_name]
+                lat, lon, date, event = location_coords[loc_name]
                 locations.append({
                     'name': loc_name,
                     'latitude': lat,
                     'longitude': lon,
+                    'date': date,
+                    'event': event,
                     'type': 'city',
                     'mention_count': entity['count']
                 })
@@ -932,7 +990,7 @@ def show_dashboard(system):
         "How did Chinese navigation compare to European methods?"
     ]
     
-    # Create buttons for example questions
+    # Create buttons for example questions - when clicked, they auto-search
     cols = st.columns(2)
     for idx, question in enumerate(example_questions):
         with cols[idx % 2]:
@@ -942,6 +1000,7 @@ def show_dashboard(system):
                 use_container_width=True
             ):
                 st.session_state.current_question = question
+                st.session_state.auto_search = True
                 st.rerun()
     
     st.divider()
@@ -949,6 +1008,9 @@ def show_dashboard(system):
     # Question input
     if 'current_question' not in st.session_state:
         st.session_state.current_question = ""
+    
+    if 'auto_search' not in st.session_state:
+        st.session_state.auto_search = False
     
     question = st.text_area(
         "Your Question:",
@@ -965,8 +1027,14 @@ def show_dashboard(system):
     with col2:
         st.markdown("*System automatically uses both documents and web research*")
     
+    # Check if we should auto-search (when example question is clicked)
+    should_search = ask_btn or st.session_state.auto_search
+    
     # Process question
-    if ask_btn and question:
+    if should_search and question:
+        # Reset auto_search flag
+        st.session_state.auto_search = False
+        
         with st.spinner("Researching historical records and searching the web..."):
             # Perform comprehensive search
             search_result = system.perform_comprehensive_search(question)
@@ -991,6 +1059,11 @@ def show_dashboard(system):
                     </div>
                 </div>
                 """.format(answer=search_result['answer']), unsafe_allow_html=True)
+                
+                # Add copy button
+                st.markdown(f"""
+                <button class="copy-button" onclick="copyAnswerToClipboard(`{search_result['answer'].replace('`', "'")}`)">Copy Answer</button>
+                """, unsafe_allow_html=True)
                 
                 # Show sources badges
                 st.markdown("**Sources used:**")
@@ -1082,24 +1155,31 @@ def show_documents_page(system):
     """Research Documents page"""
     st.markdown('<h2 class="sub-header">RESEARCH DOCUMENTS</h2>', unsafe_allow_html=True)
     
-    # Search controls
-    col1, col2, col3 = st.columns([3, 1, 1])
+    # Search controls - all on the same level
+    col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
     with col1:
         search_query = st.text_input("Search documents:", placeholder="Title, author, or keywords...", label_visibility="collapsed")
     with col2:
         source_filter = st.selectbox(
             "Filter by type",
             ["All", "Book", "Article", "Research Paper", "Website"],
-            index=0
+            index=0,
+            label_visibility="collapsed"
         )
     with col3:
-        limit = st.selectbox("Results", [25, 50, 100], index=0)
+        # Show all documents by default (no limit)
+        show_all = st.checkbox("Show all documents", value=True, help="Show all documents without limit")
+        if not show_all:
+            limit = st.selectbox("Results limit", ["25", "50", "100", "500"], index=0, label_visibility="collapsed")
+            limit = int(limit) if limit else None
+        else:
+            limit = None
+    with col4:
+        search_clicked = st.button("SEARCH", type="primary", use_container_width=True)
     
     # Action buttons
     col1, col2 = st.columns(2)
     with col1:
-        search_clicked = st.button("SEARCH DOCUMENTS", type="primary", use_container_width=True)
-    with col2:
         show_all_clicked = st.button("SHOW ALL DOCUMENTS", use_container_width=True)
     
     # Load documents
@@ -1107,14 +1187,14 @@ def show_documents_page(system):
     if search_clicked and search_query:
         start_time = time.time()
         with st.spinner("Searching documents..."):
-            documents = system.search_documents(search_query, limit=limit)
+            documents = system.search_documents(search_query, limit=limit if limit else 100)
             response_time = time.time() - start_time
             system.track_search(search_query, response_time, len(documents), ['documents'])
             if documents:
                 st.success(f"Found {len(documents)} documents")
     elif show_all_clicked:
         with st.spinner("Loading all documents..."):
-            documents = system.get_all_documents(limit=limit, source_type=source_filter)
+            documents = system.get_all_documents(limit=limit, source_type=source_filter if source_filter != "All" else None)
             if documents:
                 st.success(f"Loaded {len(documents)} documents")
     
@@ -1175,68 +1255,163 @@ def show_map_page(system):
         if map_data and map_data['locations']:
             locations = map_data['locations']
             
-            # Create map
-            fig = go.Figure()
+            # Create two columns for map and timeline
+            col1, col2 = st.columns([2, 1])
             
-            lats = [loc['latitude'] for loc in locations]
-            lons = [loc['longitude'] for loc in locations]
-            names = [loc['name'] for loc in locations]
-            counts = [loc['mention_count'] for loc in locations]
-            
-            fig.add_trace(go.Scattergeo(
-                lon=lons,
-                lat=lats,
-                mode='markers+text',
-                marker=dict(
-                    size=[min(c * 3, 25) for c in counts],
-                    color='#FF5722',
-                    line=dict(width=2, color='white')
-                ),
-                text=names,
-                textposition="top center",
-                name='Historical Locations',
-                hovertemplate='<b>%{text}</b><br>Mentions: %{marker.size}<extra></extra>'
-            ))
-            
-            # Add voyage routes
-            if len(lats) > 2:
-                fig.add_trace(go.Scattergeo(
-                    lon=lons[:5],
-                    lat=lats[:5],
-                    mode='lines',
-                    line=dict(width=2, color='#d4af37', dash='dash'),
-                    name='Possible Voyage Route'
+            with col1:
+                # Create map
+                fig_map = go.Figure()
+                
+                lats = [loc['latitude'] for loc in locations]
+                lons = [loc['longitude'] for loc in locations]
+                names = [loc['name'] for loc in locations]
+                dates = [loc.get('date', 'Unknown') for loc in locations]
+                events = [loc.get('event', 'Historical location') for loc in locations]
+                counts = [loc['mention_count'] for loc in locations]
+                
+                fig_map.add_trace(go.Scattergeo(
+                    lon=lons,
+                    lat=lats,
+                    mode='markers+text',
+                    marker=dict(
+                        size=[min(c * 3, 25) for c in counts],
+                        color='#FF5722',
+                        line=dict(width=2, color='white')
+                    ),
+                    text=names,
+                    textposition="top center",
+                    name='Historical Locations',
+                    hovertemplate='<b>%{text}</b><br>Date: %{customdata[0]}<br>Event: %{customdata[1]}<br>Mentions: %{marker.size}<extra></extra>',
+                    customdata=list(zip(dates, events))
                 ))
+                
+                # Add voyage routes
+                if len(lats) > 2:
+                    fig_map.add_trace(go.Scattergeo(
+                        lon=lons[:5],
+                        lat=lats[:5],
+                        mode='lines',
+                        line=dict(width=2, color='#d4af37', dash='dash'),
+                        name='Possible Voyage Route'
+                    ))
+                
+                fig_map.update_layout(
+                    title="Chinese Exploration Voyage Map",
+                    geo=dict(
+                        showland=True,
+                        landcolor='rgb(243, 243, 243)',
+                        coastlinecolor='rgb(204, 204, 204)',
+                        showcountries=True,
+                        countrycolor='rgb(204, 204, 204)',
+                        showocean=True,
+                        oceancolor='rgb(230, 245, 255)',
+                        projection_type='natural earth',
+                        showlakes=True,
+                        lakecolor='rgb(230, 245, 255)'
+                    ),
+                    height=500,
+                    showlegend=True,
+                    margin=dict(l=0, r=0, t=40, b=0)
+                )
+                
+                st.plotly_chart(fig_map, use_container_width=True)
             
-            fig.update_layout(
-                title="Chinese Exploration Voyage Map",
-                geo=dict(
-                    showland=True,
-                    landcolor='rgb(243, 243, 243)',
-                    coastlinecolor='rgb(204, 204, 204)',
-                    showcountries=True,
-                    countrycolor='rgb(204, 204, 204)',
-                    showocean=True,
-                    oceancolor='rgb(230, 245, 255)',
-                    projection_type='natural earth',
-                    showlakes=True,
-                    lakecolor='rgb(230, 245, 255)'
-                ),
-                height=600,
-                showlegend=True,
-                margin=dict(l=0, r=0, t=40, b=0)
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
+            with col2:
+                # Create timeline graph
+                st.subheader("Historical Timeline")
+                
+                # Prepare timeline data
+                timeline_data = []
+                for loc in locations:
+                    if 'date' in loc:
+                        # Parse date - could be range like "1405-1433" or single year "1405"
+                        date_str = loc['date']
+                        if '-' in date_str:
+                            start_year = date_str.split('-')[0]
+                            end_year = date_str.split('-')[1]
+                            try:
+                                start_year_int = int(start_year)
+                                end_year_int = int(end_year)
+                                year = start_year_int  # Use start year for positioning
+                                duration = end_year_int - start_year_int
+                            except:
+                                year = 1400  # Default
+                                duration = 10
+                        else:
+                            try:
+                                year = int(date_str)
+                                duration = 5  # Default duration for single year events
+                            except:
+                                year = 1400  # Default
+                                duration = 10
+                        
+                        timeline_data.append({
+                            'Year': year,
+                            'Event': f"{loc['name']}: {loc.get('event', 'Historical event')}",
+                            'Location': loc['name'],
+                            'Duration': duration
+                        })
+                
+                if timeline_data:
+                    timeline_df = pd.DataFrame(timeline_data)
+                    timeline_df = timeline_df.sort_values('Year')
+                    
+                    # Create timeline chart
+                    fig_timeline = go.Figure()
+                    
+                    # Add events as points
+                    fig_timeline.add_trace(go.Scatter(
+                        x=timeline_df['Year'],
+                        y=[1] * len(timeline_df),  # Constant y for now
+                        mode='markers+text',
+                        marker=dict(size=10, color='#d4af37'),
+                        text=timeline_df['Location'],
+                        textposition='top center',
+                        hovertemplate='<b>%{text}</b><br>Year: %{x}<br>Event: %{customdata}<extra></extra>',
+                        customdata=timeline_df['Event'],
+                        name='Historical Events'
+                    ))
+                    
+                    fig_timeline.update_layout(
+                        title="Exploration Timeline (1400-1433)",
+                        xaxis_title="Year",
+                        yaxis=dict(showticklabels=False, showgrid=False, zeroline=False),
+                        height=400,
+                        showlegend=False,
+                        margin=dict(l=20, r=20, t=40, b=20)
+                    )
+                    
+                    st.plotly_chart(fig_timeline, use_container_width=True)
+                    
+                    # Show timeline table
+                    with st.expander("Timeline Details", expanded=False):
+                        timeline_table = timeline_df[['Year', 'Location', 'Event']].sort_values('Year')
+                        st.dataframe(timeline_table, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No timeline data available for locations.")
             
             # Location table
             with st.expander("LOCATION DETAILS", expanded=False):
                 loc_df = pd.DataFrame(locations)
-                st.dataframe(
-                    loc_df[['name', 'type', 'mention_count']].sort_values('mention_count', ascending=False),
-                    use_container_width=True,
-                    hide_index=True
-                )
+                if 'date' in loc_df.columns and 'event' in loc_df.columns:
+                    display_df = loc_df[['name', 'date', 'event', 'mention_count']].sort_values('mention_count', ascending=False)
+                    st.dataframe(
+                        display_df,
+                        column_config={
+                            "name": "Location",
+                            "date": "Date",
+                            "event": "Historical Event",
+                            "mention_count": "Mentions"
+                        },
+                        use_container_width=True,
+                        hide_index=True
+                    )
+                else:
+                    st.dataframe(
+                        loc_df[['name', 'type', 'mention_count']].sort_values('mention_count', ascending=False),
+                        use_container_width=True,
+                        hide_index=True
+                    )
         else:
             st.info("No geographical location data available in the database.")
 
@@ -1577,6 +1752,10 @@ def main():
     # Initialize saved searches if not exists
     if 'saved_searches' not in st.session_state:
         st.session_state.saved_searches = []
+    
+    # Initialize auto_search flag
+    if 'auto_search' not in st.session_state:
+        st.session_state.auto_search = False
     
     # Render sidebar
     render_sidebar()
