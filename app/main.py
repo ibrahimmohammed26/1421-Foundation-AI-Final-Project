@@ -50,44 +50,139 @@ DEFAULT_STATE = {
     'animation_playing': False,
     'current_year': 1368,
     'map_data': None,
-    'search_mode': 'Auto (Documents + Web)'
+    'search_mode': 'Auto (Documents + Web)',
+    'saved_sidebar_collapsed': False,
+    'chat_sessions': [],  # For multiple chat sessions like DeepSeek
+    'current_chat_id': 0
 }
 
 for key, value in DEFAULT_STATE.items():
     if key not in st.session_state:
         st.session_state[key] = value
 
+# Initialize default chat session
+if not st.session_state.chat_sessions:
+    st.session_state.chat_sessions = [{
+        'id': 0,
+        'name': 'New Chat',
+        'history': [],
+        'created': datetime.now().strftime("%Y-%m-%d %H:%M")
+    }]
+
 # ========== CSS STYLING ==========
 st.markdown("""
 <style>
 /* Main styling */
 .stApp { background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); }
-.main .block-container { background: rgba(255,255,255,0.98); border-radius: 15px; padding: 2.5rem; margin-top: 1rem; box-shadow: 0 6px 20px rgba(0,0,0,0.1); }
+.main .block-container { background: rgba(255,255,255,0.98); border-radius: 15px; padding: 2rem; margin-top: 1rem; box-shadow: 0 6px 20px rgba(0,0,0,0.1); max-width: 1200px; margin-left: auto; margin-right: auto; }
 
 /* Headers */
-.main-header { font-size: 3rem; color: #000; text-align: center; margin-bottom: 1rem; font-weight: 800; background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.main-header { font-size: 2.8rem; color: #000; text-align: center; margin-bottom: 0.5rem; font-weight: 800; background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
 .sub-header { font-size: 1.8rem; color: #2c3e50; margin-bottom: 1.5rem; font-weight: 700; border-bottom: 3px solid #d4af37; padding-bottom: 0.5rem; }
 
-/* Sidebar - Navigation */
-section[data-testid="stSidebar"] > div { background: linear-gradient(135deg, #2c3e50 0%, #1a252f 100%) !important; border-right: 4px solid #d4af37; padding-top: 1.5rem !important; }
-
-/* Navigation buttons - close together */
-.sidebar-nav {
+/* Main layout - Two column for chat sidebar and content */
+.main-layout {
     display: flex;
-    flex-direction: column;
-    gap: 2px;
-    margin-bottom: 10px;
+    gap: 20px;
 }
 
-.stButton > button {
+/* Chat sidebar - Right side like DeepSeek */
+.chat-sidebar {
+    background: linear-gradient(135deg, #2c3e50 0%, #1a252f 100%);
+    border-left: 4px solid #d4af37;
+    padding: 1.5rem 1rem;
+    height: calc(100vh - 100px);
+    position: sticky;
+    top: 10px;
+    right: 0;
+    border-radius: 12px 0 0 12px;
+    color: white;
+    overflow-y: auto;
+    width: 280px;
+    flex-shrink: 0;
+}
+
+.chat-sidebar.collapsed {
+    width: 60px;
+    padding: 1.5rem 0.5rem;
+}
+
+.chat-sidebar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(212,175,55,0.3);
+}
+
+.new-chat-btn {
+    background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%);
+    color: black;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 15px;
+    font-weight: 600;
+    width: 100%;
+    cursor: pointer;
+    margin-bottom: 20px;
+    transition: all 0.3s ease;
+}
+
+.new-chat-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+}
+
+.chat-session-item {
+    background: rgba(255,255,255,0.1);
+    border-radius: 8px;
+    padding: 12px;
+    margin: 8px 0;
+    border-left: 3px solid transparent;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.chat-session-item:hover {
+    background: rgba(255,255,255,0.2);
+    border-left: 3px solid #d4af37;
+}
+
+.chat-session-item.active {
+    background: rgba(212,175,55,0.2);
+    border-left: 3px solid #d4af37;
+}
+
+.chat-session-name {
+    font-size: 0.95rem;
+    color: white;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.chat-session-time {
+    font-size: 0.7rem;
+    color: #ccc;
+}
+
+/* Left Navigation Sidebar */
+section[data-testid="stSidebar"] > div { 
+    background: linear-gradient(135deg, #2c3e50 0%, #1a252f 100%) !important; 
+    border-right: 4px solid #d4af37;
+    padding-top: 1.2rem !important;
+}
+
+/* Navigation buttons - larger text, closer together */
+.stSidebar .stButton > button {
     background: transparent;
     color: white !important;
     border: none !important;
     border-radius: 6px;
-    font-weight: 500 !important;
-    font-size: 1rem !important;
-    padding: 8px 12px !important;
-    margin: 0 !important;
+    font-weight: 600 !important;
+    font-size: 1.1rem !important;
+    padding: 10px 14px !important;
+    margin: 2px 0 !important;
     text-align: left;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -95,16 +190,16 @@ section[data-testid="stSidebar"] > div { background: linear-gradient(135deg, #2c
     width: 100%;
 }
 
-.stButton > button:hover {
+.stSidebar .stButton > button:hover {
     background: rgba(212,175,55,0.2) !important;
     transform: translateX(3px);
     border-left: 3px solid #d4af37 !important;
 }
 
-.stButton > button[kind="primary"] {
+.stSidebar .stButton > button[kind="primary"] {
     background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%) !important;
     color: #000 !important;
-    font-weight: 600 !important;
+    font-weight: 700 !important;
 }
 
 /* Source badges */
@@ -116,7 +211,7 @@ section[data-testid="stSidebar"] > div { background: linear-gradient(135deg, #2c
 [data-testid="stMetricValue"] { font-size: 2rem !important; font-weight: 700 !important; color: #2c3e50 !important; }
 [data-testid="stMetricLabel"] { font-weight: 600 !important; font-size: 1rem !important; color: #d4af37 !important; }
 
-/* Saved searches */
+/* Saved searches in right sidebar */
 .saved-search-sidebar-item { background: rgba(255,255,255,0.1); border-radius: 8px; padding: 12px; margin: 8px 0; border-left: 4px solid #d4af37; cursor: pointer; transition: all 0.3s ease; }
 .saved-search-sidebar-item:hover { background: rgba(255,255,255,0.2); transform: translateX(5px); }
 .search-time { font-size: 0.8rem; color: #ccc; margin-top: 5px; }
@@ -163,15 +258,44 @@ section[data-testid="stSidebar"] > div { background: linear-gradient(135deg, #2c
 /* Headers */
 .saved-searches-header, .system-status-header { color: #FFD700 !important; font-weight: 700 !important; }
 
-/* Question input at bottom - Natural bottom of page, not fixed */
+/* Question input at bottom - DeepSeek style, fixed at bottom */
 .question-input-container {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(800px, 90%);
     background: white;
-    padding: 25px 20px;
-    border-top: 2px solid #d4af37;
-    margin-top: 30px;
-    margin-bottom: 20px;
-    border-radius: 12px;
-    box-shadow: 0 -2px 10px rgba(0,0,0,0.03);
+    padding: 15px 20px;
+    border: 1px solid #e0e0e0;
+    border-radius: 50px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    backdrop-filter: blur(10px);
+    background: rgba(255,255,255,0.95);
+}
+
+.question-input-container textarea {
+    border: none;
+    background: transparent;
+    padding: 10px 15px;
+    font-size: 1rem;
+    resize: none;
+    outline: none;
+    flex-grow: 1;
+}
+
+.question-input-container button {
+    background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%);
+    color: white;
+    border: none;
+    border-radius: 30px;
+    padding: 10px 24px;
+    font-weight: 600;
+    margin-left: 10px;
+    white-space: nowrap;
 }
 
 /* Confirmation dialog */
@@ -194,9 +318,51 @@ section[data-testid="stSidebar"] > div { background: linear-gradient(135deg, #2c
 /* Hide default title */
 .js-plotly-plot .gtitle { display: none; }
 
+/* Content area with margin for bottom fixed input */
+.content-area {
+    margin-bottom: 100px;
+    padding-bottom: 20px;
+}
+
+/* Document search - full width */
+.document-search-container {
+    width: 100%;
+    margin-bottom: 20px;
+}
+
+.document-search-input {
+    width: 100%;
+    padding: 12px 18px;
+    border: 2px solid #e0e0e0;
+    border-radius: 30px;
+    font-size: 1rem;
+    transition: all 0.3s ease;
+}
+
+.document-search-input:focus {
+    border-color: #d4af37;
+    box-shadow: 0 0 0 3px rgba(212,175,55,0.1);
+    outline: none;
+}
+
 /* UK English text */
 p, div, span, li {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+}
+
+/* Toggle sidebar button */
+.toggle-sidebar-btn {
+    background: transparent;
+    color: white;
+    border: 1px solid #d4af37;
+    border-radius: 20px;
+    padding: 5px 12px;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+
+.toggle-sidebar-btn:hover {
+    background: rgba(212,175,55,0.2);
 }
 </style>
 
@@ -232,18 +398,13 @@ function scrollToBottom() {
     });
 }
 
-// Initialize typing on new messages
-document.addEventListener('DOMContentLoaded', function() {
-    const messages = document.querySelectorAll('.assistant-message .answer-text');
-    messages.forEach((msg, index) => {
-        if (index === messages.length - 1) {
-            const text = msg.textContent;
-            msg.innerHTML = '';
-            typeWriter(msg.id || 'answer-' + index, text);
-        }
-    });
-    scrollToBottom();
-});
+// Toggle sidebar
+function toggleChatSidebar() {
+    const sidebar = document.querySelector('.chat-sidebar');
+    if (sidebar) {
+        sidebar.classList.toggle('collapsed');
+    }
+}
 </script>
 """, unsafe_allow_html=True)
 
@@ -321,16 +482,58 @@ class SavedSearchesSystem:
         st.session_state.saved_searches = [s for s in st.session_state.saved_searches if s['id'] != search_id]
     
     @staticmethod
-    def render_sidebar():
+    def render_chat_sidebar():
+        """Render the right sidebar with chat sessions and saved searches (DeepSeek style)"""
         saved = st.session_state.saved_searches
-        st.sidebar.markdown("---")
-        st.sidebar.markdown('<h3 class="saved-searches-header">SAVED SEARCHES</h3>', unsafe_allow_html=True)
+        chat_sessions = st.session_state.chat_sessions
+        current_id = st.session_state.current_chat_id
+        
+        # Chat sidebar container
+        st.markdown("""
+        <div class="chat-sidebar">
+            <div class="chat-sidebar-header">
+                <h3 style="color: #d4af37; margin:0;">Chat History</h3>
+                <button class="toggle-sidebar-btn" onclick="toggleChatSidebar()">◀</button>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        # New Chat button
+        if st.button("+ New Chat", key="new_chat_btn", use_container_width=True):
+            new_id = len(chat_sessions)
+            st.session_state.chat_sessions.append({
+                'id': new_id,
+                'name': f'Chat {new_id + 1}',
+                'history': [],
+                'created': datetime.now().strftime("%Y-%m-%d %H:%M")
+            })
+            st.session_state.current_chat_id = new_id
+            st.rerun()
+        
+        # Chat sessions
+        st.markdown("<div style='margin-top: 20px;'>", unsafe_allow_html=True)
+        for session in chat_sessions[-5:][::-1]:  # Show last 5
+            active_class = "active" if session['id'] == current_id else ""
+            st.markdown(f"""
+            <div class="chat-session-item {active_class}" onclick="document.getElementById('chat_{session['id']}').click();">
+                <div class="chat-session-name">{session['name']}</div>
+                <div class="chat-session-time">{session['created'][:10]}</div>
+            </div>
+            """, unsafe_allow_html=True)
+            if st.button("Select", key=f"chat_{session['id']}", help="Select this chat"):
+                st.session_state.current_chat_id = session['id']
+                st.rerun()
+        
+        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown("<hr style='border-color: rgba(212,175,55,0.3); margin: 20px 0;'>", unsafe_allow_html=True)
+        
+        # Saved searches section
+        st.markdown('<h3 class="saved-searches-header">SAVED SEARCHES</h3>', unsafe_allow_html=True)
         
         if saved:
             for s in saved[-5:][::-1]:
-                cols = st.sidebar.columns([3, 1, 1])
+                cols = st.columns([3, 1, 1])
                 with cols[0]:
-                    st.markdown(f'<div class="saved-search-sidebar-item"><div class="search-query">{s["question"][:50]}{"..." if len(s["question"])>50 else ""}</div><div class="search-time">{s["time"]} • {len(s["sources"])} sources</div></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="saved-search-sidebar-item"><div class="search-query">{s["question"][:40]}{"..." if len(s["question"])>40 else ""}</div><div class="search-time">{s["time"]} • {len(s["sources"])} sources</div></div>', unsafe_allow_html=True)
                 with cols[1]:
                     if st.button("↻", key=f"sr_{s['id']}", help="Reload this search"):
                         st.session_state.current_question = s['question']
@@ -342,8 +545,8 @@ class SavedSearchesSystem:
                         st.rerun()
             
             if st.session_state.deleting_search_id:
-                st.sidebar.markdown('<div class="confirmation-dialog"><strong>Delete Search?</strong><br><small>This action cannot be undone.</small></div>', unsafe_allow_html=True)
-                c1, c2 = st.sidebar.columns(2)
+                st.markdown('<div class="confirmation-dialog"><strong>Delete Search?</strong><br><small>This action cannot be undone.</small></div>', unsafe_allow_html=True)
+                c1, c2 = st.columns(2)
                 if c1.button("Confirm", key="confirm_del"):
                     SavedSearchesSystem.delete_search(st.session_state.deleting_search_id)
                     st.session_state.deleting_search_id = None
@@ -351,9 +554,11 @@ class SavedSearchesSystem:
                 if c2.button("Cancel", key="cancel_del"):
                     st.session_state.deleting_search_id = None
                     st.rerun()
-            st.sidebar.markdown(f"*Showing 5 of {len(saved)} saved searches*")
+            st.markdown(f"*Showing 5 of {len(saved)}*")
         else:
-            st.sidebar.markdown('<div class="no-saved-searches">No saved searches yet.<br><small>Searches are automatically saved.</small></div>', unsafe_allow_html=True)
+            st.markdown('<div class="no-saved-searches">No saved searches yet.<br><small>Searches are automatically saved.</small></div>', unsafe_allow_html=True)
+        
+        st.markdown("</div>", unsafe_allow_html=True)  # Close chat-sidebar div
 
 # ========== FEEDBACK SYSTEM ==========
 class FeedbackSystem:
@@ -447,20 +652,16 @@ class ResearchSystem:
         except:
             return {'total_documents': 0, 'saved_searches': 0, 'geocoded_locations': 0}
     
-    def get_all_documents(self, limit=None, source_type=None):
+    def get_all_documents(self, limit=None):
         if not self.db:
             return []
         try:
-            q = "SELECT * FROM documents"
-            params = []
-            if source_type and source_type != "All":
-                q += " WHERE source_type = ?"
-                params.append(source_type)
-            q += " ORDER BY id"
+            q = "SELECT * FROM documents ORDER BY id"
             if limit:
                 q += " LIMIT ?"
-                params.append(limit)
-            rows = self.db.execute(q, params).fetchall()
+                rows = self.db.execute(q, (limit,) if limit else ()).fetchall()
+            else:
+                rows = self.db.execute(q).fetchall()
             return [dict(r) for r in rows]
         except Exception as e:
             print(f"Error: {e}")
@@ -709,6 +910,15 @@ Please provide a comprehensive answer that:
 
 # ========== PAGE FUNCTIONS ==========
 def show_dashboard(system):
+    # Get current chat history
+    current_chat_id = st.session_state.current_chat_id
+    current_session = next((s for s in st.session_state.chat_sessions if s['id'] == current_chat_id), None)
+    
+    if current_session:
+        chat_history = current_session['history']
+    else:
+        chat_history = []
+    
     st.markdown('<h2 class="sub-header">DASHBOARD</h2>', unsafe_allow_html=True)
     
     stats = system.get_database_stats()
@@ -722,6 +932,7 @@ def show_dashboard(system):
     st.divider()
     st.markdown('<h2 class="sub-header">ASK HISTORICAL QUESTIONS</h2>', unsafe_allow_html=True)
     
+    # Example questions
     examples = [
         "What was the significance of Zheng He's voyages?",
         "Is there evidence of Chinese ships reaching America before Columbus?",
@@ -739,15 +950,15 @@ def show_dashboard(system):
     
     st.divider()
     
-    # Chat history
-    for idx, chat in enumerate(st.session_state.chat_history[-20:]):
+    # Chat history for current session
+    for idx, chat in enumerate(chat_history[-20:]):
         st.markdown(f'<div class="chat-message user-message"><strong>You:</strong><br>{chat["question"]}</div>', unsafe_allow_html=True)
         
         answer_id = f"answer_{idx}_{int(time.time())}"
         st.markdown(f'<div class="chat-message assistant-message"><strong>1421 AI:</strong><br><div id="{answer_id}" class="answer-text">{chat["answer"]}</div></div>', unsafe_allow_html=True)
         
         # Only trigger typing animation for the latest message
-        if idx == len(st.session_state.chat_history[-20:]) - 1:
+        if idx == len(chat_history[-20:]) - 1:
             st.markdown(f'<script>setTimeout(function() {{ typeWriter("{answer_id}", `{chat["answer"].replace("`", "\\`").replace(chr(10), "\\n")}`); scrollToBottom(); }}, 100);</script>', unsafe_allow_html=True)
         
         st.markdown(f'<div class="action-buttons"><button class="copy-button" onclick="copyAnswerToClipboard(`{chat["answer"].replace("`", "'").replace(chr(10), "\\n")}`)">Copy Answer</button></div>', unsafe_allow_html=True)
@@ -777,31 +988,43 @@ def show_dashboard(system):
                 st.divider()
         st.divider()
     
-    # Question input at the bottom of the page (not fixed, just naturally at the bottom)
-    st.markdown('<div style="height: 20px;"></div>', unsafe_allow_html=True)
-    st.markdown('<div class="question-input-container">', unsafe_allow_html=True)
-    st.markdown("### Ask a Question")
+    # Add bottom padding for fixed input
+    st.markdown('<div style="height: 100px;"></div>', unsafe_allow_html=True)
     
+    # Question input at bottom - Fixed position, only in dashboard
+    st.markdown("""
+    <div class="question-input-container">
+        <textarea id="question-textarea" placeholder="Ask a question about Chinese exploration, Zheng He, or the 1421 theory..." rows="1"></textarea>
+        <button id="research-btn" onclick="document.getElementById('research_btn').click();">Research</button>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Hidden Streamlit components for the fixed input
     col1, col2 = st.columns([4, 1])
     with col1:
         question = st.text_area(
-            "Your question",
+            "Hidden question",
             value=st.session_state.current_question,
-            placeholder="Ask a question about Chinese exploration, Zheng He, or the 1421 theory...",
             key="dashboard_question",
-            height=80,
-            label_visibility="collapsed"
+            height=1,
+            label_visibility="collapsed",
+            placeholder=""
         )
     with col2:
-        ask = st.button("RESEARCH", type="primary", use_container_width=True)
-    
-    st.markdown('</div>', unsafe_allow_html=True)
+        ask = st.button("RESEARCH", type="primary", key="research_btn", use_container_width=True)
     
     if (ask or st.session_state.auto_search) and question:
         st.session_state.auto_search = False
         with st.spinner("Researching historical records and searching the web..."):
             result = system.perform_search(question)
-            st.session_state.chat_history.append(result)
+            
+            # Add to current chat session
+            for session in st.session_state.chat_sessions:
+                if session['id'] == st.session_state.current_chat_id:
+                    session['history'].append(result)
+                    break
+            
+            # Auto-save to saved searches
             SavedSearchesSystem.save_search(
                 question, result['answer'], result['sources_used'],
                 result['document_results'], result['web_results']
@@ -811,12 +1034,15 @@ def show_dashboard(system):
 def show_documents_page(system):
     st.markdown('<h2 class="sub-header">RESEARCH DOCUMENTS</h2>', unsafe_allow_html=True)
     
-    c1, c2, c3 = st.columns([3, 2, 1])
-    with c1:
-        search = st.text_input("Search documents:", placeholder="Title, author, or keywords...", label_visibility="collapsed")
-    with c2:
-        filter_type = st.selectbox("Filter by type", ["All", "Book", "Article", "Research Paper", "Website"], label_visibility="collapsed")
-    with c3:
+    # Full width search input - no filter dropdown
+    st.markdown('<div class="document-search-container">', unsafe_allow_html=True)
+    search = st.text_input("", placeholder="Search documents by title, author, or keywords...", 
+                          label_visibility="collapsed", key="doc_search")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Results per page selector
+    col1, col2 = st.columns([1, 5])
+    with col1:
         limit_opts = {"25": 25, "50": 50, "100": 100, "All": None}
         limit = limit_opts[st.selectbox("Show", ["All", "25", "50", "100"], index=0, label_visibility="collapsed")]
     
@@ -830,7 +1056,7 @@ def show_documents_page(system):
         if docs:
             st.success(f"Found {len(docs)} documents")
     elif show_btn:
-        docs = system.get_all_documents(limit, filter_type if filter_type != "All" else None)
+        docs = system.get_all_documents(limit)
         if docs:
             st.success(f"Loaded {len(docs)} documents")
     else:
@@ -1117,7 +1343,13 @@ def show_settings_page(system):
     st.subheader("Data Management")
     
     if st.button("CLEAR CHAT HISTORY", use_container_width=True):
-        st.session_state.chat_history = []
+        st.session_state.chat_sessions = [{
+            'id': 0,
+            'name': 'New Chat',
+            'history': [],
+            'created': datetime.now().strftime("%Y-%m-%d %H:%M")
+        }]
+        st.session_state.current_chat_id = 0
         st.success("Chat history cleared!")
         st.rerun()
     
@@ -1134,9 +1366,9 @@ def show_settings_page(system):
 # ========== SIDEBAR ==========
 def render_sidebar():
     with st.sidebar:
-        st.markdown('<div style="text-align: center; margin-bottom: 1rem;"><h2 style="color: #d4af37; font-size: 1.8rem; margin-bottom: 0;">1421 AI</h2><p style="color: #fff; opacity: 0.8; margin-top: 0;">HISTORICAL RESEARCH SYSTEM</p></div>', unsafe_allow_html=True)
+        st.markdown('<div style="text-align: center; margin-bottom: 0.8rem;"><h2 style="color: #d4af37; font-size: 1.8rem; margin-bottom: 0;">1421 AI</h2><p style="color: #fff; opacity: 0.8; margin-top: 0; font-size: 0.8rem;">HISTORICAL RESEARCH SYSTEM</p></div>', unsafe_allow_html=True)
         
-        # Navigation - all buttons close together with no extra lines
+        # Navigation - all buttons close together with larger text
         pages = [
             ("DASHBOARD", "dashboard"),
             ("RESEARCH DOCUMENTS", "documents"),
@@ -1152,32 +1384,19 @@ def render_sidebar():
                 st.session_state.current_page = pid
                 st.rerun()
         
-        # Saved searches
-        SavedSearchesSystem.render_sidebar()
-        
-        # System status
+        # System status (minimal)
         if 'system_stats' in st.session_state:
             stats = st.session_state.system_stats
             st.sidebar.markdown("---")
-            st.sidebar.markdown('<h3 class="system-status-header">SYSTEM STATUS</h3>', unsafe_allow_html=True)
-            st.sidebar.markdown(f'''
-            <div style="background:rgba(255,255,255,0.1);padding:15px;border-radius:10px;">
-                <p style="color:#FFD700; margin:5px 0;"><strong>Documents:</strong> <span style="color:white;">{stats.get("total_documents",0)}</span></p>
-                <p style="color:#FFD700; margin:5px 0;"><strong>Saved:</strong> <span style="color:white;">{stats.get("saved_searches",0)}</span></p>
-                <p style="color:#FFD700; margin:5px 0;"><strong>Chat:</strong> <span style="color:white;">{len(st.session_state.chat_history)}</span></p>
-                <p style="color:#FFD700; margin:5px 0;"><strong>Locations:</strong> <span style="color:white;">{stats.get("geocoded_locations",25)}</span></p>
-                <p style="color:#FFD700; margin:5px 0;"><strong>Mode:</strong> <span style="color:white;">{st.session_state.get("search_mode", "Auto")}</span></p>
-            </div>
-            ''', unsafe_allow_html=True)
+            st.sidebar.markdown('<h3 style="color: #FFD700; font-size: 0.9rem; margin-bottom: 5px;">SYSTEM</h3>', unsafe_allow_html=True)
+            st.sidebar.markdown(f'<p style="color: white; margin: 2px 0; font-size: 0.8rem;">📄 {stats.get("total_documents",0)} docs</p>', unsafe_allow_html=True)
+            st.sidebar.markdown(f'<p style="color: white; margin: 2px 0; font-size: 0.8rem;">💾 {stats.get("saved_searches",0)} saved</p>', unsafe_allow_html=True)
 
 # ========== MAIN ==========
 def main():
     st.markdown('''
-    <div style="text-align: center; padding: 1rem 0 1rem 0;">
+    <div style="text-align: center; padding: 0.5rem 0 0.5rem 0;">
         <h1 class="main-header">1421 AI - HISTORICAL RESEARCH SYSTEM</h1>
-        <p style="font-size: 1.2rem; color: #666; max-width: 800px; margin: 0 auto;">
-            A comprehensive research platform for studying Chinese exploration history and the 1421 theory
-        </p>
     </div>
     ''', unsafe_allow_html=True)
     
@@ -1196,19 +1415,30 @@ def main():
     st.session_state.system_stats = system.get_database_stats()
     render_sidebar()
     
-    # Page routing
-    if st.session_state.current_page == "feedback":
-        FeedbackSystem.render_feedback_page()
-    elif st.session_state.current_page == "dashboard":
-        show_dashboard(system)
-    elif st.session_state.current_page == "documents":
-        show_documents_page(system)
-    elif st.session_state.current_page == "map":
-        show_map_page(system)
-    elif st.session_state.current_page == "analytics":
-        show_analytics_page(system)
-    elif st.session_state.current_page == "settings":
-        show_settings_page(system)
+    # Main content area with right sidebar for chat/saved searches
+    if st.session_state.current_page == "dashboard":
+        # Two-column layout for dashboard only
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            # Dashboard content
+            show_dashboard(system)
+        
+        with col2:
+            # Right sidebar with chat sessions and saved searches
+            SavedSearchesSystem.render_chat_sidebar()
+    else:
+        # Other pages - full width
+        if st.session_state.current_page == "feedback":
+            FeedbackSystem.render_feedback_page()
+        elif st.session_state.current_page == "documents":
+            show_documents_page(system)
+        elif st.session_state.current_page == "map":
+            show_map_page(system)
+        elif st.session_state.current_page == "analytics":
+            show_analytics_page(system)
+        elif st.session_state.current_page == "settings":
+            show_settings_page(system)
 
 @st.cache_resource
 def init_system():
