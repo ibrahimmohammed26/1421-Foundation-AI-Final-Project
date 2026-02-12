@@ -77,42 +77,48 @@ st.markdown("""
 .main .block-container { 
     background: rgba(255,255,255,0.98); 
     border-radius: 15px; 
-    padding: 2rem; 
+    padding: 1.5rem 2rem; 
     margin-top: 1rem; 
     box-shadow: 0 6px 20px rgba(0,0,0,0.1); 
     max-width: 1400px; 
     margin-left: auto; 
     margin-right: auto; 
-    min-height: calc(100vh - 120px);
+    min-height: calc(100vh - 100px);
     position: relative;
     padding-bottom: 100px;
 }
 
+/* Remove extra spacing */
+.block-container {
+    padding-top: 1rem !important;
+    padding-bottom: 1rem !important;
+}
+
 /* Headers - No emojis */
 .main-header { 
-    font-size: 2.4rem; 
+    font-size: 2.2rem; 
     color: #000; 
     text-align: center; 
-    margin-bottom: 0.5rem; 
+    margin-bottom: 0.3rem; 
     font-weight: 800; 
     background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%); 
     -webkit-background-clip: text; 
     -webkit-text-fill-color: transparent; 
 }
 .sub-header { 
-    font-size: 1.8rem; 
+    font-size: 1.6rem; 
     color: #2c3e50; 
-    margin-bottom: 1.5rem; 
+    margin-bottom: 1rem; 
     font-weight: 700; 
     border-bottom: 3px solid #d4af37; 
-    padding-bottom: 0.5rem; 
+    padding-bottom: 0.3rem; 
 }
 
 /* Left Navigation Sidebar */
 section[data-testid="stSidebar"] > div { 
     background: linear-gradient(135deg, #2c3e50 0%, #1a252f 100%) !important; 
     border-right: 4px solid #d4af37;
-    padding-top: 1.2rem !important;
+    padding-top: 1rem !important;
     width: 100%;
 }
 
@@ -123,9 +129,9 @@ section[data-testid="stSidebar"] > div {
     border: none !important;
     border-radius: 6px;
     font-weight: 600 !important;
-    font-size: 0.95rem !important;
-    padding: 8px 12px !important;
-    margin: 2px 0 !important;
+    font-size: 0.9rem !important;
+    padding: 6px 10px !important;
+    margin: 1px 0 !important;
     text-align: left;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -149,16 +155,16 @@ section[data-testid="stSidebar"] > div {
 
 /* Chat History in Left Sidebar - ABOVE System Status */
 .chat-history-section {
-    margin-top: 15px;
-    padding-top: 10px;
+    margin-top: 10px;
+    padding-top: 8px;
     border-top: 2px solid rgba(212,175,55,0.3);
 }
 
 .chat-history-header {
     color: #d4af37;
-    font-size: 0.9rem;
+    font-size: 0.85rem;
     font-weight: 700;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
@@ -169,13 +175,13 @@ section[data-testid="stSidebar"] > div {
     color: #000000;
     border: none;
     border-radius: 4px;
-    padding: 6px 10px;
+    padding: 5px 8px;
     font-weight: 600;
     width: 100%;
     cursor: pointer;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
     transition: all 0.3s ease;
-    font-size: 0.8rem;
+    font-size: 0.75rem;
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
@@ -188,12 +194,12 @@ section[data-testid="stSidebar"] > div {
 .chat-session-item-sidebar {
     background: rgba(255,255,255,0.1);
     border-radius: 4px;
-    padding: 6px 8px;
-    margin: 4px 0;
+    padding: 5px 8px;
+    margin: 3px 0;
     border-left: 2px solid transparent;
     cursor: pointer;
     transition: all 0.2s ease;
-    font-size: 0.8rem;
+    font-size: 0.75rem;
 }
 
 .chat-session-item-sidebar:hover {
@@ -207,60 +213,53 @@ section[data-testid="stSidebar"] > div {
 }
 
 .chat-session-name-sidebar {
-    font-size: 0.75rem;
+    font-size: 0.7rem;
     color: white;
     font-weight: 600;
     margin-bottom: 1px;
 }
 
 .chat-session-time-sidebar {
-    font-size: 0.6rem;
+    font-size: 0.55rem;
     color: #ccc;
 }
 
 /* System Status - Clean, no background */
 .system-status-container {
-    margin-top: 15px;
-    padding-top: 10px;
+    margin-top: 10px;
+    padding-top: 8px;
     border-top: 2px solid rgba(212,175,55,0.3);
 }
 
 .system-status-container p {
     color: #d4af37;
-    margin: 4px 0;
-    font-size: 0.8rem;
+    margin: 3px 0;
+    font-size: 0.75rem;
 }
 
 .system-status-container span {
     color: white;
 }
 
-/* Main Content Area */
-.main-content {
-    flex-grow: 1;
-    min-width: 0;
-    padding-right: 20px;
-}
-
 /* Metrics - Black text for labels */
 [data-testid="stMetricValue"] { 
-    font-size: 2rem !important; 
+    font-size: 1.8rem !important; 
     font-weight: 700 !important; 
     color: #2c3e50 !important; 
 }
 [data-testid="stMetricLabel"] { 
     font-weight: 600 !important; 
-    font-size: 1rem !important; 
+    font-size: 0.9rem !important; 
     color: #000000 !important; 
 }
 
-/* Answer display with typing animation */
+/* Answer display with typing animation - REDUCED SPACING */
 .answer-text { 
-    font-size: 1.1rem; 
-    line-height: 1.8; 
+    font-size: 1rem; 
+    line-height: 1.5; 
     color: #2c3e50; 
-    margin: 20px 0; 
-    padding: 10px 0; 
+    margin: 5px 0; 
+    padding: 0; 
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
 }
 .typing-animation { 
@@ -273,48 +272,58 @@ section[data-testid="stSidebar"] > div {
     50% { border-color: #d4af37; } 
 }
 
-/* Chat message styling */
+/* Chat message styling - REDUCED SPACING */
 .chat-message { 
-    padding: 20px; 
-    margin: 15px 0; 
+    padding: 8px 12px; 
+    margin: 5px 0; 
     border-radius: 12px; 
-    max-width: 100%; 
+    max-width: 80%; 
     animation: fadeIn 0.3s ease; 
 }
 .user-message { 
-    background: linear-gradient(135deg, #4a6491 0%, #2c3e50 100%); 
-    color: white; 
-    margin-right: 20%; 
-    border-bottom-right-radius: 4px; 
+    background: #f0f0f0; 
+    color: #333; 
+    margin-left: auto; 
+    margin-right: 0; 
+    border-radius: 18px 18px 4px 18px; 
 }
 .assistant-message { 
-    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); 
+    background: white; 
     color: #333; 
-    border: 1px solid #ddd; 
-    margin-left: 20%; 
-    border-bottom-left-radius: 4px; 
+    margin-right: auto; 
+    margin-left: 0; 
+    border-radius: 18px 18px 18px 4px; 
+    border: 1px solid #eaeaea; 
 }
 
-/* Black text for historical questions */
-.historical-question-text {
-    color: #000000 !important;
-    font-weight: 600;
+/* Remove extra spacing between messages */
+div[data-testid="stVerticalBlock"] > div {
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+}
+
+.stMarkdown {
+    margin-bottom: 0 !important;
+}
+
+hr {
+    margin: 10px 0 !important;
 }
 
 /* Action buttons - Copy only */
 .action-buttons { 
     display: flex; 
     gap: 10px; 
-    margin-top: 15px; 
-    margin-bottom: 20px; 
+    margin-top: 5px; 
+    margin-bottom: 5px; 
 }
 .copy-button { 
     background: linear-gradient(135deg, #6c757d 0%, #495057 100%); 
     color: white; 
     border: none; 
     border-radius: 6px; 
-    padding: 6px 14px; 
-    font-size: 0.85rem; 
+    padding: 4px 12px; 
+    font-size: 0.8rem; 
     cursor: pointer; 
 }
 .copy-button:hover { 
@@ -329,7 +338,7 @@ section[data-testid="stSidebar"] > div {
     transform: translateX(-50%);
     width: min(700px, 85%);
     background: white;
-    padding: 8px 8px 8px 16px;
+    padding: 6px 6px 6px 16px;
     border: 1px solid #e0e0e0;
     border-radius: 40px;
     box-shadow: 0 2px 6px rgba(0,0,0,0.05);
@@ -344,8 +353,8 @@ section[data-testid="stSidebar"] > div {
 .chat-input-container input {
     border: none;
     background: transparent;
-    padding: 10px 0;
-    font-size: 0.95rem;
+    padding: 8px 0;
+    font-size: 0.9rem;
     outline: none;
     flex-grow: 1;
     color: #333;
@@ -353,7 +362,7 @@ section[data-testid="stSidebar"] > div {
 
 .chat-input-container input::placeholder {
     color: #999;
-    font-size: 0.95rem;
+    font-size: 0.9rem;
 }
 
 .chat-input-container button {
@@ -361,9 +370,9 @@ section[data-testid="stSidebar"] > div {
     color: #000000;
     border: none;
     border-radius: 30px;
-    padding: 8px 20px;
+    padding: 6px 18px;
     font-weight: 600;
-    font-size: 0.9rem;
+    font-size: 0.85rem;
     margin-left: 8px;
     white-space: nowrap;
     cursor: pointer;
@@ -374,33 +383,11 @@ section[data-testid="stSidebar"] > div {
     background: #c4a030;
 }
 
-/* DeepSeek style message bubbles */
-.user-message {
-    background: #f5f5f5;
-    color: #333;
-    margin-left: auto;
-    margin-right: 0;
-    max-width: 70%;
-    border-radius: 18px 18px 4px 18px;
-    padding: 12px 18px;
-}
-
-.assistant-message {
-    background: white;
-    color: #333;
-    margin-right: auto;
-    margin-left: 0;
-    max-width: 70%;
-    border-radius: 18px 18px 18px 4px;
-    padding: 12px 18px;
-    border: 1px solid #eaeaea;
-}
-
-/* Chat container */
+/* Chat container - REDUCED SPACING */
 .chat-container {
-    margin-bottom: 100px;
-    min-height: 500px;
-    padding: 0 10px;
+    margin-bottom: 80px;
+    min-height: 400px;
+    padding: 0;
 }
 
 /* Fullscreen map styles */
@@ -445,7 +432,7 @@ section[data-testid="stSidebar"] > div {
     display: flex;
     gap: 10px;
     align-items: center;
-    margin-bottom: 20px;
+    margin-bottom: 15px;
     width: 100%;
 }
 
@@ -459,10 +446,10 @@ section[data-testid="stSidebar"] > div {
 
 .document-search-input {
     width: 100%;
-    padding: 10px 16px;
+    padding: 8px 16px;
     border: 2px solid #e0e0e0;
     border-radius: 30px;
-    font-size: 0.95rem;
+    font-size: 0.9rem;
     transition: all 0.3s ease;
 }
 
@@ -479,8 +466,8 @@ section[data-testid="stSidebar"] > div {
     border: none !important;
     border-radius: 6px;
     font-weight: 600 !important;
-    font-size: 0.9rem !important;
-    padding: 8px 20px !important;
+    font-size: 0.85rem !important;
+    padding: 6px 16px !important;
     transition: all 0.3s ease !important;
 }
 
@@ -496,46 +483,49 @@ section[data-testid="stSidebar"] > div {
     border: none !important;
     border-radius: 6px;
     font-weight: 600 !important;
-    font-size: 0.9rem !important;
-    padding: 8px 20px !important;
+    font-size: 0.85rem !important;
+    padding: 6px 16px !important;
 }
 
-/* How to use section */
+/* How to use section - REDUCED SPACING */
 .how-to-use {
     background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
     border-radius: 12px;
-    padding: 25px;
-    margin: 20px 0;
+    padding: 15px 20px;
+    margin: 10px 0;
     border-left: 6px solid #d4af37;
 }
 
 .how-to-use h3 {
     color: #2c3e50;
-    margin-bottom: 15px;
+    margin-bottom: 10px;
     font-weight: 700;
-    font-size: 1.3rem;
+    font-size: 1.2rem;
 }
 
 .how-to-use p {
     color: #333;
-    margin-bottom: 10px;
-    line-height: 1.6;
+    margin-bottom: 8px;
+    line-height: 1.5;
+    font-size: 0.95rem;
 }
 
 .how-to-use li {
     color: #333;
-    margin-bottom: 8px;
+    margin-bottom: 5px;
+    font-size: 0.95rem;
 }
 
 /* Coming soon badge */
 .coming-soon {
     background: #f0f0f0;
     color: #666;
-    padding: 20px;
+    padding: 15px;
     border-radius: 8px;
     text-align: center;
     font-style: italic;
     border: 1px dashed #999;
+    font-size: 0.95rem;
 }
 
 /* Dashboard metrics - black labels */
@@ -551,12 +541,12 @@ p, div, span, li {
 
 /* Chat page specific */
 .chat-page .main .block-container {
-    padding-bottom: 120px;
+    padding-bottom: 100px;
 }
 
 /* Scrollable chat history */
 .chat-history-scroll {
-    max-height: 250px;
+    max-height: 200px;
     overflow-y: auto;
     padding-right: 3px;
 }
@@ -575,46 +565,46 @@ p, div, span, li {
     border-radius: 10px;
 }
 
-/* Previous button */
-.previous-button {
-    background: #4a6491;
-    color: white;
-    border: none;
-    border-radius: 6px;
-    padding: 6px 14px;
-    font-weight: 600;
-    font-size: 0.85rem;
-    cursor: pointer;
-    margin-top: 10px;
-}
-
-.previous-button:hover {
-    background: #2c3e50;
-}
-
 /* System status in dashboard - no background */
 .dashboard-status {
     padding: 0;
-    margin-top: 20px;
+    margin-top: 10px;
 }
 
 .dashboard-status h3 {
     color: #2c3e50;
-    margin-bottom: 15px;
-    font-size: 1.3rem;
+    margin-bottom: 10px;
+    font-size: 1.2rem;
     border-bottom: 2px solid #d4af37;
-    padding-bottom: 8px;
+    padding-bottom: 5px;
 }
 
 .status-item {
     color: #2c3e50;
-    margin: 8px 0;
-    font-size: 1rem;
+    margin: 5px 0;
+    font-size: 0.95rem;
 }
 
 .status-item strong {
     color: #000000;
     font-weight: 700;
+}
+
+/* Example question buttons */
+.stButton > button[kind="secondary"] {
+    background: #d4af37 !important;
+    color: #000000 !important;
+    font-size: 0.85rem !important;
+    padding: 6px 12px !important;
+}
+
+/* Remove extra spacing from Streamlit elements */
+.row-widget {
+    margin-bottom: 0 !important;
+}
+
+.element-container {
+    margin-bottom: 0 !important;
 }
 </style>
 
@@ -889,6 +879,7 @@ class ResearchSystem:
             print(f"Search error: {e}")
             return []
     
+    # FIXED: get_map_locations method is now properly defined in the class
     def get_map_locations(self):
         """Get geographical locations for map with timeline data"""
         locations = [
@@ -1076,7 +1067,7 @@ Please provide a comprehensive answer that:
 # ========== LEFT SIDEBAR ==========
 def render_left_sidebar():
     with st.sidebar:
-        st.markdown('<div style="text-align: center; margin-bottom: 0.8rem;"><h2 style="color: #d4af37; font-size: 1.6rem; margin-bottom: 0;">1421 FOUNDATION AI</h2><p style="color: #fff; opacity: 0.8; margin-top: 0; font-size: 0.7rem;">HISTORICAL RESEARCH SYSTEM</p></div>', unsafe_allow_html=True)
+        st.markdown('<div style="text-align: center; margin-bottom: 0.5rem;"><h2 style="color: #d4af37; font-size: 1.4rem; margin-bottom: 0;">1421 FOUNDATION AI</h2><p style="color: #fff; opacity: 0.8; margin-top: 0; font-size: 0.65rem;">HISTORICAL RESEARCH SYSTEM</p></div>', unsafe_allow_html=True)
         
         # Navigation - Yellow background with black text
         pages = [
@@ -1095,7 +1086,7 @@ def render_left_sidebar():
                 st.session_state.current_page = pid
                 st.rerun()
         
-        # CHAT HISTORY - Now ABOVE System Status
+        # CHAT HISTORY - ABOVE System Status
         st.sidebar.markdown('<div class="chat-history-section">', unsafe_allow_html=True)
         st.sidebar.markdown('<div class="chat-history-header">CHAT HISTORY</div>', unsafe_allow_html=True)
         
@@ -1124,16 +1115,15 @@ def render_left_sidebar():
         st.sidebar.markdown('</div>', unsafe_allow_html=True)
         st.sidebar.markdown('</div>', unsafe_allow_html=True)
         
-        # System Status in left sidebar (NOW BELOW Chat History)
+        # System Status in left sidebar (BELOW Chat History)
         if 'system_stats' in st.session_state:
             stats = st.session_state.system_stats
             st.sidebar.markdown('<div class="system-status-container">', unsafe_allow_html=True)
             st.sidebar.markdown('<div class="chat-history-header">SYSTEM STATUS</div>', unsafe_allow_html=True)
             st.sidebar.markdown(f'''
-                <p style="color: #d4af37; margin: 4px 0;"><strong>Documents:</strong> <span style="color: white;">{stats.get("total_documents",0)}</span></p>
-                <p style="color: #d4af37; margin: 4px 0;"><strong>Chats:</strong> <span style="color: white;">{len(st.session_state.chat_sessions)}</span></p>
-                <p style="color: #d4af37; margin: 4px 0;"><strong>Locations:</strong> <span style="color: white;">{stats.get("geocoded_locations",25)}</span></p>
-                <p style="color: #d4af37; margin: 4px 0;"><strong>Mode:</strong> <span style="color: white;">{st.session_state.get("search_mode", "Auto")}</span></p>
+                <p style="color: #d4af37; margin: 3px 0;"><strong>Documents:</strong> <span style="color: white;">{stats.get("total_documents",0)}</span></p>
+                <p style="color: #d4af37; margin: 3px 0;"><strong>Chats:</strong> <span style="color: white;">{len(st.session_state.chat_sessions)}</span></p>
+                <p style="color: #d4af37; margin: 3px 0;"><strong>Locations:</strong> <span style="color: white;">{stats.get("geocoded_locations",25)}</span></p>
             ''', unsafe_allow_html=True)
             st.sidebar.markdown('</div>', unsafe_allow_html=True)
 
@@ -1162,11 +1152,11 @@ def show_dashboard(system):
             <li><strong>VOYAGE MAP:</strong> Visualise voyage routes and explore locations on the interactive world map with fullscreen support.</li>
             <li><strong>ANALYTICS:</strong> View search statistics and popular topics.</li>
         </ul>
-        <p style="margin-top: 15px; color: #d4af37; font-weight: 600;">Click on any example question below to start a new chat:</p>
+        <p style="margin-top: 10px; color: #d4af37; font-weight: 600;">Click on any example question below to start a new chat:</p>
     </div>
     """, unsafe_allow_html=True)
     
-    st.markdown('<h3 style="color: #2c3e50; margin-top: 20px;">EXAMPLE QUESTIONS</h3>', unsafe_allow_html=True)
+    st.markdown('<h3 style="color: #2c3e50; margin-top: 10px; font-size: 1.2rem;">EXAMPLE QUESTIONS</h3>', unsafe_allow_html=True)
     
     # Example questions
     examples = [
@@ -1210,13 +1200,12 @@ def show_dashboard(system):
             st.markdown(f'<p class="status-item"><strong>Locations:</strong> {stats["geocoded_locations"]}</p>', unsafe_allow_html=True)
             st.markdown(f'<p class="status-item"><strong>Chats:</strong> {len(st.session_state.chat_sessions)}</p>', unsafe_allow_html=True)
         with col3:
-            st.markdown(f'<p class="status-item"><strong>Mode:</strong> {st.session_state.get("search_mode", "Auto")}</p>', unsafe_allow_html=True)
             st.markdown(f'<p class="status-item"><strong>Status:</strong> {"Active" if system.db else "Inactive"}</p>', unsafe_allow_html=True)
         
         st.markdown('</div>', unsafe_allow_html=True)
 
 def show_chat_page(system):
-    """Dedicated Chat page with DeepSeek style input box"""
+    """Dedicated Chat page with DeepSeek style input box - NO PREVIOUS BUTTON"""
     
     # Add chat-page class to container
     st.markdown('<div class="chat-page">', unsafe_allow_html=True)
@@ -1234,12 +1223,12 @@ def show_chat_page(system):
     
     st.markdown(f'<h2 class="sub-header">CHAT: {chat_name}</h2>', unsafe_allow_html=True)
     
-    # Chat container
+    # Chat container - REDUCED SPACING
     st.markdown('<div class="chat-container">', unsafe_allow_html=True)
     
-    # Chat history for current session
+    # Chat history for current session - NO EXTRA SPACING
     if chat_history:
-        for idx, chat in enumerate(chat_history[-50:]):
+        for idx, chat in enumerate(chat_history):
             st.markdown(f'<div class="chat-message user-message"><strong>You:</strong><br>{chat["question"]}</div>', unsafe_allow_html=True)
             
             answer_id = f"answer_{idx}_{int(time.time())}"
@@ -1252,26 +1241,20 @@ def show_chat_page(system):
             # Copy button only
             st.markdown(f'<div class="action-buttons"><button class="copy-button" onclick="copyAnswerToClipboard(`{chat["answer"].replace("`", "'").replace(chr(10), "\\n")}`)">Copy Answer</button></div>', unsafe_allow_html=True)
             
-            st.divider()
+            st.markdown('<hr style="margin: 8px 0;">', unsafe_allow_html=True)
     else:
-        # Welcome message
+        # Welcome message - REDUCED SPACING
         st.markdown("""
-        <div style="text-align: center; padding: 50px 20px; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); border-radius: 12px; margin: 30px 0;">
-            <h3 style="color: #2c3e50; margin-bottom: 20px;">Welcome to 1421 Foundation AI Chat</h3>
-            <p style="color: #666; font-size: 1.1rem;">Ask any question about Chinese exploration, Zheng He's voyages, or the 1421 theory.</p>
-            <p style="color: #d4af37; margin-top: 20px;">Type your question in the box below to begin...</p>
+        <div style="text-align: center; padding: 30px 20px; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); border-radius: 12px; margin: 10px 0;">
+            <h3 style="color: #2c3e50; margin-bottom: 10px;">Welcome to 1421 Foundation AI Chat</h3>
+            <p style="color: #666; font-size: 1rem;">Ask any question about Chinese exploration, Zheng He's voyages, or the 1421 theory.</p>
+            <p style="color: #d4af37; margin-top: 10px;">Type your question in the box below to begin...</p>
         </div>
         """, unsafe_allow_html=True)
     
     st.markdown('</div>', unsafe_allow_html=True)
     
-    # Previous button at bottom
-    if chat_history and st.session_state.current_chat_id > 0:
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            if st.button("PREVIOUS CHAT", key="previous_chat_btn", use_container_width=True):
-                st.session_state.current_chat_id -= 1
-                st.rerun()
+    # NO PREVIOUS CHAT BUTTON - Removed as requested
     
     # DeepSeek style chat input box
     st.markdown("""
@@ -1305,7 +1288,7 @@ def show_chat_page(system):
                 if session['id'] == st.session_state.current_chat_id:
                     session['history'].append(result)
                     if len(session['history']) == 1:
-                        session['name'] = question[:25] + ('...' if len(question) > 25 else '')
+                        session['name'] = question[:20] + ('...' if len(question) > 20 else '')
                     break
             
             st.session_state.current_question = ""
@@ -1349,11 +1332,11 @@ def show_documents_page(system):
     if docs:
         df = pd.DataFrame([{
             'ID': d.get('id', ''), 
-            'Title': d.get('title', 'Untitled')[:60],
-            'Author': d.get('author', 'Unknown')[:30], 
+            'Title': d.get('title', 'Untitled')[:50],
+            'Author': d.get('author', 'Unknown')[:25], 
             'Type': d.get('source_type', 'Unknown'),
             'Words': d.get('word_count', 0),
-            'URL': d.get('url', '')[:40] + '...' if len(d.get('url', '')) > 40 else d.get('url', '')
+            'URL': d.get('url', '')[:35] + '...' if len(d.get('url', '')) > 35 else d.get('url', '')
         } for d in docs])
         
         st.dataframe(df, column_config={
@@ -1363,10 +1346,10 @@ def show_documents_page(system):
             "Type": st.column_config.TextColumn("Type", width="small"),
             "Words": st.column_config.NumberColumn("Words", width="small"),
             "URL": st.column_config.LinkColumn("URL", width="medium")
-        }, use_container_width=True, height=500, hide_index=True)
+        }, use_container_width=True, height=450, hide_index=True)
         
         csv = df.to_csv(index=False).encode()
-        st.download_button("DOWNLOAD AS CSV", csv, f"documents_{datetime.now():%Y%m%d}.csv", "text/csv", use_container_width=True)
+        st.download_button("DOWNLOAD CSV", csv, f"documents_{datetime.now():%Y%m%d}.csv", "text/csv", use_container_width=True)
 
 def show_map_page(system):
     st.markdown('<h2 class="sub-header">FULL VOYAGE MAP</h2>', unsafe_allow_html=True)
@@ -1380,6 +1363,7 @@ def show_map_page(system):
     
     with st.spinner("Loading geographical data..."):
         try:
+            # FIXED: This method is now properly defined in the ResearchSystem class
             map_data = system.get_map_locations()
             st.session_state.map_data = map_data
             
@@ -1497,7 +1481,7 @@ def show_map_page(system):
                         lonaxis=dict(range=[-180, 180]),
                         center=dict(lat=20, lon=80)
                     ),
-                    height=700 if not st.session_state.map_fullscreen else 900,
+                    height=600 if not st.session_state.map_fullscreen else 800,
                     margin=dict(l=0, r=0, t=0, b=0),
                     hovermode='closest'
                 )
@@ -1543,7 +1527,7 @@ def show_map_page(system):
                         xaxis_title="Year",
                         xaxis=dict(range=[1368, 1421], tickmode='linear', tick0=1368, dtick=10),
                         yaxis=dict(showticklabels=False, showgrid=False, zeroline=False, range=[0, 2]),
-                        height=300,
+                        height=250,
                         margin=dict(l=20, r=20, t=40, b=20),
                         hovermode='closest'
                     )
@@ -1591,7 +1575,7 @@ def show_analytics_page(system):
             topics_df = pd.DataFrame(list(a['popular_topics'].items()), columns=['Topic', 'Count'])
             topics_df = topics_df.sort_values('Count', ascending=False).head(10)
             fig = px.bar(topics_df, x='Count', y='Topic', orientation='h', color='Count', color_continuous_scale='Oranges')
-            fig.update_layout(height=400)
+            fig.update_layout(height=350)
             st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("No analytics data available yet. Start searching to generate analytics.")
@@ -1626,7 +1610,7 @@ def show_settings_page(system):
     st.markdown("""
     <div class="coming-soon">
         <p>Search mode selection is coming soon.</p>
-        <p style="font-size: 0.9rem; margin-top: 10px;">The system currently uses Auto mode (Documents + Web).</p>
+        <p style="font-size: 0.85rem; margin-top: 8px;">The system currently uses Auto mode (Documents + Web).</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -1682,7 +1666,7 @@ def show_settings_page(system):
 # ========== MAIN ==========
 def main():
     st.markdown('''
-    <div style="text-align: center; padding: 0.5rem 0 0.5rem 0;">
+    <div style="text-align: center; padding: 0.3rem 0 0.3rem 0;">
         <h1 class="main-header">1421 FOUNDATION AI - HISTORICAL RESEARCH SYSTEM</h1>
     </div>
     ''', unsafe_allow_html=True)
