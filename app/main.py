@@ -49,7 +49,8 @@ DEFAULT_STATE = {
     'feedback_submitted': False,
     'animation_playing': False,
     'current_year': 1368,
-    'map_data': None
+    'map_data': None,
+    'search_mode': 'Auto (Documents + Web)'
 }
 
 for key, value in DEFAULT_STATE.items():
@@ -67,18 +68,44 @@ st.markdown("""
 .main-header { font-size: 3rem; color: #000; text-align: center; margin-bottom: 1rem; font-weight: 800; background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
 .sub-header { font-size: 1.8rem; color: #2c3e50; margin-bottom: 1.5rem; font-weight: 700; border-bottom: 3px solid #d4af37; padding-bottom: 0.5rem; }
 
-/* Sidebar */
-section[data-testid="stSidebar"] > div { background: linear-gradient(135deg, #2c3e50 0%, #1a252f 100%) !important; border-right: 4px solid #d4af37; padding-top: 2rem !important; }
+/* Sidebar - Navigation */
+section[data-testid="stSidebar"] > div { background: linear-gradient(135deg, #2c3e50 0%, #1a252f 100%) !important; border-right: 4px solid #d4af37; padding-top: 1.5rem !important; }
 
-/* Navigation */
-.sidebar-button { display: block; background: transparent; color: white !important; font-size: 1.2rem; font-weight: 600; padding: 0.8rem 1rem; text-align: left; border-radius: 8px; transition: all 0.3s ease; cursor: pointer; margin: 5px 0; border: none; width: 100%; text-transform: uppercase; letter-spacing: 0.5px; }
-.sidebar-button:hover { background: rgba(212,175,55,0.2); transform: translateX(5px); border-left: 3px solid #d4af37; }
-.sidebar-button.active { background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%); color: #000 !important; font-weight: 700; }
+/* Navigation buttons - close together */
+.sidebar-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-bottom: 10px;
+}
 
-/* Status popup */
-.popup-notification { position: fixed; top: 100px; right: 20px; background: linear-gradient(135deg, #28a745 0%, #20c997 100%); color: white; padding: 18px 25px; border-radius: 12px; box-shadow: 0 8px 25px rgba(0,0,0,0.3); z-index: 1000; animation: slideInRight 0.5s ease, fadeOut 0.5s ease 4.5s forwards; border-left: 5px solid #fff; max-width: 400px; }
-@keyframes slideInRight { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-@keyframes fadeOut { from { opacity: 1; } to { opacity: 0; transform: translateY(-20px); } }
+.stButton > button {
+    background: transparent;
+    color: white !important;
+    border: none !important;
+    border-radius: 6px;
+    font-weight: 500 !important;
+    font-size: 1rem !important;
+    padding: 8px 12px !important;
+    margin: 0 !important;
+    text-align: left;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    transition: all 0.2s ease;
+    width: 100%;
+}
+
+.stButton > button:hover {
+    background: rgba(212,175,55,0.2) !important;
+    transform: translateX(3px);
+    border-left: 3px solid #d4af37 !important;
+}
+
+.stButton > button[kind="primary"] {
+    background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%) !important;
+    color: #000 !important;
+    font-weight: 600 !important;
+}
 
 /* Source badges */
 .source-badge { display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: 600; margin-right: 8px; margin-bottom: 8px; }
@@ -88,10 +115,6 @@ section[data-testid="stSidebar"] > div { background: linear-gradient(135deg, #2c
 /* Metrics */
 [data-testid="stMetricValue"] { font-size: 2rem !important; font-weight: 700 !important; color: #2c3e50 !important; }
 [data-testid="stMetricLabel"] { font-weight: 600 !important; font-size: 1rem !important; color: #d4af37 !important; }
-
-/* Buttons */
-.stButton > button { background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%); color: white !important; border: none !important; border-radius: 10px; font-weight: 600 !important; font-size: 1.1rem !important; padding: 12px 24px !important; transition: all 0.3s ease !important; }
-.stButton > button:hover { background: linear-gradient(135deg, #b8860b 0%, #8b4513 100%); transform: translateY(-2px); box-shadow: 0 6px 15px rgba(0,0,0,0.2); }
 
 /* Saved searches */
 .saved-search-sidebar-item { background: rgba(255,255,255,0.1); border-radius: 8px; padding: 12px; margin: 8px 0; border-left: 4px solid #d4af37; cursor: pointer; transition: all 0.3s ease; }
@@ -104,13 +127,29 @@ section[data-testid="stSidebar"] > div { background: linear-gradient(135deg, #2c
 .no-saved-searches small { color: #FFD700 !important; }
 
 /* Answer display with typing animation */
-.answer-text { font-size: 1.1rem; line-height: 1.8; color: #333; margin: 20px 0; padding: 10px 0; font-family: 'Courier New', monospace; }
+.answer-text { 
+    font-size: 1.1rem; 
+    line-height: 1.8; 
+    color: #2c3e50; 
+    margin: 20px 0; 
+    padding: 10px 0; 
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+}
 .typing-animation { border-right: 2px solid #d4af37; animation: blink 1s step-end infinite; white-space: pre-wrap; }
 @keyframes blink { from, to { border-color: transparent; } 50% { border-color: #d4af37; } }
 
 .chat-message { padding: 20px; margin: 15px 0; border-radius: 12px; max-width: 100%; animation: fadeIn 0.3s ease; }
 .user-message { background: linear-gradient(135deg, #4a6491 0%, #2c3e50 100%); color: white; margin-right: 20%; border-bottom-right-radius: 4px; }
 .assistant-message { background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); color: #333; border: 1px solid #ddd; margin-left: 20%; border-bottom-left-radius: 4px; }
+
+/* Query text styling - same as assistant message */
+.assistant-message .answer-text, 
+.assistant-message p,
+.assistant-message strong,
+.assistant-message em {
+    color: #2c3e50;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+}
 
 /* Action buttons */
 .action-buttons { display: flex; gap: 10px; margin-top: 15px; margin-bottom: 20px; }
@@ -124,40 +163,19 @@ section[data-testid="stSidebar"] > div { background: linear-gradient(135deg, #2c
 /* Headers */
 .saved-searches-header, .system-status-header { color: #FFD700 !important; font-weight: 700 !important; }
 
-/* Question input at bottom - STICKY */
+/* Question input at bottom - Natural bottom of page, not fixed */
 .question-input-container {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
     background: white;
-    padding: 20px;
+    padding: 25px 20px;
     border-top: 2px solid #d4af37;
-    z-index: 999;
-    margin-left: 15rem; /* Sidebar width */
-    box-shadow: 0 -4px 10px rgba(0,0,0,0.05);
-}
-
-@media (max-width: 768px) {
-    .question-input-container {
-        margin-left: 0;
-    }
+    margin-top: 30px;
+    margin-bottom: 20px;
+    border-radius: 12px;
+    box-shadow: 0 -2px 10px rgba(0,0,0,0.03);
 }
 
 /* Confirmation dialog */
 .confirmation-dialog { background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; padding: 15px; margin: 10px 0; color: #856404; }
-
-/* Feedback button */
-.feedback-nav-button {
-    background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
-    color: white !important;
-    border: none;
-    border-radius: 8px;
-    padding: 10px !important;
-    font-weight: 600;
-    width: 100%;
-    margin-bottom: 10px;
-}
 
 /* Map container */
 .map-container { margin-bottom: 100px; }
@@ -175,13 +193,18 @@ section[data-testid="stSidebar"] > div { background: linear-gradient(135deg, #2c
 
 /* Hide default title */
 .js-plotly-plot .gtitle { display: none; }
+
+/* UK English text */
+p, div, span, li {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+}
 </style>
 
 <script>
-function copyAnswerToClipboard(t) { navigator.clipboard.writeText(t).then(()=>alert('Answer copied!'), e=>console.error(e)); }
+function copyAnswerToClipboard(t) { navigator.clipboard.writeText(t).then(()=>alert('Answer copied to clipboard!'), e=>console.error(e)); }
 
 // Typing animation effect
-function typeWriter(elementId, text, speed = 30) {
+function typeWriter(elementId, text, speed = 20) {
     let i = 0;
     const element = document.getElementById(elementId);
     if (!element) return;
@@ -476,8 +499,8 @@ class ResearchSystem:
                     for w in words:
                         if w in lower:
                             idx = lower.find(w)
-                            start = max(0, idx - 100)
-                            end = min(len(content), idx + 200)
+                            start = max(0, idx - 150)
+                            end = min(len(content), idx + 250)
                             snippet = content[start:end] + "..."
                             break
                     if not snippet and content:
@@ -491,63 +514,177 @@ class ResearchSystem:
             print(f"Search error: {e}")
             return []
     
-    def generate_answer(self, question, doc_results, web_results):
+    def get_map_locations(self):
+        """Get geographical locations for map with timeline data"""
+        locations = [
+            {'name': 'Beijing', 'lat': 39.9042, 'lon': 116.4074, 'year': 1403, 'event': 'Capital moved to Beijing'},
+            {'name': 'Nanjing', 'lat': 32.0603, 'lon': 118.7969, 'year': 1368, 'event': 'Early Ming capital established'},
+            {'name': 'Calicut', 'lat': 11.2588, 'lon': 75.7804, 'year': 1406, 'event': 'Zheng He\'s fleet first arrived'},
+            {'name': 'Sumatra', 'lat': -0.5897, 'lon': 101.3431, 'year': 1407, 'event': 'Strategic trading post established'},
+            {'name': 'Java', 'lat': -7.6145, 'lon': 110.7123, 'year': 1407, 'event': 'Diplomatic missions conducted'},
+            {'name': 'Malacca', 'lat': 2.1896, 'lon': 102.2501, 'year': 1409, 'event': 'Strategic port established'},
+            {'name': 'Sri Lanka', 'lat': 7.8731, 'lon': 80.7718, 'year': 1409, 'event': 'Trilingual inscription erected'},
+            {'name': 'Hormuz', 'lat': 27.1561, 'lon': 56.2815, 'year': 1414, 'event': 'Persian Gulf trade route opened'},
+            {'name': 'Mombasa', 'lat': -4.0435, 'lon': 39.6682, 'year': 1418, 'event': 'East African trade commenced'},
+            {'name': 'Zanzibar', 'lat': -6.1659, 'lon': 39.2026, 'year': 1419, 'event': 'Trade agreements established'},
+            {'name': 'Aden', 'lat': 12.7855, 'lon': 45.0187, 'year': 1417, 'event': 'Arabian Peninsula contact made'},
+            {'name': 'Mogadishu', 'lat': 2.0469, 'lon': 45.3182, 'year': 1418, 'event': 'Somali coast exploration'},
+            {'name': 'Champa', 'lat': 10.8231, 'lon': 106.6297, 'year': 1405, 'event': 'Southeast Asian ally'},
+            {'name': 'Siam', 'lat': 13.7367, 'lon': 100.5231, 'year': 1408, 'event': 'Diplomatic relations established'}
+        ]
+        
+        timeline = [{'year': l['year'], 'location': l['name'], 'event': l['event']} for l in locations]
+        timeline.sort(key=lambda x: x['year'])
+        
+        return {'locations': locations, 'timeline_events': timeline}
+    
+    def generate_intelligent_answer(self, question, doc_results, web_results, mode):
+        """Generate a coherent, well-structured answer in UK English without copying verbatim"""
         sources = []
-        combined = []
-        
-        if doc_results:
-            sources.append('documents')
-            for d in doc_results[:2]:
-                if d.get('snippet'):
-                    combined.append(f"**From historical documents ({d.get('title', 'Unknown')}):** {d['snippet'].replace(chr(10), ' ').strip()}")
-        
-        if web_results:
-            sources.append('web')
-            for w in web_results[:2]:
-                if w.get('snippet'):
-                    combined.append(f"**From web research ({w.get('title', 'Unknown')}):** {w['snippet'].replace(chr(10), ' ').strip()}")
         
         if not doc_results and not web_results:
-            return "I could not find specific information about that in our historical database or on the web. Try rephrasing your question or using different keywords.", []
+            return "I could not find specific information about that in our historical database or on the web. Please try rephrasing your question or using different keywords.", []
         
+        # Determine which sources to use based on mode
+        use_docs = mode in ['Auto (Documents + Web)', 'Documents Only']
+        use_web = mode in ['Auto (Documents + Web)', 'Web Only']
+        
+        if use_docs and doc_results:
+            sources.append('documents')
+        if use_web and web_results:
+            sources.append('web')
+        
+        # If no sources after filtering, fallback
+        if not sources:
+            return "No information available with current search settings. Please try changing your search mode.", []
+        
+        # Try OpenAI first for intelligent response
         if self.web_searcher.openai_client:
             try:
-                doc_text = ' '.join([d.get('snippet', '')[:300] for d in doc_results[:2]])
-                web_text = ' '.join([w.get('snippet', '')[:300] for w in web_results[:2]])
-                prompt = f"Question: {question}\n\nDocuments: {doc_text}\n\nWeb: {web_text}\n\nProvide a comprehensive answer based on this information. Do not include URLs in the main text."
+                doc_context = ""
+                if use_docs and doc_results:
+                    for d in doc_results[:3]:
+                        title = d.get('title', 'Unknown')
+                        content = d.get('snippet', d.get('content', ''))[:500]
+                        doc_context += f"Document '{title}': {content}\n\n"
+                
+                web_context = ""
+                if use_web and web_results:
+                    for w in web_results[:3]:
+                        title = w.get('title', 'Unknown')
+                        content = w.get('snippet', '')[:500]
+                        web_context += f"Web source '{title}': {content}\n\n"
+                
+                prompt = f"""You are a professional historian specialising in Chinese maritime exploration during the Ming dynasty. 
+Answer the following question in clear, fluent UK English. Do not copy text verbatim from the sources. 
+Instead, synthesise the information into a coherent, well-structured response with proper paragraphs.
+Use British English spelling and conventions.
+
+Question: {question}
+
+Available information:
+{doc_context}
+{web_context}
+
+Please provide a comprehensive answer that:
+1. Directly addresses the question
+2. Presents key facts and historical context
+3. Uses professional academic tone
+4. Does not include URLs or references in the main text
+5. Is written in proper UK English
+"""
+                
                 resp = self.web_searcher.openai_client.chat.completions.create(
                     model="gpt-3.5-turbo",
-                    messages=[{"role": "system", "content": "You are a historical research assistant specializing in Chinese exploration history."},
-                             {"role": "user", "content": prompt}],
-                    max_tokens=500,
+                    messages=[
+                        {"role": "system", "content": "You are a professional historian specialising in early Chinese maritime exploration. You write in clear, academic UK English and synthesise information rather than copying it."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=700,
                     temperature=0.7
                 )
-                if resp:
-                    return re.sub(r'https?://\S+', '', resp.choices[0].message.content), sources
-            except:
-                pass
+                
+                if resp and resp.choices:
+                    answer = resp.choices[0].message.content
+                    # Remove any URLs just in case
+                    answer = re.sub(r'https?://\S+', '', answer)
+                    return answer, sources
+            except Exception as e:
+                print(f"OpenAI generation failed: {e}")
         
-        base = random.choice([
-            f"Based on historical research, {question.replace('?', '').strip()} can be understood through multiple sources.\n\n",
-            f"Research indicates that {question.replace('?', '').strip()} reveals several important findings.\n\n"
-        ])
-        if combined:
-            base += "\n\n".join(combined)
-            if len(sources) > 1:
-                base += "\n\n**Sources:** This information comes from both historical documents and current web research."
-            elif 'documents' in sources:
-                base += "\n\n**Sources:** This evidence primarily comes from historical documents in the 1421 research database."
-            else:
-                base += "\n\n**Sources:** This information comes from web-based historical research."
-        return base, sources
+        # Enhanced fallback with better synthesis
+        key_points = []
+        
+        if use_docs and doc_results:
+            for d in doc_results[:3]:
+                content = d.get('snippet', d.get('content', ''))[:200]
+                # Clean and summarise
+                content = re.sub(r'#\S+', '', content)  # Remove hashtags
+                content = re.sub(r'https?://\S+', '', content)  # Remove URLs
+                content = ' '.join(content.split())  # Clean whitespace
+                if len(content) > 50:
+                    key_points.append(content)
+        
+        if use_web and web_results:
+            for w in web_results[:2]:
+                content = w.get('snippet', '')[:200]
+                content = re.sub(r'https?://\S+', '', content)
+                content = ' '.join(content.split())
+                if len(content) > 50:
+                    key_points.append(content)
+        
+        # Build a coherent response
+        response_parts = []
+        
+        # Introduction
+        intro_templates = [
+            f"Regarding {question.lower().replace('?', '')}, historical evidence suggests several important conclusions.",
+            f"The question of {question.lower().replace('?', '')} can be addressed through examination of available historical records.",
+            f"Historical research into {question.lower().replace('?', '')} reveals a complex picture."
+        ]
+        response_parts.append(random.choice(intro_templates))
+        
+        # Body - synthesise key points
+        if key_points:
+            response_parts.append("\n\n" + key_points[0][:300])
+            if len(key_points) > 1:
+                response_parts.append("\n\nFurthermore, " + key_points[1][0].lower() + key_points[1][1:300] if key_points[1] else "")
+            if len(key_points) > 2:
+                response_parts.append("\n\nAdditional evidence indicates " + key_points[2][0].lower() + key_points[2][1:300] if key_points[2] else "")
+        
+        # Conclusion
+        response_parts.append("\n\nThese findings demonstrate the significance of Chinese maritime exploration during this period, though further research continues to refine our understanding.")
+        
+        # Source attribution
+        if len(sources) > 1:
+            response_parts.append("\n\n**Sources:** This analysis draws from both historical documents and contemporary web research.")
+        elif 'documents' in sources:
+            response_parts.append("\n\n**Sources:** This analysis is primarily based on historical documents in the 1421 research database.")
+        else:
+            response_parts.append("\n\n**Sources:** This analysis draws from web-based historical research.")
+        
+        return ''.join(response_parts), sources
     
     def perform_search(self, question):
         start = time.time()
-        docs = self.search_documents(question, 10)
-        time.sleep(0.3)
-        web = self.web_searcher.search_google(question, 3) if not docs else []
-        answer, sources = self.generate_answer(question, docs, web)
+        mode = st.session_state.get('search_mode', 'Auto (Documents + Web)')
         
+        # Search based on mode
+        docs = []
+        web = []
+        
+        if mode in ['Auto (Documents + Web)', 'Documents Only']:
+            docs = self.search_documents(question, 10)
+        
+        if mode in ['Auto (Documents + Web)', 'Web Only']:
+            # Only do web search if no docs found in Auto mode, or always in Web Only mode
+            if mode == 'Web Only' or (mode == 'Auto (Documents + Web)' and not docs):
+                time.sleep(0.3)
+                web = self.web_searcher.search_google(question, 3)
+        
+        answer, sources = self.generate_intelligent_answer(question, docs, web, mode)
+        
+        # Track analytics
         a = st.session_state.search_analytics
         a['total_searches'] += 1
         today = datetime.now().strftime("%Y-%m-%d")
@@ -556,32 +693,19 @@ class ResearchSystem:
         if len(a['response_times']) > 500:
             a['response_times'] = a['response_times'][-500:]
         
+        # Track source usage
+        if len(sources) > 1:
+            a['sources_used']['both'] += 1
+        elif 'documents' in sources:
+            a['sources_used']['documents'] += 1
+        elif 'web' in sources:
+            a['sources_used']['web'] += 1
+        
         return {
             'question': question, 'answer': answer, 'sources_used': sources,
             'document_results': docs, 'web_results': web,
             'total_results': len(docs) + len(web)
         }
-    
-    def get_map_locations(self):
-        """Get geographical locations for map with timeline data"""
-        locations = [
-            {'name': 'Beijing', 'lat': 39.9042, 'lon': 116.4074, 'year': 1403, 'event': 'Capital moved to Beijing'},
-            {'name': 'Nanjing', 'lat': 32.0603, 'lon': 118.7969, 'year': 1368, 'event': 'Early Ming capital'},
-            {'name': 'Calicut', 'lat': 11.2588, 'lon': 75.7804, 'year': 1406, 'event': 'Zheng He visited'},
-            {'name': 'Sumatra', 'lat': -0.5897, 'lon': 101.3431, 'year': 1407, 'event': 'Zheng He visited'},
-            {'name': 'Java', 'lat': -7.6145, 'lon': 110.7123, 'year': 1407, 'event': 'Zheng He visited'},
-            {'name': 'Malacca', 'lat': 2.1896, 'lon': 102.2501, 'year': 1409, 'event': 'Strategic trading port'},
-            {'name': 'Sri Lanka', 'lat': 7.8731, 'lon': 80.7718, 'year': 1409, 'event': 'Zheng He visited'},
-            {'name': 'Hormuz', 'lat': 27.1561, 'lon': 56.2815, 'year': 1414, 'event': 'Persian Gulf port'},
-            {'name': 'Africa', 'lat': 8.7832, 'lon': 34.5085, 'year': 1418, 'event': 'Zheng He reached East Africa'},
-            {'name': 'Mombasa', 'lat': -4.0435, 'lon': 39.6682, 'year': 1418, 'event': 'East African trade'},
-            {'name': 'Zanzibar', 'lat': -6.1659, 'lon': 39.2026, 'year': 1419, 'event': 'Trade with Africa'},
-        ]
-        
-        timeline = [{'year': l['year'], 'location': l['name'], 'event': l['event']} for l in locations]
-        timeline.sort(key=lambda x: x['year'])
-        
-        return {'locations': locations, 'timeline_events': timeline}
 
 # ========== PAGE FUNCTIONS ==========
 def show_dashboard(system):
@@ -599,11 +723,11 @@ def show_dashboard(system):
     st.markdown('<h2 class="sub-header">ASK HISTORICAL QUESTIONS</h2>', unsafe_allow_html=True)
     
     examples = [
-        "Zheng He voyages significance",
-        "Chinese ships in America before Columbus",
-        "Ming Dynasty naval technology",
-        "Chinese treasure fleets purpose",
-        "Chinese navigation vs European methods"
+        "What was the significance of Zheng He's voyages?",
+        "Is there evidence of Chinese ships reaching America before Columbus?",
+        "Describe Ming Dynasty naval technology and shipbuilding",
+        "What were the main purposes of the Chinese treasure fleets?",
+        "How did Chinese navigation compare to European methods?"
     ]
     cols = st.columns(2)
     for i, q in enumerate(examples):
@@ -622,7 +746,9 @@ def show_dashboard(system):
         answer_id = f"answer_{idx}_{int(time.time())}"
         st.markdown(f'<div class="chat-message assistant-message"><strong>1421 AI:</strong><br><div id="{answer_id}" class="answer-text">{chat["answer"]}</div></div>', unsafe_allow_html=True)
         
-        st.markdown(f'<script>typeWriter("{answer_id}", `{chat["answer"].replace("`", "\\`").replace(chr(10), "\\n")}`); scrollToBottom();</script>', unsafe_allow_html=True)
+        # Only trigger typing animation for the latest message
+        if idx == len(st.session_state.chat_history[-20:]) - 1:
+            st.markdown(f'<script>setTimeout(function() {{ typeWriter("{answer_id}", `{chat["answer"].replace("`", "\\`").replace(chr(10), "\\n")}`); scrollToBottom(); }}, 100);</script>', unsafe_allow_html=True)
         
         st.markdown(f'<div class="action-buttons"><button class="copy-button" onclick="copyAnswerToClipboard(`{chat["answer"].replace("`", "'").replace(chr(10), "\\n")}`)">Copy Answer</button></div>', unsafe_allow_html=True)
         
@@ -651,8 +777,36 @@ def show_dashboard(system):
                 st.divider()
         st.divider()
     
-    # Add bottom padding for fixed input
-    st.markdown('<div style="height: 100px;"></div>', unsafe_allow_html=True)
+    # Question input at the bottom of the page (not fixed, just naturally at the bottom)
+    st.markdown('<div style="height: 20px;"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="question-input-container">', unsafe_allow_html=True)
+    st.markdown("### Ask a Question")
+    
+    col1, col2 = st.columns([4, 1])
+    with col1:
+        question = st.text_area(
+            "Your question",
+            value=st.session_state.current_question,
+            placeholder="Ask a question about Chinese exploration, Zheng He, or the 1421 theory...",
+            key="dashboard_question",
+            height=80,
+            label_visibility="collapsed"
+        )
+    with col2:
+        ask = st.button("RESEARCH", type="primary", use_container_width=True)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    if (ask or st.session_state.auto_search) and question:
+        st.session_state.auto_search = False
+        with st.spinner("Researching historical records and searching the web..."):
+            result = system.perform_search(question)
+            st.session_state.chat_history.append(result)
+            SavedSearchesSystem.save_search(
+                question, result['answer'], result['sources_used'],
+                result['document_results'], result['web_results']
+            )
+            st.rerun()
 
 def show_documents_page(system):
     st.markdown('<h2 class="sub-header">RESEARCH DOCUMENTS</h2>', unsafe_allow_html=True)
@@ -789,7 +943,7 @@ def show_map_page(system):
                         ))
                 
                 fig.update_layout(
-                    title=None,  # No title
+                    title=None,
                     geo=dict(
                         showland=True,
                         landcolor='rgb(243,243,243)',
@@ -870,6 +1024,8 @@ def show_map_page(system):
                 st.info("No geographical location data available.")
         except Exception as e:
             st.error(f"Error loading map data: {str(e)}")
+            import traceback
+            st.code(traceback.format_exc())
 
 def show_analytics_page(system):
     st.markdown('<h2 class="sub-header">ANALYTICS DASHBOARD</h2>', unsafe_allow_html=True)
@@ -925,6 +1081,19 @@ def show_settings_page(system):
         st.write(f"**OpenAI Integration:** {openai_status}")
     
     st.divider()
+    st.subheader("Search Mode")
+    
+    # LLM Thinking Mode selector
+    mode = st.radio(
+        "Select how the system should search for information:",
+        options=["Auto (Documents + Web)", "Documents Only", "Web Only"],
+        index=0,
+        horizontal=True,
+        help="Auto mode uses documents first, then falls back to web. Documents Only uses only the local database. Web Only uses only internet search."
+    )
+    st.session_state.search_mode = mode
+    
+    st.divider()
     st.subheader("Actions")
     
     c1, c2 = st.columns(2)
@@ -965,14 +1134,16 @@ def show_settings_page(system):
 # ========== SIDEBAR ==========
 def render_sidebar():
     with st.sidebar:
-        st.markdown('<div style="text-align: center; margin-bottom: 2rem;"><h2 style="color: #d4af37; font-size: 1.8rem;">1421 AI</h2><p style="color: #fff; opacity: 0.8;">HISTORICAL RESEARCH SYSTEM</p></div>', unsafe_allow_html=True)
+        st.markdown('<div style="text-align: center; margin-bottom: 1rem;"><h2 style="color: #d4af37; font-size: 1.8rem; margin-bottom: 0;">1421 AI</h2><p style="color: #fff; opacity: 0.8; margin-top: 0;">HISTORICAL RESEARCH SYSTEM</p></div>', unsafe_allow_html=True)
         
-        # Navigation
+        # Navigation - all buttons close together with no extra lines
         pages = [
             ("DASHBOARD", "dashboard"),
             ("RESEARCH DOCUMENTS", "documents"),
             ("FULL VOYAGE MAP", "map"),
-            ("ANALYTICS", "analytics")
+            ("ANALYTICS", "analytics"),
+            ("SEND FEEDBACK", "feedback"),
+            ("SETTINGS", "settings")
         ]
         
         for label, pid in pages:
@@ -980,18 +1151,6 @@ def render_sidebar():
             if st.button(label, key=f"nav_{pid}", use_container_width=True, type=btn_type):
                 st.session_state.current_page = pid
                 st.rerun()
-        
-        # Feedback button (above settings)
-        st.sidebar.markdown("---")
-        if st.sidebar.button("SEND FEEDBACK", key="feedback_nav", use_container_width=True, type="secondary"):
-            st.session_state.current_page = "feedback"
-            st.rerun()
-        
-        # Settings button
-        btn_type = "primary" if st.session_state.current_page == "settings" else "secondary"
-        if st.button("SETTINGS", key="nav_settings", use_container_width=True, type=btn_type):
-            st.session_state.current_page = "settings"
-            st.rerun()
         
         # Saved searches
         SavedSearchesSystem.render_sidebar()
@@ -1003,10 +1162,11 @@ def render_sidebar():
             st.sidebar.markdown('<h3 class="system-status-header">SYSTEM STATUS</h3>', unsafe_allow_html=True)
             st.sidebar.markdown(f'''
             <div style="background:rgba(255,255,255,0.1);padding:15px;border-radius:10px;">
-                <p style="color:#FFD700;"><strong>Documents:</strong> <span style="color:white;">{stats.get("total_documents",0)}</span></p>
-                <p style="color:#FFD700;"><strong>Saved:</strong> <span style="color:white;">{stats.get("saved_searches",0)}</span></p>
-                <p style="color:#FFD700;"><strong>Chat:</strong> <span style="color:white;">{len(st.session_state.chat_history)}</span></p>
-                <p style="color:#FFD700;"><strong>Locations:</strong> <span style="color:white;">{stats.get("geocoded_locations",25)}</span></p>
+                <p style="color:#FFD700; margin:5px 0;"><strong>Documents:</strong> <span style="color:white;">{stats.get("total_documents",0)}</span></p>
+                <p style="color:#FFD700; margin:5px 0;"><strong>Saved:</strong> <span style="color:white;">{stats.get("saved_searches",0)}</span></p>
+                <p style="color:#FFD700; margin:5px 0;"><strong>Chat:</strong> <span style="color:white;">{len(st.session_state.chat_history)}</span></p>
+                <p style="color:#FFD700; margin:5px 0;"><strong>Locations:</strong> <span style="color:white;">{stats.get("geocoded_locations",25)}</span></p>
+                <p style="color:#FFD700; margin:5px 0;"><strong>Mode:</strong> <span style="color:white;">{st.session_state.get("search_mode", "Auto")}</span></p>
             </div>
             ''', unsafe_allow_html=True)
 
@@ -1049,33 +1209,6 @@ def main():
         show_analytics_page(system)
     elif st.session_state.current_page == "settings":
         show_settings_page(system)
-    
-    # Sticky question input at bottom (DeepSeek style)
-    if st.session_state.current_page == "dashboard":
-        st.markdown('<div class="question-input-container">', unsafe_allow_html=True)
-        cols = st.columns([4, 1])
-        with cols[0]:
-            question = st.text_input(
-                "Ask a question",
-                value=st.session_state.current_question,
-                placeholder="Ask a question about Chinese exploration, Zheng He, or the 1421 theory...",
-                key="sticky_question",
-                label_visibility="collapsed"
-            )
-        with cols[1]:
-            ask = st.button("RESEARCH", type="primary", use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        if (ask or st.session_state.auto_search) and question:
-            st.session_state.auto_search = False
-            with st.spinner("Researching historical records and searching the web..."):
-                result = system.perform_search(question)
-                st.session_state.chat_history.append(result)
-                SavedSearchesSystem.save_search(
-                    question, result['answer'], result['sources_used'],
-                    result['document_results'], result['web_results']
-                )
-                st.rerun()
 
 @st.cache_resource
 def init_system():
