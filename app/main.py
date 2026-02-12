@@ -50,7 +50,6 @@ DEFAULT_STATE = {
     'current_year': 1368,
     'map_data': None,
     'search_mode': 'Auto (Documents + Web)',
-    'right_sidebar_collapsed': False,
     'chat_sessions': [],
     'current_chat_id': 0
 }
@@ -68,7 +67,7 @@ if not st.session_state.chat_sessions:
         'created': datetime.now().strftime("%Y-%m-%d %H:%M")
     }]
 
-# ========== CSS STYLING ==========
+# ========== CSS STYLING - Professional, No Emojis ==========
 st.markdown("""
 <style>
 /* Main styling */
@@ -84,18 +83,27 @@ st.markdown("""
     margin-right: auto; 
 }
 
-/* Headers */
-.main-header { font-size: 2.8rem; color: #000; text-align: center; margin-bottom: 0.5rem; font-weight: 800; background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-.sub-header { font-size: 1.8rem; color: #2c3e50; margin-bottom: 1.5rem; font-weight: 700; border-bottom: 3px solid #d4af37; padding-bottom: 0.5rem; }
-
-/* Main layout - Three column layout */
-.main-layout {
-    display: flex;
-    gap: 20px;
-    width: 100%;
+/* Headers - No emojis */
+.main-header { 
+    font-size: 2.8rem; 
+    color: #000; 
+    text-align: center; 
+    margin-bottom: 0.5rem; 
+    font-weight: 800; 
+    background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%); 
+    -webkit-background-clip: text; 
+    -webkit-text-fill-color: transparent; 
+}
+.sub-header { 
+    font-size: 1.8rem; 
+    color: #2c3e50; 
+    margin-bottom: 1.5rem; 
+    font-weight: 700; 
+    border-bottom: 3px solid #d4af37; 
+    padding-bottom: 0.5rem; 
 }
 
-/* Left Navigation Sidebar - Always visible */
+/* Left Navigation Sidebar */
 section[data-testid="stSidebar"] > div { 
     background: linear-gradient(135deg, #2c3e50 0%, #1a252f 100%) !important; 
     border-right: 4px solid #d4af37;
@@ -103,14 +111,14 @@ section[data-testid="stSidebar"] > div {
     width: 100%;
 }
 
-/* Navigation buttons - larger text, closer together */
+/* Navigation buttons - Yellow background with black text */
 .stSidebar .stButton > button {
-    background: transparent;
-    color: white !important;
+    background: #d4af37 !important;
+    color: #000000 !important;
     border: none !important;
     border-radius: 6px;
     font-weight: 600 !important;
-    font-size: 1.1rem !important;
+    font-size: 1rem !important;
     padding: 10px 14px !important;
     margin: 2px 0 !important;
     text-align: left;
@@ -118,155 +126,114 @@ section[data-testid="stSidebar"] > div {
     letter-spacing: 0.5px;
     transition: all 0.2s ease;
     width: 100%;
+    border-bottom: 2px solid transparent !important;
 }
 
 .stSidebar .stButton > button:hover {
-    background: rgba(212,175,55,0.2) !important;
+    background: #c4a030 !important;
     transform: translateX(3px);
-    border-left: 3px solid #d4af37 !important;
+    border-bottom: 2px solid #000000 !important;
 }
 
 .stSidebar .stButton > button[kind="primary"] {
-    background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%) !important;
-    color: #000 !important;
+    background: #d4af37 !important;
+    color: #000000 !important;
     font-weight: 700 !important;
+    border: 2px solid #ffffff !important;
 }
 
-/* Right Sidebar - Chat History & Saved Searches (Always visible) */
-.right-sidebar {
-    background: linear-gradient(135deg, #2c3e50 0%, #1a252f 100%);
-    border-left: 4px solid #d4af37;
-    padding: 1.5rem 1rem;
-    height: calc(100vh - 80px);
-    position: sticky;
-    top: 10px;
-    right: 0;
-    border-radius: 12px 0 0 12px;
-    color: white;
-    overflow-y: auto;
-    width: 300px;
-    flex-shrink: 0;
-    transition: width 0.3s ease;
+/* Chat History in Left Sidebar - Below Settings */
+.chat-history-section {
+    margin-top: 20px;
+    padding-top: 15px;
+    border-top: 2px solid rgba(212,175,55,0.3);
 }
 
-.right-sidebar.collapsed {
-    width: 60px;
-    padding: 1.5rem 0.5rem;
-    overflow: hidden;
-}
-
-.right-sidebar.collapsed .sidebar-content {
-    display: none;
-}
-
-.right-sidebar-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 20px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid rgba(212,175,55,0.3);
-}
-
-.right-sidebar-header h3 {
+.chat-history-header {
     color: #d4af37;
-    margin: 0;
-    font-size: 1.2rem;
-}
-
-.toggle-sidebar-btn {
-    background: transparent;
-    color: white;
-    border: 1px solid #d4af37;
-    border-radius: 20px;
-    padding: 5px 12px;
-    font-size: 0.8rem;
-    cursor: pointer;
-    transition: all 0.3s ease;
-}
-
-.toggle-sidebar-btn:hover {
-    background: rgba(212,175,55,0.2);
-}
-
-/* New Chat Button */
-.new-chat-btn {
-    background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%);
-    color: black;
-    border: none;
-    border-radius: 8px;
-    padding: 12px 15px;
-    font-weight: 700;
-    width: 100%;
-    cursor: pointer;
-    margin-bottom: 20px;
-    transition: all 0.3s ease;
     font-size: 1rem;
+    font-weight: 700;
+    margin-bottom: 15px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
 
-.new-chat-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+.new-chat-btn-sidebar {
+    background: #d4af37;
+    color: #000000;
+    border: none;
+    border-radius: 6px;
+    padding: 10px 15px;
+    font-weight: 600;
+    width: 100%;
+    cursor: pointer;
+    margin-bottom: 15px;
+    transition: all 0.3s ease;
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
 }
 
-/* Chat Session Items */
-.chat-session-item {
+.new-chat-btn-sidebar:hover {
+    background: #c4a030;
+    transform: translateY(-2px);
+}
+
+.chat-session-item-sidebar {
     background: rgba(255,255,255,0.1);
-    border-radius: 8px;
-    padding: 12px;
-    margin: 8px 0;
+    border-radius: 6px;
+    padding: 10px;
+    margin: 6px 0;
     border-left: 3px solid transparent;
     cursor: pointer;
     transition: all 0.3s ease;
 }
 
-.chat-session-item:hover {
+.chat-session-item-sidebar:hover {
     background: rgba(255,255,255,0.2);
     border-left: 3px solid #d4af37;
 }
 
-.chat-session-item.active {
+.chat-session-item-sidebar.active {
     background: rgba(212,175,55,0.2);
     border-left: 3px solid #d4af37;
 }
 
-.chat-session-name {
-    font-size: 0.95rem;
+.chat-session-name-sidebar {
+    font-size: 0.85rem;
     color: white;
     font-weight: 600;
-    margin-bottom: 4px;
+    margin-bottom: 2px;
 }
 
-.chat-session-time {
-    font-size: 0.7rem;
+.chat-session-time-sidebar {
+    font-size: 0.65rem;
     color: #ccc;
 }
 
-/* Saved searches in right sidebar */
+/* Saved searches in left sidebar */
 .saved-search-sidebar-item { 
     background: rgba(255,255,255,0.1); 
-    border-radius: 8px; 
-    padding: 12px; 
-    margin: 8px 0; 
-    border-left: 4px solid #d4af37; 
+    border-radius: 6px; 
+    padding: 10px; 
+    margin: 6px 0; 
+    border-left: 3px solid #d4af37; 
     cursor: pointer; 
     transition: all 0.3s ease; 
 }
 .saved-search-sidebar-item:hover { 
     background: rgba(255,255,255,0.2); 
-    transform: translateX(5px); 
+    transform: translateX(3px); 
 }
-.search-time { 
-    font-size: 0.8rem; 
+.search-time-sidebar { 
+    font-size: 0.7rem; 
     color: #ccc; 
-    margin-top: 5px; 
+    margin-top: 3px; 
 }
-.search-query { 
-    font-size: 0.9rem; 
+.search-query-sidebar { 
+    font-size: 0.8rem; 
     color: #fff; 
-    margin-bottom: 5px; 
+    margin-bottom: 3px; 
     overflow: hidden; 
     text-overflow: ellipsis; 
     white-space: nowrap; 
@@ -275,29 +242,30 @@ section[data-testid="stSidebar"] > div {
 /* Yellow text for no saved searches */
 .no-saved-searches { 
     background: rgba(255,255,255,0.1); 
-    border-radius: 8px; 
-    padding: 15px; 
-    margin: 10px 0; 
+    border-radius: 6px; 
+    padding: 12px; 
+    margin: 8px 0; 
     text-align: center; 
-    color: #FFD700 !important; 
+    color: #d4af37 !important; 
     font-style: italic; 
+    font-size: 0.85rem;
 }
 .no-saved-searches small { 
-    color: #FFD700 !important; 
+    color: #d4af37 !important; 
 }
 
-/* System Status - Old style */
+/* System Status */
 .system-status-container {
     background: rgba(255,255,255,0.1);
     padding: 15px;
-    border-radius: 10px;
+    border-radius: 8px;
     margin-top: 20px;
 }
 
 .system-status-container p {
-    color: #FFD700;
+    color: #d4af37;
     margin: 5px 0;
-    font-size: 0.9rem;
+    font-size: 0.85rem;
 }
 
 .system-status-container span {
@@ -311,14 +279,36 @@ section[data-testid="stSidebar"] > div {
     padding-right: 20px;
 }
 
-/* Source badges */
-.source-badge { display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: 600; margin-right: 8px; margin-bottom: 8px; }
-.badge-document { background: #4a6491; color: white; }
-.badge-web { background: #28a745; color: white; }
+/* Source badges - No emojis */
+.source-badge { 
+    display: inline-block; 
+    padding: 4px 10px; 
+    border-radius: 12px; 
+    font-size: 0.8rem; 
+    font-weight: 600; 
+    margin-right: 8px; 
+    margin-bottom: 8px; 
+}
+.badge-document { 
+    background: #4a6491; 
+    color: white; 
+}
+.badge-web { 
+    background: #28a745; 
+    color: white; 
+}
 
 /* Metrics */
-[data-testid="stMetricValue"] { font-size: 2rem !important; font-weight: 700 !important; color: #2c3e50 !important; }
-[data-testid="stMetricLabel"] { font-weight: 600 !important; font-size: 1rem !important; color: #d4af37 !important; }
+[data-testid="stMetricValue"] { 
+    font-size: 2rem !important; 
+    font-weight: 700 !important; 
+    color: #2c3e50 !important; 
+}
+[data-testid="stMetricLabel"] { 
+    font-weight: 600 !important; 
+    font-size: 1rem !important; 
+    color: #d4af37 !important; 
+}
 
 /* Answer display with typing animation */
 .answer-text { 
@@ -329,12 +319,36 @@ section[data-testid="stSidebar"] > div {
     padding: 10px 0; 
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
 }
-.typing-animation { border-right: 2px solid #d4af37; animation: blink 1s step-end infinite; white-space: pre-wrap; }
-@keyframes blink { from, to { border-color: transparent; } 50% { border-color: #d4af37; } }
+.typing-animation { 
+    border-right: 2px solid #d4af37; 
+    animation: blink 1s step-end infinite; 
+    white-space: pre-wrap; 
+}
+@keyframes blink { 
+    from, to { border-color: transparent; } 
+    50% { border-color: #d4af37; } 
+}
 
-.chat-message { padding: 20px; margin: 15px 0; border-radius: 12px; max-width: 100%; animation: fadeIn 0.3s ease; }
-.user-message { background: linear-gradient(135deg, #4a6491 0%, #2c3e50 100%); color: white; margin-right: 20%; border-bottom-right-radius: 4px; }
-.assistant-message { background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); color: #333; border: 1px solid #ddd; margin-left: 20%; border-bottom-left-radius: 4px; }
+.chat-message { 
+    padding: 20px; 
+    margin: 15px 0; 
+    border-radius: 12px; 
+    max-width: 100%; 
+    animation: fadeIn 0.3s ease; 
+}
+.user-message { 
+    background: linear-gradient(135deg, #4a6491 0%, #2c3e50 100%); 
+    color: white; 
+    margin-right: 20%; 
+    border-bottom-right-radius: 4px; 
+}
+.assistant-message { 
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); 
+    color: #333; 
+    border: 1px solid #ddd; 
+    margin-left: 20%; 
+    border-bottom-left-radius: 4px; 
+}
 
 /* Black text for historical questions */
 .historical-question-text {
@@ -342,28 +356,50 @@ section[data-testid="stSidebar"] > div {
     font-weight: 600;
 }
 
-/* Query text styling */
-.assistant-message .answer-text, 
-.assistant-message p,
-.assistant-message strong,
-.assistant-message em {
-    color: #2c3e50;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+/* Action buttons - No emojis */
+.action-buttons { 
+    display: flex; 
+    gap: 10px; 
+    margin-top: 15px; 
+    margin-bottom: 20px; 
+}
+.copy-button, .save-button { 
+    background: linear-gradient(135deg, #6c757d 0%, #495057 100%); 
+    color: white; 
+    border: none; 
+    border-radius: 6px; 
+    padding: 8px 16px; 
+    font-size: 0.9rem; 
+    cursor: pointer; 
+}
+.save-button { 
+    background: linear-gradient(135deg, #4a6491 0%, #2c3e50 100%); 
+}
+.copy-button:hover, .save-button:hover { 
+    transform: translateY(-2px); 
 }
 
-/* Action buttons */
-.action-buttons { display: flex; gap: 10px; margin-top: 15px; margin-bottom: 20px; }
-.copy-button, .save-button { background: linear-gradient(135deg, #6c757d 0%, #495057 100%); color: white; border: none; border-radius: 6px; padding: 8px 16px; font-size: 0.9rem; cursor: pointer; }
-.save-button { background: linear-gradient(135deg, #4a6491 0%, #2c3e50 100%); }
-.copy-button:hover, .save-button:hover { transform: translateY(-2px); }
-
 /* Delete button */
-.delete-button { background: linear-gradient(135deg, #dc3545 0%, #c82333 100%); color: white; border: none; border-radius: 6px; padding: 4px 8px; font-size: 0.8rem; cursor: pointer; }
+.delete-button { 
+    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%); 
+    color: white; 
+    border: none; 
+    border-radius: 6px; 
+    padding: 4px 8px; 
+    font-size: 0.8rem; 
+    cursor: pointer; 
+}
 
-/* Headers */
-.saved-searches-header, .system-status-header { color: #FFD700 !important; font-weight: 700 !important; }
+/* Headers - No emojis */
+.saved-searches-header, .system-status-header { 
+    color: #d4af37 !important; 
+    font-weight: 700 !important; 
+    font-size: 1rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
 
-/* Question input at bottom - Fixed position, only in chat */
+/* Question input at bottom - Professional */
 .question-input-container {
     position: fixed;
     bottom: 20px;
@@ -380,7 +416,7 @@ section[data-testid="stSidebar"] > div {
     align-items: center;
     backdrop-filter: blur(10px);
     background: rgba(255,255,255,0.95);
-    margin-left: 150px; /* Account for left sidebar */
+    margin-left: 150px;
 }
 
 .question-input-container input {
@@ -393,8 +429,8 @@ section[data-testid="stSidebar"] > div {
 }
 
 .question-input-container button {
-    background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%);
-    color: white;
+    background: #d4af37;
+    color: #000000;
     border: none;
     border-radius: 30px;
     padding: 10px 24px;
@@ -406,17 +442,26 @@ section[data-testid="stSidebar"] > div {
 }
 
 .question-input-container button:hover {
+    background: #c4a030;
     transform: translateY(-2px);
-    box-shadow: 0 4px 10px rgba(0,0,0,0.2);
 }
 
 /* Confirmation dialog */
-.confirmation-dialog { background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; padding: 15px; margin: 10px 0; color: #856404; }
+.confirmation-dialog { 
+    background: #fff3cd; 
+    border: 1px solid #ffc107; 
+    border-radius: 8px; 
+    padding: 15px; 
+    margin: 10px 0; 
+    color: #856404; 
+}
 
 /* Map container */
-.map-container { margin-bottom: 100px; }
+.map-container { 
+    margin-bottom: 100px; 
+}
 
-/* Timeline controls */
+/* Timeline controls - No emojis */
 .timeline-controls { 
     display: flex; 
     gap: 10px; 
@@ -428,12 +473,8 @@ section[data-testid="stSidebar"] > div {
 }
 
 /* Hide default title */
-.js-plotly-plot .gtitle { display: none; }
-
-/* Content area with margin for bottom fixed input */
-.content-area {
-    margin-bottom: 100px;
-    padding-bottom: 20px;
+.js-plotly-plot .gtitle { 
+    display: none; 
 }
 
 /* Document search - full width */
@@ -457,36 +498,35 @@ section[data-testid="stSidebar"] > div {
     outline: none;
 }
 
-/* Document buttons - same style */
-.doc-button {
-    background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%);
-    color: white !important;
+/* Document buttons - Yellow with black text */
+.doc-button, .stButton > button {
+    background: #d4af37 !important;
+    color: #000000 !important;
     border: none !important;
-    border-radius: 10px;
+    border-radius: 6px;
     font-weight: 600 !important;
-    font-size: 1.1rem !important;
+    font-size: 1rem !important;
     padding: 12px 24px !important;
     transition: all 0.3s ease !important;
 }
 
-.doc-button:hover {
-    background: linear-gradient(135deg, #b8860b 0%, #8b4513 100%);
+.doc-button:hover, .stButton > button:hover {
+    background: #c4a030 !important;
     transform: translateY(-2px);
-    box-shadow: 0 6px 15px rgba(0,0,0,0.2);
 }
 
-/* Settings buttons - yellow background */
-.settings-button {
-    background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%) !important;
-    color: white !important;
+/* Settings buttons - Yellow with black text */
+.settings-button, .stButton > button[kind="secondary"] {
+    background: #d4af37 !important;
+    color: #000000 !important;
     border: none !important;
-    border-radius: 10px;
+    border-radius: 6px;
     font-weight: 600 !important;
-    font-size: 1.1rem !important;
+    font-size: 1rem !important;
     padding: 12px 24px !important;
 }
 
-/* How to use section */
+/* How to use section - No emojis */
 .how-to-use {
     background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
     border-radius: 12px;
@@ -519,7 +559,9 @@ p, div, span, li {
 </style>
 
 <script>
-function copyAnswerToClipboard(t) { navigator.clipboard.writeText(t).then(()=>alert('Answer copied to clipboard!'), e=>console.error(e)); }
+function copyAnswerToClipboard(t) { 
+    navigator.clipboard.writeText(t).then(()=>alert('Answer copied to clipboard'), e=>console.error(e)); 
+}
 
 // Typing animation effect
 function typeWriter(elementId, text, speed = 20) {
@@ -548,14 +590,6 @@ function scrollToBottom() {
         top: document.body.scrollHeight,
         behavior: 'smooth'
     });
-}
-
-// Toggle right sidebar
-function toggleRightSidebar() {
-    const sidebar = document.querySelector('.right-sidebar');
-    if (sidebar) {
-        sidebar.classList.toggle('collapsed');
-    }
 }
 </script>
 """, unsafe_allow_html=True)
@@ -634,100 +668,89 @@ class SavedSearchesSystem:
         st.session_state.saved_searches = [s for s in st.session_state.saved_searches if s['id'] != search_id]
     
     @staticmethod
-    def render_right_sidebar():
-        """Render the right sidebar with chat sessions and saved searches (Always visible)"""
+    def render_left_sidebar_chat_history():
+        """Render chat history and saved searches in left sidebar below settings"""
         saved = st.session_state.saved_searches
         chat_sessions = st.session_state.chat_sessions
         current_id = st.session_state.current_chat_id
         
-        # Right sidebar container
-        collapsed_class = "collapsed" if st.session_state.right_sidebar_collapsed else ""
-        st.markdown(f"""
-        <div class="right-sidebar {collapsed_class}">
-            <div class="right-sidebar-header">
-                <h3>CHATS</h3>
-                <button class="toggle-sidebar-btn" onclick="toggleRightSidebar()">{'◀' if not st.session_state.right_sidebar_collapsed else '▶'}</button>
-            </div>
-        """, unsafe_allow_html=True)
+        st.sidebar.markdown('<div class="chat-history-section">', unsafe_allow_html=True)
+        st.sidebar.markdown('<div class="chat-history-header">CHAT HISTORY</div>', unsafe_allow_html=True)
         
-        if not st.session_state.right_sidebar_collapsed:
-            # New Chat button
-            if st.button("+ NEW CHAT", key="new_chat_btn", use_container_width=True):
-                new_id = len(chat_sessions)
-                st.session_state.chat_sessions.append({
-                    'id': new_id,
-                    'name': f'Chat {new_id + 1}',
-                    'history': [],
-                    'created': datetime.now().strftime("%Y-%m-%d %H:%M")
-                })
-                st.session_state.current_chat_id = new_id
+        # New Chat button - Yellow with black text
+        if st.sidebar.button("+ NEW CHAT", key="new_chat_btn_sidebar", use_container_width=True):
+            new_id = len(chat_sessions)
+            st.session_state.chat_sessions.append({
+                'id': new_id,
+                'name': f'Chat {new_id + 1}',
+                'history': [],
+                'created': datetime.now().strftime("%Y-%m-%d %H:%M")
+            })
+            st.session_state.current_chat_id = new_id
+            st.rerun()
+        
+        # Chat sessions
+        st.sidebar.markdown('<div style="max-height: 300px; overflow-y: auto;">', unsafe_allow_html=True)
+        for session in chat_sessions[-5:][::-1]:
+            active_class = "active" if session['id'] == current_id else ""
+            
+            chat_key = f"chat_select_sidebar_{session['id']}"
+            if st.sidebar.button(f"{session['name']}", key=chat_key, use_container_width=True):
+                st.session_state.current_chat_id = session['id']
                 st.rerun()
             
-            # Chat sessions
-            st.markdown("<div style='margin-top: 10px; max-height: 300px; overflow-y: auto;'>", unsafe_allow_html=True)
-            for session in chat_sessions[-5:][::-1]:  # Show last 5
-                active_class = "active" if session['id'] == current_id else ""
-                
-                # Create a clickable chat session item
-                chat_key = f"chat_select_{session['id']}"
-                if st.button(f"📝 {session['name']}", key=chat_key, use_container_width=True):
-                    st.session_state.current_chat_id = session['id']
-                    st.rerun()
-                
-                # Show active indicator
-                if session['id'] == current_id:
-                    st.markdown(f"<small style='color: #d4af37;'>✓ Active</small>", unsafe_allow_html=True)
-            
-            st.markdown("</div>", unsafe_allow_html=True)
-            st.markdown("<hr style='border-color: rgba(212,175,55,0.3); margin: 20px 0;'>", unsafe_allow_html=True)
-            
-            # Saved searches section
-            st.markdown('<h3 class="saved-searches-header">SAVED SEARCHES</h3>', unsafe_allow_html=True)
-            
-            if saved:
-                for s in saved[-5:][::-1]:
-                    cols = st.columns([3, 1, 1])
-                    with cols[0]:
-                        st.markdown(f'<div class="saved-search-sidebar-item"><div class="search-query">{s["question"][:40]}{"..." if len(s["question"])>40 else ""}</div><div class="search-time">{s["time"]} • {len(s["sources"])} sources</div></div>', unsafe_allow_html=True)
-                    with cols[1]:
-                        if st.button("↻", key=f"sr_{s['id']}", help="Reload this search"):
-                            # Create new chat and add this search
-                            new_id = len(st.session_state.chat_sessions)
-                            st.session_state.chat_sessions.append({
-                                'id': new_id,
-                                'name': f'Chat {new_id + 1}',
-                                'history': [{
-                                    'question': s['question'],
-                                    'answer': s['answer'],
-                                    'sources_used': s['sources'],
-                                    'document_results': s['document_results'],
-                                    'web_results': s['web_results'],
-                                    'total_results': s['document_results_count'] + s['web_results_count']
-                                }],
-                                'created': datetime.now().strftime("%Y-%m-%d %H:%M")
-                            })
-                            st.session_state.current_chat_id = new_id
-                            st.rerun()
-                    with cols[2]:
-                        if st.button("🗑", key=f"sd_{s['id']}", help="Delete this search"):
-                            st.session_state.deleting_search_id = s['id']
-                            st.rerun()
-                
-                if st.session_state.deleting_search_id:
-                    st.markdown('<div class="confirmation-dialog"><strong>Delete Search?</strong><br><small>This action cannot be undone.</small></div>', unsafe_allow_html=True)
-                    c1, c2 = st.columns(2)
-                    if c1.button("Confirm", key="confirm_del"):
-                        SavedSearchesSystem.delete_search(st.session_state.deleting_search_id)
-                        st.session_state.deleting_search_id = None
-                        st.rerun()
-                    if c2.button("Cancel", key="cancel_del"):
-                        st.session_state.deleting_search_id = None
-                        st.rerun()
-                st.markdown(f"*Showing 5 of {len(saved)}*")
-            else:
-                st.markdown('<div class="no-saved-searches">No saved searches yet.<br><small>Searches are automatically saved.</small></div>', unsafe_allow_html=True)
+            if session['id'] == current_id:
+                st.sidebar.markdown(f"<small style='color: #d4af37; float: right;'>Active</small>", unsafe_allow_html=True)
         
-        st.markdown("</div>", unsafe_allow_html=True)  # Close right-sidebar div
+        st.sidebar.markdown('</div>', unsafe_allow_html=True)
+        st.sidebar.markdown('<hr style="border-color: rgba(212,175,55,0.3); margin: 15px 0;">', unsafe_allow_html=True)
+        
+        # Saved searches section
+        st.sidebar.markdown('<div class="chat-history-header">SAVED SEARCHES</div>', unsafe_allow_html=True)
+        
+        if saved:
+            for s in saved[-5:][::-1]:
+                cols = st.sidebar.columns([3, 1, 1])
+                with cols[0]:
+                    st.sidebar.markdown(f'<div class="saved-search-sidebar-item"><div class="search-query-sidebar">{s["question"][:35]}{"..." if len(s["question"])>35 else ""}</div><div class="search-time-sidebar">{s["time"]} • {len(s["sources"])} sources</div></div>', unsafe_allow_html=True)
+                with cols[1]:
+                    if st.sidebar.button("↻", key=f"sr_sidebar_{s['id']}", help="Reload this search"):
+                        new_id = len(st.session_state.chat_sessions)
+                        st.session_state.chat_sessions.append({
+                            'id': new_id,
+                            'name': f'Chat {new_id + 1}',
+                            'history': [{
+                                'question': s['question'],
+                                'answer': s['answer'],
+                                'sources_used': s['sources'],
+                                'document_results': s['document_results'],
+                                'web_results': s['web_results'],
+                                'total_results': s['document_results_count'] + s['web_results_count']
+                            }],
+                            'created': datetime.now().strftime("%Y-%m-%d %H:%M")
+                        })
+                        st.session_state.current_chat_id = new_id
+                        st.rerun()
+                with cols[2]:
+                    if st.sidebar.button("🗑", key=f"sd_sidebar_{s['id']}", help="Delete this search"):
+                        st.session_state.deleting_search_id = s['id']
+                        st.rerun()
+            
+            if st.session_state.deleting_search_id:
+                st.sidebar.markdown('<div class="confirmation-dialog"><strong>Delete Search?</strong><br><small>This action cannot be undone.</small></div>', unsafe_allow_html=True)
+                c1, c2 = st.sidebar.columns(2)
+                if c1.button("Confirm", key="confirm_del_sidebar"):
+                    SavedSearchesSystem.delete_search(st.session_state.deleting_search_id)
+                    st.session_state.deleting_search_id = None
+                    st.rerun()
+                if c2.button("Cancel", key="cancel_del_sidebar"):
+                    st.session_state.deleting_search_id = None
+                    st.rerun()
+            st.sidebar.markdown(f"<small style='color: #ccc;'>Showing 5 of {len(saved)}</small>", unsafe_allow_html=True)
+        else:
+            st.sidebar.markdown('<div class="no-saved-searches">No saved searches yet.<br><small>Searches are automatically saved.</small></div>', unsafe_allow_html=True)
+        
+        st.sidebar.markdown('</div>', unsafe_allow_html=True)
 
 # ========== FEEDBACK SYSTEM ==========
 class FeedbackSystem:
@@ -884,7 +907,7 @@ class ResearchSystem:
         locations = [
             {'name': 'Beijing', 'lat': 39.9042, 'lon': 116.4074, 'year': 1403, 'event': 'Capital moved to Beijing'},
             {'name': 'Nanjing', 'lat': 32.0603, 'lon': 118.7969, 'year': 1368, 'event': 'Early Ming capital established'},
-            {'name': 'Calicut', 'lat': 11.2588, 'lon': 75.7804, 'year': 1406, 'event': 'Zheng He\'s fleet first arrived'},
+            {'name': 'Calicut', 'lat': 11.2588, 'lon': 75.7804, 'year': 1406, 'event': 'Zheng He fleet first arrived'},
             {'name': 'Sumatra', 'lat': -0.5897, 'lon': 101.3431, 'year': 1407, 'event': 'Strategic trading post established'},
             {'name': 'Java', 'lat': -7.6145, 'lon': 110.7123, 'year': 1407, 'event': 'Diplomatic missions conducted'},
             {'name': 'Malacca', 'lat': 2.1896, 'lon': 102.2501, 'year': 1409, 'event': 'Strategic port established'},
@@ -984,9 +1007,9 @@ Please provide a comprehensive answer that:
             for d in doc_results[:3]:
                 content = d.get('snippet', d.get('content', ''))[:200]
                 # Clean and summarise
-                content = re.sub(r'#\S+', '', content)  # Remove hashtags
-                content = re.sub(r'https?://\S+', '', content)  # Remove URLs
-                content = ' '.join(content.split())  # Clean whitespace
+                content = re.sub(r'#\S+', '', content)
+                content = re.sub(r'https?://\S+', '', content)
+                content = ' '.join(content.split())
                 if len(content) > 50:
                     key_points.append(content)
         
@@ -1042,7 +1065,6 @@ Please provide a comprehensive answer that:
             docs = self.search_documents(question, 10)
         
         if mode in ['Auto (Documents + Web)', 'Web Only']:
-            # Only do web search if no docs found in Auto mode, or always in Web Only mode
             if mode == 'Web Only' or (mode == 'Auto (Documents + Web)' and not docs):
                 time.sleep(0.3)
                 web = self.web_searcher.search_google(question, 3)
@@ -1086,17 +1108,17 @@ def show_dashboard(system):
     
     st.divider()
     
-    # How to Use This System Section
+    # How to Use This System Section - No emojis
     st.markdown("""
     <div class="how-to-use">
-        <h3>📚 How to Use 1421 AI</h3>
+        <h3>HOW TO USE 1421 AI</h3>
         <p>Welcome to the 1421 AI Historical Research System. This platform helps you explore Chinese maritime history, Zheng He's voyages, and the 1421 theory through both historical documents and web research.</p>
         <ul>
-            <li><strong>💬 Chat:</strong> Use the chat interface on the right sidebar to start conversations. Each chat session is saved automatically.</li>
-            <li><strong>🔍 Research:</strong> Ask questions about Chinese exploration, navigation techniques, Ming Dynasty technology, and more.</li>
-            <li><strong>📄 Documents:</strong> Browse and search through our historical document database in the Research Documents section.</li>
-            <li><strong>🗺️ Map:</strong> Visualise voyage routes and explore locations on the interactive timeline map.</li>
-            <li><strong>💾 Saved Searches:</strong> Important answers are automatically saved and can be accessed from the right sidebar.</li>
+            <li><strong>CHAT:</strong> Use the chat interface below to start conversations. Each chat session is saved automatically in the left sidebar.</li>
+            <li><strong>RESEARCH:</strong> Ask questions about Chinese exploration, navigation techniques, Ming Dynasty technology, and more.</li>
+            <li><strong>DOCUMENTS:</strong> Browse and search through our historical document database in the Research Documents section.</li>
+            <li><strong>MAP:</strong> Visualise voyage routes and explore locations on the interactive timeline map.</li>
+            <li><strong>SAVED SEARCHES:</strong> Important answers are automatically saved and can be accessed from the left sidebar.</li>
         </ul>
         <p style="margin-top: 15px; color: #d4af37; font-weight: 600;">Click on any example question below to start a new chat:</p>
     </div>
@@ -1132,11 +1154,11 @@ def show_dashboard(system):
     
     st.divider()
     
-    # System Status - Old style
+    # System Status - Professional style
     if stats:
         st.markdown("""
         <div style="background: rgba(44,62,80,0.05); padding: 20px; border-radius: 10px; margin-top: 20px;">
-            <h3 style="color: #2c3e50; margin-bottom: 15px;">📊 System Status</h3>
+            <h3 style="color: #2c3e50; margin-bottom: 15px;">SYSTEM STATUS</h3>
         """, unsafe_allow_html=True)
         
         col1, col2, col3 = st.columns(3)
@@ -1148,7 +1170,7 @@ def show_dashboard(system):
             st.markdown(f"<p style='color: #2c3e50;'><strong>Chats:</strong> {len(st.session_state.chat_sessions)}</p>", unsafe_allow_html=True)
         with col3:
             st.markdown(f"<p style='color: #2c3e50;'><strong>Mode:</strong> {st.session_state.get('search_mode', 'Auto')}</p>", unsafe_allow_html=True)
-            st.markdown(f"<p style='color: #2c3e50;'><strong>Status:</strong> {'🟢 Active' if system.db else '🔴 Inactive'}</p>", unsafe_allow_html=True)
+            st.markdown(f"<p style='color: #2c3e50;'><strong>Status:</strong> {'Active' if system.db else 'Inactive'}</p>", unsafe_allow_html=True)
         
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1157,7 +1179,7 @@ def show_documents_page(system):
     
     # Full width search input - no filter dropdown
     st.markdown('<div class="document-search-container">', unsafe_allow_html=True)
-    search = st.text_input("", placeholder="🔍 Search documents by title, author, or keywords...", 
+    search = st.text_input("", placeholder="Search documents by title, author, or keywords...", 
                           label_visibility="collapsed", key="doc_search")
     st.markdown('</div>', unsafe_allow_html=True)
     
@@ -1167,12 +1189,12 @@ def show_documents_page(system):
         limit_opts = {"25": 25, "50": 50, "100": 100, "All": None}
         limit = limit_opts[st.selectbox("Show", ["All", "25", "50", "100"], index=0, label_visibility="collapsed")]
     
-    # Action buttons - both with same yellow background
+    # Action buttons - both with yellow background
     c1, c2 = st.columns(2)
     with c1:
-        search_btn = st.button("🔍 SEARCH DOCUMENTS", key="search_docs_btn", use_container_width=True)
+        search_btn = st.button("SEARCH DOCUMENTS", key="search_docs_btn", use_container_width=True)
     with c2:
-        show_btn = st.button("📄 SHOW DOCUMENTS", key="show_docs_btn", use_container_width=True)
+        show_btn = st.button("SHOW DOCUMENTS", key="show_docs_btn", use_container_width=True)
     
     docs = []
     if search_btn and search:
@@ -1184,7 +1206,7 @@ def show_documents_page(system):
         if docs:
             st.success(f"Loaded {len(docs)} documents")
     else:
-        st.info("💡 Enter a search query or click 'SHOW DOCUMENTS' to load all documents from the database.")
+        st.info("Enter a search query or click 'SHOW DOCUMENTS' to load all documents from the database.")
     
     if docs:
         df = pd.DataFrame([{
@@ -1206,7 +1228,7 @@ def show_documents_page(system):
         }, use_container_width=True, height=500, hide_index=True)
         
         csv = df.to_csv(index=False).encode()
-        st.download_button("⬇️ DOWNLOAD AS CSV", csv, f"documents_{datetime.now():%Y%m%d}.csv", "text/csv", use_container_width=True)
+        st.download_button("DOWNLOAD AS CSV", csv, f"documents_{datetime.now():%Y%m%d}.csv", "text/csv", use_container_width=True)
 
 def show_chat_page(system):
     """Main chat interface - where questions are asked"""
@@ -1217,10 +1239,12 @@ def show_chat_page(system):
     
     if current_session:
         chat_history = current_session['history']
+        chat_name = current_session['name']
     else:
         chat_history = []
+        chat_name = "New Chat"
     
-    st.markdown(f'<h2 class="sub-header">CHAT: {current_session["name"] if current_session else "New Chat"}</h2>', unsafe_allow_html=True)
+    st.markdown(f'<h2 class="sub-header">CHAT: {chat_name}</h2>', unsafe_allow_html=True)
     
     # Chat history for current session
     if chat_history:
@@ -1234,17 +1258,17 @@ def show_chat_page(system):
             if idx == len(chat_history[-20:]) - 1:
                 st.markdown(f'<script>setTimeout(function() {{ typeWriter("{answer_id}", `{chat["answer"].replace("`", "\\`").replace(chr(10), "\\n")}`); scrollToBottom(); }}, 100);</script>', unsafe_allow_html=True)
             
-            st.markdown(f'<div class="action-buttons"><button class="copy-button" onclick="copyAnswerToClipboard(`{chat["answer"].replace("`", "'").replace(chr(10), "\\n")}`)">📋 Copy Answer</button></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="action-buttons"><button class="copy-button" onclick="copyAnswerToClipboard(`{chat["answer"].replace("`", "'").replace(chr(10), "\\n")}`)">Copy Answer</button></div>', unsafe_allow_html=True)
             
             st.markdown("**Sources used:**")
             if 'documents' in chat['sources_used']:
-                st.markdown('<span class="source-badge badge-document">📚 Documents</span>', unsafe_allow_html=True)
+                st.markdown('<span class="source-badge badge-document">Documents</span>', unsafe_allow_html=True)
             if 'web' in chat['sources_used']:
-                st.markdown('<span class="source-badge badge-web">🌐 Web</span>', unsafe_allow_html=True)
+                st.markdown('<span class="source-badge badge-web">Web</span>', unsafe_allow_html=True)
             
-            with st.expander(f"📑 DETAILED SOURCES ({chat['total_results']} results found)", expanded=False):
+            with st.expander("DETAILED SOURCES", expanded=False):
                 for res in chat.get('document_results', [])[:3]:
-                    st.markdown(f"**📄 {res.get('title', 'Unknown')}**")
+                    st.markdown(f"**{res.get('title', 'Unknown')}**")
                     if res.get('author'):
                         st.markdown(f"*Author: {res['author']}*")
                     if res.get('url'):
@@ -1253,7 +1277,7 @@ def show_chat_page(system):
                         st.info(res['snippet'])
                     st.divider()
                 for res in chat.get('web_results', [])[:2]:
-                    st.markdown(f"**🌐 {res.get('title', 'Unknown')}**")
+                    st.markdown(f"**{res.get('title', 'Unknown')}**")
                     if res.get('url'):
                         st.markdown(f"[View Source]({res['url']})")
                     if res.get('snippet'):
@@ -1261,10 +1285,10 @@ def show_chat_page(system):
                     st.divider()
             st.divider()
     else:
-        # Welcome message for new chat
+        # Welcome message for new chat - No emojis
         st.markdown("""
         <div style="text-align: center; padding: 50px 20px; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); border-radius: 12px; margin: 30px 0;">
-            <h3 style="color: #2c3e50; margin-bottom: 20px;">💬 Welcome to 1421 AI Chat</h3>
+            <h3 style="color: #2c3e50; margin-bottom: 20px;">Welcome to 1421 AI Chat</h3>
             <p style="color: #666; font-size: 1.1rem;">Ask any question about Chinese exploration, Zheng He's voyages, or the 1421 theory.</p>
             <p style="color: #d4af37; margin-top: 20px;">Type your question in the box below to begin...</p>
         </div>
@@ -1273,7 +1297,7 @@ def show_chat_page(system):
     # Add bottom padding for fixed input
     st.markdown('<div style="height: 100px;"></div>', unsafe_allow_html=True)
     
-    # Question input at bottom - Fixed position, only in chat
+    # Question input at bottom - Fixed position
     st.markdown("""
     <div class="question-input-container">
         <input type="text" id="chat-question-input" placeholder="Ask a question about Chinese exploration, Zheng He, or the 1421 theory...">
@@ -1297,7 +1321,7 @@ def show_chat_page(system):
     
     if (ask or st.session_state.auto_search) and question:
         st.session_state.auto_search = False
-        with st.spinner("🔍 Researching historical records and searching the web..."):
+        with st.spinner("Researching historical records and searching the web..."):
             result = system.perform_search(question)
             
             # Add to current chat session
@@ -1322,6 +1346,7 @@ def show_map_page(system):
     
     with st.spinner("Loading geographical data..."):
         try:
+            # FIXED: This method now exists in the ResearchSystem class
             map_data = system.get_map_locations()
             st.session_state.map_data = map_data
             
@@ -1329,24 +1354,24 @@ def show_map_page(system):
                 locations = map_data['locations']
                 timeline_events = map_data.get('timeline_events', [])
                 
-                # Animation controls
+                # Animation controls - No emojis
                 col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
                 
                 with col1:
                     current_year = st.session_state.current_year
-                    year = st.slider("📅 Year", 1368, 1421, current_year, key="map_year_slider")
+                    year = st.slider("Year", 1368, 1421, current_year, key="map_year_slider")
                     st.session_state.current_year = year
                 
                 with col2:
-                    if st.button("▶️ Play", key="play_animation", use_container_width=True):
+                    if st.button("Play", key="play_animation", use_container_width=True):
                         st.session_state.animation_playing = True
                 
                 with col3:
-                    if st.button("⏸️ Pause", key="pause_animation", use_container_width=True):
+                    if st.button("Pause", key="pause_animation", use_container_width=True):
                         st.session_state.animation_playing = False
                 
                 with col4:
-                    if st.button("🔄 Reset", key="reset_animation", use_container_width=True):
+                    if st.button("Reset", key="reset_animation", use_container_width=True):
                         st.session_state.current_year = 1368
                         st.session_state.animation_playing = False
                         st.rerun()
@@ -1428,7 +1453,7 @@ def show_map_page(system):
                 
                 # Timeline
                 st.divider()
-                st.subheader("📜 Historical Timeline")
+                st.subheader("Historical Timeline")
                 
                 if timeline_events:
                     timeline_df = pd.DataFrame(timeline_events)
@@ -1474,7 +1499,7 @@ def show_map_page(system):
                     
                     st.plotly_chart(fig_timeline, use_container_width=True)
                     
-                    with st.expander("📋 Timeline Details", expanded=True):
+                    with st.expander("Timeline Details", expanded=True):
                         for year in sorted(timeline_df['year'].unique()):
                             year_events = timeline_df[timeline_df['year'] == year]
                             st.markdown(f"### {year}")
@@ -1504,14 +1529,14 @@ def show_analytics_page(system):
         cols[3].metric("Saved Searches", stats.get('saved_searches', 0))
         
         if a['sources_used']:
-            st.subheader("📊 Source Usage")
+            st.subheader("Source Usage")
             c1, c2, c3 = st.columns(3)
             c1.metric("Document Searches", a['sources_used']['documents'])
             c2.metric("Web Searches", a['sources_used']['web'])
             c3.metric("Combined Searches", a['sources_used']['both'])
         
         if a['popular_topics']:
-            st.subheader("🔥 Top Search Topics")
+            st.subheader("Top Search Topics")
             topics_df = pd.DataFrame(list(a['popular_topics'].items()), columns=['Topic', 'Count'])
             topics_df = topics_df.sort_values('Count', ascending=False).head(10)
             fig = px.bar(topics_df, x='Count', y='Topic', orientation='h', color='Count', color_continuous_scale='Oranges')
@@ -1525,7 +1550,7 @@ def show_settings_page(system):
     
     c1, c2 = st.columns(2)
     with c1:
-        st.subheader("💾 Database Information")
+        st.subheader("Database Information")
         stats = system.get_database_stats()
         if stats:
             st.write(f"**Total Documents:** {stats['total_documents']}")
@@ -1533,18 +1558,18 @@ def show_settings_page(system):
             st.write(f"**Geocoded Locations:** {stats['geocoded_locations']}")
     
     with c2:
-        st.subheader("⚙️ System Status")
+        st.subheader("System Status")
         st.write(f"**Database Path:** `{system.db_path}`")
-        st.write(f"**Database Connection:** {'✅ Active' if system.db else '❌ Inactive'}")
-        st.write(f"**Web Search Module:** {'✅ Active' if system.web_searcher else '❌ Inactive'}")
+        st.write(f"**Database Connection:** {'Active' if system.db else 'Inactive'}")
+        st.write(f"**Web Search Module:** {'Active' if system.web_searcher else 'Inactive'}")
         
-        openai_status = '❌ Inactive (API key not set)'
+        openai_status = 'Inactive (API key not set)'
         if hasattr(system.web_searcher, 'openai_client'):
-            openai_status = '✅ Active' if system.web_searcher.openai_client else '❌ Inactive (API key not set)'
+            openai_status = 'Active' if system.web_searcher.openai_client else 'Inactive (API key not set)'
         st.write(f"**OpenAI Integration:** {openai_status}")
     
     st.divider()
-    st.subheader("🎯 Search Mode")
+    st.subheader("Search Mode")
     
     # LLM Thinking Mode selector
     mode = st.radio(
@@ -1557,17 +1582,17 @@ def show_settings_page(system):
     st.session_state.search_mode = mode
     
     st.divider()
-    st.subheader("🛠️ Actions")
+    st.subheader("Actions")
     
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("🔄 REFRESH CACHE", key="refresh_cache", use_container_width=True):
+        if st.button("REFRESH CACHE", key="refresh_cache", use_container_width=True):
             st.cache_resource.clear()
             st.success("System cache cleared!")
             st.rerun()
     
     with c2:
-        if st.button("🔍 CHECK DATABASE", key="check_db", use_container_width=True):
+        if st.button("CHECK DATABASE", key="check_db", use_container_width=True):
             if system.db:
                 try:
                     cursor = system.db.execute("SELECT name FROM sqlite_master WHERE type='table';")
@@ -1579,11 +1604,11 @@ def show_settings_page(system):
                 st.error("Database not initialized")
     
     st.divider()
-    st.subheader("🗑️ Data Management")
+    st.subheader("Data Management")
     
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("🧹 CLEAR CHAT HISTORY", key="clear_chats", use_container_width=True):
+        if st.button("CLEAR CHAT HISTORY", key="clear_chats", use_container_width=True):
             st.session_state.chat_sessions = [{
                 'id': 0,
                 'name': 'Chat 1',
@@ -1595,29 +1620,29 @@ def show_settings_page(system):
             st.rerun()
     
     with c2:
-        if st.button("💾 CLEAR SAVED SEARCHES", key="clear_saved", use_container_width=True):
+        if st.button("CLEAR SAVED SEARCHES", key="clear_saved", use_container_width=True):
             st.session_state.saved_searches = []
             st.success("All saved searches cleared!")
             st.rerun()
     
-    if st.button("📊 RESET ANALYTICS DATA", key="reset_analytics", use_container_width=True):
+    if st.button("RESET ANALYTICS DATA", key="reset_analytics", use_container_width=True):
         st.session_state.search_analytics = DEFAULT_ANALYTICS.copy()
         st.success("Analytics data reset!")
         st.rerun()
 
-# ========== SIDEBAR ==========
+# ========== LEFT SIDEBAR ==========
 def render_left_sidebar():
     with st.sidebar:
         st.markdown('<div style="text-align: center; margin-bottom: 0.8rem;"><h2 style="color: #d4af37; font-size: 1.8rem; margin-bottom: 0;">1421 AI</h2><p style="color: #fff; opacity: 0.8; margin-top: 0; font-size: 0.8rem;">HISTORICAL RESEARCH SYSTEM</p></div>', unsafe_allow_html=True)
         
-        # Navigation - all buttons close together with larger text
+        # Navigation - Yellow background with black text
         pages = [
-            ("📊 DASHBOARD", "dashboard"),
-            ("📚 RESEARCH DOCUMENTS", "documents"),
-            ("🗺️ FULL VOYAGE MAP", "map"),
-            ("📈 ANALYTICS", "analytics"),
-            ("✉️ SEND FEEDBACK", "feedback"),
-            ("⚙️ SETTINGS", "settings")
+            ("DASHBOARD", "dashboard"),
+            ("RESEARCH DOCUMENTS", "documents"),
+            ("FULL VOYAGE MAP", "map"),
+            ("ANALYTICS", "analytics"),
+            ("SEND FEEDBACK", "feedback"),
+            ("SETTINGS", "settings")
         ]
         
         for label, pid in pages:
@@ -1626,20 +1651,24 @@ def render_left_sidebar():
                 st.session_state.current_page = pid
                 st.rerun()
         
-        # System Status - Old style in left sidebar
+        # System Status in left sidebar
         if 'system_stats' in st.session_state:
             stats = st.session_state.system_stats
             st.sidebar.markdown("---")
-            st.sidebar.markdown('<h3 style="color: #FFD700; font-size: 1rem; margin-bottom: 10px;">📊 SYSTEM STATUS</h3>', unsafe_allow_html=True)
+            st.sidebar.markdown('<h3 style="color: #d4af37; font-size: 1rem; margin-bottom: 10px;">SYSTEM STATUS</h3>', unsafe_allow_html=True)
             st.sidebar.markdown(f'''
             <div class="system-status-container">
-                <p style="color: #FFD700; margin: 5px 0;"><strong>📄 Documents:</strong> <span style="color: white;">{stats.get("total_documents",0)}</span></p>
-                <p style="color: #FFD700; margin: 5px 0;"><strong>💾 Saved:</strong> <span style="color: white;">{stats.get("saved_searches",0)}</span></p>
-                <p style="color: #FFD700; margin: 5px 0;"><strong>💬 Chats:</strong> <span style="color: white;">{len(st.session_state.chat_sessions)}</span></p>
-                <p style="color: #FFD700; margin: 5px 0;"><strong>📍 Locations:</strong> <span style="color: white;">{stats.get("geocoded_locations",25)}</span></p>
-                <p style="color: #FFD700; margin: 5px 0;"><strong>🎯 Mode:</strong> <span style="color: white;">{st.session_state.get("search_mode", "Auto")}</span></p>
+                <p style="color: #d4af37; margin: 5px 0;"><strong>Documents:</strong> <span style="color: white;">{stats.get("total_documents",0)}</span></p>
+                <p style="color: #d4af37; margin: 5px 0;"><strong>Saved:</strong> <span style="color: white;">{stats.get("saved_searches",0)}</span></p>
+                <p style="color: #d4af37; margin: 5px 0;"><strong>Chats:</strong> <span style="color: white;">{len(st.session_state.chat_sessions)}</span></p>
+                <p style="color: #d4af37; margin: 5px 0;"><strong>Locations:</strong> <span style="color: white;">{stats.get("geocoded_locations",25)}</span></p>
+                <p style="color: #d4af37; margin: 5px 0;"><strong>Mode:</strong> <span style="color: white;">{st.session_state.get("search_mode", "Auto")}</span></p>
             </div>
             ''', unsafe_allow_html=True)
+        
+        # Chat History and Saved Searches - Below Settings
+        # This will appear after the navigation buttons and system status
+        SavedSearchesSystem.render_left_sidebar_chat_history()
 
 # ========== MAIN ==========
 def main():
@@ -1663,39 +1692,26 @@ def main():
     
     st.session_state.system_stats = system.get_database_stats()
     
-    # Three-column layout with left sidebar, main content, and right sidebar
+    # Render left sidebar with navigation and chat history
     render_left_sidebar()
     
-    # Main content and right sidebar
-    col1, col2 = st.columns([3, 1])
-    
-    with col1:
-        # Main content area
-        if st.session_state.current_page == "dashboard":
-            show_dashboard(system)
-        elif st.session_state.current_page == "documents":
-            show_documents_page(system)
-        elif st.session_state.current_page == "map":
-            show_map_page(system)
-        elif st.session_state.current_page == "analytics":
-            show_analytics_page(system)
-        elif st.session_state.current_page == "settings":
-            show_settings_page(system)
-        elif st.session_state.current_page == "feedback":
-            FeedbackSystem.render_feedback_page()
-    
-    with col2:
-        # Right sidebar with chat sessions and saved searches - ALWAYS VISIBLE
-        SavedSearchesSystem.render_right_sidebar()
-    
-    # Chat input - only show on chat-related pages
+    # Main content area - full width
     if st.session_state.current_page == "dashboard":
-        # For dashboard, we show the example questions and info, but chat happens in chat sessions
-        pass
-    else:
-        # For all other pages, show the chat input in the main content area
-        with col1:
-            show_chat_page(system)
+        show_dashboard(system)
+    elif st.session_state.current_page == "documents":
+        show_documents_page(system)
+    elif st.session_state.current_page == "map":
+        show_map_page(system)
+    elif st.session_state.current_page == "analytics":
+        show_analytics_page(system)
+    elif st.session_state.current_page == "settings":
+        show_settings_page(system)
+    elif st.session_state.current_page == "feedback":
+        FeedbackSystem.render_feedback_page()
+    
+    # Chat interface - shown on all pages except dashboard
+    if st.session_state.current_page != "dashboard":
+        show_chat_page(system)
 
 @st.cache_resource
 def init_system():
