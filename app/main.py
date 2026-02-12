@@ -51,7 +51,9 @@ DEFAULT_STATE = {
     'map_data': None,
     'search_mode': 'Auto (Documents + Web)',
     'chat_sessions': [],
-    'current_chat_id': 0
+    'current_chat_id': 0,
+    'map_fullscreen': False,
+    'show_world_map': True
 }
 
 for key, value in DEFAULT_STATE.items():
@@ -81,6 +83,9 @@ st.markdown("""
     max-width: 1400px; 
     margin-left: auto; 
     margin-right: auto; 
+    min-height: calc(100vh - 120px);
+    position: relative;
+    padding-bottom: 100px;
 }
 
 /* Headers - No emojis */
@@ -329,6 +334,7 @@ section[data-testid="stSidebar"] > div {
     50% { border-color: #d4af37; } 
 }
 
+/* Chat message styling */
 .chat-message { 
     padding: 20px; 
     margin: 15px 0; 
@@ -399,8 +405,8 @@ section[data-testid="stSidebar"] > div {
     letter-spacing: 0.5px;
 }
 
-/* Question input at bottom - Professional */
-.question-input-container {
+/* Question input at bottom - Fixed for Chat page */
+.chat-page .question-input-container {
     position: fixed;
     bottom: 20px;
     left: 50%;
@@ -446,6 +452,48 @@ section[data-testid="stSidebar"] > div {
     transform: translateY(-2px);
 }
 
+/* Chat container with proper spacing */
+.chat-container {
+    margin-bottom: 100px;
+    min-height: 500px;
+}
+
+/* Fullscreen map styles */
+.fullscreen-map {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 9999;
+    background: white;
+    padding: 20px;
+}
+
+.fullscreen-btn {
+    background: #d4af37;
+    color: black;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 16px;
+    font-weight: 600;
+    cursor: pointer;
+    float: right;
+    margin-bottom: 10px;
+}
+
+.fullscreen-btn:hover {
+    background: #c4a030;
+}
+
+/* World map styling */
+.world-map {
+    border: 2px solid #d4af37;
+    border-radius: 12px;
+    padding: 10px;
+    background: white;
+}
+
 /* Confirmation dialog */
 .confirmation-dialog { 
     background: #fff3cd; 
@@ -458,7 +506,8 @@ section[data-testid="stSidebar"] > div {
 
 /* Map container */
 .map-container { 
-    margin-bottom: 100px; 
+    margin-bottom: 30px; 
+    position: relative;
 }
 
 /* Timeline controls - No emojis */
@@ -470,11 +519,6 @@ section[data-testid="stSidebar"] > div {
     padding: 15px; 
     background: #f8f9fa; 
     border-radius: 8px; 
-}
-
-/* Hide default title */
-.js-plotly-plot .gtitle { 
-    display: none; 
 }
 
 /* Document search - full width */
@@ -556,6 +600,32 @@ section[data-testid="stSidebar"] > div {
 p, div, span, li {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
 }
+
+/* Chat page specific */
+.chat-page .main .block-container {
+    padding-bottom: 120px;
+}
+
+/* Scrollable chat history */
+.chat-history-scroll {
+    max-height: 300px;
+    overflow-y: auto;
+    padding-right: 5px;
+}
+
+.chat-history-scroll::-webkit-scrollbar {
+    width: 5px;
+}
+
+.chat-history-scroll::-webkit-scrollbar-track {
+    background: rgba(255,255,255,0.1);
+    border-radius: 10px;
+}
+
+.chat-history-scroll::-webkit-scrollbar-thumb {
+    background: #d4af37;
+    border-radius: 10px;
+}
 </style>
 
 <script>
@@ -590,6 +660,18 @@ function scrollToBottom() {
         top: document.body.scrollHeight,
         behavior: 'smooth'
     });
+}
+
+// Toggle fullscreen map
+function toggleFullscreen() {
+    const mapElement = document.getElementById('voyage-map');
+    if (mapElement) {
+        if (!document.fullscreenElement) {
+            mapElement.requestFullscreen();
+        } else {
+            document.exitFullscreen();
+        }
+    }
 }
 </script>
 """, unsafe_allow_html=True)
@@ -689,9 +771,9 @@ class SavedSearchesSystem:
             st.session_state.current_chat_id = new_id
             st.rerun()
         
-        # Chat sessions
-        st.sidebar.markdown('<div style="max-height: 300px; overflow-y: auto;">', unsafe_allow_html=True)
-        for session in chat_sessions[-5:][::-1]:
+        # Chat sessions - scrollable
+        st.sidebar.markdown('<div class="chat-history-scroll">', unsafe_allow_html=True)
+        for session in chat_sessions[-10:][::-1]:  # Show last 10
             active_class = "active" if session['id'] == current_id else ""
             
             chat_key = f"chat_select_sidebar_{session['id']}"
@@ -1114,10 +1196,10 @@ def show_dashboard(system):
         <h3>HOW TO USE 1421 AI</h3>
         <p>Welcome to the 1421 AI Historical Research System. This platform helps you explore Chinese maritime history, Zheng He's voyages, and the 1421 theory through both historical documents and web research.</p>
         <ul>
-            <li><strong>CHAT:</strong> Use the chat interface below to start conversations. Each chat session is saved automatically in the left sidebar.</li>
+            <li><strong>CHAT:</strong> Use the Chat section to ask questions. Each chat session is saved automatically in the left sidebar.</li>
             <li><strong>RESEARCH:</strong> Ask questions about Chinese exploration, navigation techniques, Ming Dynasty technology, and more.</li>
             <li><strong>DOCUMENTS:</strong> Browse and search through our historical document database in the Research Documents section.</li>
-            <li><strong>MAP:</strong> Visualise voyage routes and explore locations on the interactive timeline map.</li>
+            <li><strong>MAP:</strong> Visualise voyage routes and explore locations on the interactive world map with fullscreen support.</li>
             <li><strong>SAVED SEARCHES:</strong> Important answers are automatically saved and can be accessed from the left sidebar.</li>
         </ul>
         <p style="margin-top: 15px; color: #d4af37; font-weight: 600;">Click on any example question below to start a new chat:</p>
@@ -1150,6 +1232,7 @@ def show_dashboard(system):
                 st.session_state.current_chat_id = new_id
                 st.session_state.current_question = q
                 st.session_state.auto_search = True
+                st.session_state.current_page = "chat"
                 st.rerun()
     
     st.divider()
@@ -1173,6 +1256,124 @@ def show_dashboard(system):
             st.markdown(f"<p style='color: #2c3e50;'><strong>Status:</strong> {'Active' if system.db else 'Inactive'}</p>", unsafe_allow_html=True)
         
         st.markdown("</div>", unsafe_allow_html=True)
+
+def show_chat_page(system):
+    """Dedicated Chat page with fixed query box at bottom"""
+    
+    # Add chat-page class to container
+    st.markdown('<div class="chat-page">', unsafe_allow_html=True)
+    
+    # Get current chat history
+    current_chat_id = st.session_state.current_chat_id
+    current_session = next((s for s in st.session_state.chat_sessions if s['id'] == current_chat_id), None)
+    
+    if current_session:
+        chat_history = current_session['history']
+        chat_name = current_session['name']
+    else:
+        chat_history = []
+        chat_name = "New Chat"
+    
+    st.markdown(f'<h2 class="sub-header">CHAT: {chat_name}</h2>', unsafe_allow_html=True)
+    
+    # Chat container with proper spacing
+    st.markdown('<div class="chat-container">', unsafe_allow_html=True)
+    
+    # Chat history for current session
+    if chat_history:
+        for idx, chat in enumerate(chat_history[-50:]):  # Show last 50 messages
+            st.markdown(f'<div class="chat-message user-message"><strong>You:</strong><br>{chat["question"]}</div>', unsafe_allow_html=True)
+            
+            answer_id = f"answer_{idx}_{int(time.time())}"
+            st.markdown(f'<div class="chat-message assistant-message"><strong>1421 AI:</strong><br><div id="{answer_id}" class="answer-text">{chat["answer"]}</div></div>', unsafe_allow_html=True)
+            
+            # Only trigger typing animation for the latest message
+            if idx == len(chat_history) - 1:
+                st.markdown(f'<script>setTimeout(function() {{ typeWriter("{answer_id}", `{chat["answer"].replace("`", "\\`").replace(chr(10), "\\n")}`); scrollToBottom(); }}, 100);</script>', unsafe_allow_html=True)
+            
+            st.markdown(f'<div class="action-buttons"><button class="copy-button" onclick="copyAnswerToClipboard(`{chat["answer"].replace("`", "'").replace(chr(10), "\\n")}`)">Copy Answer</button></div>', unsafe_allow_html=True)
+            
+            st.markdown("**Sources used:**")
+            if 'documents' in chat['sources_used']:
+                st.markdown('<span class="source-badge badge-document">Documents</span>', unsafe_allow_html=True)
+            if 'web' in chat['sources_used']:
+                st.markdown('<span class="source-badge badge-web">Web</span>', unsafe_allow_html=True)
+            
+            with st.expander("DETAILED SOURCES", expanded=False):
+                for res in chat.get('document_results', [])[:3]:
+                    st.markdown(f"**{res.get('title', 'Unknown')}**")
+                    if res.get('author'):
+                        st.markdown(f"*Author: {res['author']}*")
+                    if res.get('url'):
+                        st.markdown(f"[View Source]({res['url']})")
+                    if res.get('snippet'):
+                        st.info(res['snippet'])
+                    st.divider()
+                for res in chat.get('web_results', [])[:2]:
+                    st.markdown(f"**{res.get('title', 'Unknown')}**")
+                    if res.get('url'):
+                        st.markdown(f"[View Source]({res['url']})")
+                    if res.get('snippet'):
+                        st.info(res['snippet'])
+                    st.divider()
+            st.divider()
+    else:
+        # Welcome message for new chat - No emojis
+        st.markdown("""
+        <div style="text-align: center; padding: 50px 20px; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); border-radius: 12px; margin: 30px 0;">
+            <h3 style="color: #2c3e50; margin-bottom: 20px;">Welcome to 1421 AI Chat</h3>
+            <p style="color: #666; font-size: 1.1rem;">Ask any question about Chinese exploration, Zheng He's voyages, or the 1421 theory.</p>
+            <p style="color: #d4af37; margin-top: 20px;">Type your question in the box below to begin...</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    st.markdown('</div>', unsafe_allow_html=True)  # Close chat-container
+    
+    # Question input at bottom - Fixed position for Chat page
+    st.markdown("""
+    <div class="question-input-container">
+        <input type="text" id="chat-question-input" placeholder="Ask a question about Chinese exploration, Zheng He, or the 1421 theory...">
+        <button id="chat-research-btn" onclick="document.getElementById('chat_research_btn').click();">Research</button>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Hidden Streamlit components for the fixed input
+    col1, col2 = st.columns([4, 1])
+    with col1:
+        question = st.text_area(
+            "Hidden question",
+            value=st.session_state.current_question,
+            key="chat_question",
+            height=1,
+            label_visibility="collapsed",
+            placeholder=""
+        )
+    with col2:
+        ask = st.button("RESEARCH", type="primary", key="chat_research_btn", use_container_width=True)
+    
+    if (ask or st.session_state.auto_search) and question:
+        st.session_state.auto_search = False
+        with st.spinner("Researching historical records and searching the web..."):
+            result = system.perform_search(question)
+            
+            # Add to current chat session
+            for session in st.session_state.chat_sessions:
+                if session['id'] == st.session_state.current_chat_id:
+                    session['history'].append(result)
+                    # Update chat name based on first question if it's a new chat
+                    if len(session['history']) == 1:
+                        session['name'] = question[:30] + ('...' if len(question) > 30 else '')
+                    break
+            
+            # Auto-save to saved searches
+            SavedSearchesSystem.save_search(
+                question, result['answer'], result['sources_used'],
+                result['document_results'], result['web_results']
+            )
+            st.session_state.current_question = ""
+            st.rerun()
+    
+    st.markdown('</div>', unsafe_allow_html=True)  # Close chat-page
 
 def show_documents_page(system):
     st.markdown('<h2 class="sub-header">RESEARCH DOCUMENTS</h2>', unsafe_allow_html=True)
@@ -1230,123 +1431,18 @@ def show_documents_page(system):
         csv = df.to_csv(index=False).encode()
         st.download_button("DOWNLOAD AS CSV", csv, f"documents_{datetime.now():%Y%m%d}.csv", "text/csv", use_container_width=True)
 
-def show_chat_page(system):
-    """Main chat interface - where questions are asked"""
-    
-    # Get current chat history
-    current_chat_id = st.session_state.current_chat_id
-    current_session = next((s for s in st.session_state.chat_sessions if s['id'] == current_chat_id), None)
-    
-    if current_session:
-        chat_history = current_session['history']
-        chat_name = current_session['name']
-    else:
-        chat_history = []
-        chat_name = "New Chat"
-    
-    st.markdown(f'<h2 class="sub-header">CHAT: {chat_name}</h2>', unsafe_allow_html=True)
-    
-    # Chat history for current session
-    if chat_history:
-        for idx, chat in enumerate(chat_history[-20:]):
-            st.markdown(f'<div class="chat-message user-message"><strong>You:</strong><br>{chat["question"]}</div>', unsafe_allow_html=True)
-            
-            answer_id = f"answer_{idx}_{int(time.time())}"
-            st.markdown(f'<div class="chat-message assistant-message"><strong>1421 AI:</strong><br><div id="{answer_id}" class="answer-text">{chat["answer"]}</div></div>', unsafe_allow_html=True)
-            
-            # Only trigger typing animation for the latest message
-            if idx == len(chat_history[-20:]) - 1:
-                st.markdown(f'<script>setTimeout(function() {{ typeWriter("{answer_id}", `{chat["answer"].replace("`", "\\`").replace(chr(10), "\\n")}`); scrollToBottom(); }}, 100);</script>', unsafe_allow_html=True)
-            
-            st.markdown(f'<div class="action-buttons"><button class="copy-button" onclick="copyAnswerToClipboard(`{chat["answer"].replace("`", "'").replace(chr(10), "\\n")}`)">Copy Answer</button></div>', unsafe_allow_html=True)
-            
-            st.markdown("**Sources used:**")
-            if 'documents' in chat['sources_used']:
-                st.markdown('<span class="source-badge badge-document">Documents</span>', unsafe_allow_html=True)
-            if 'web' in chat['sources_used']:
-                st.markdown('<span class="source-badge badge-web">Web</span>', unsafe_allow_html=True)
-            
-            with st.expander("DETAILED SOURCES", expanded=False):
-                for res in chat.get('document_results', [])[:3]:
-                    st.markdown(f"**{res.get('title', 'Unknown')}**")
-                    if res.get('author'):
-                        st.markdown(f"*Author: {res['author']}*")
-                    if res.get('url'):
-                        st.markdown(f"[View Source]({res['url']})")
-                    if res.get('snippet'):
-                        st.info(res['snippet'])
-                    st.divider()
-                for res in chat.get('web_results', [])[:2]:
-                    st.markdown(f"**{res.get('title', 'Unknown')}**")
-                    if res.get('url'):
-                        st.markdown(f"[View Source]({res['url']})")
-                    if res.get('snippet'):
-                        st.info(res['snippet'])
-                    st.divider()
-            st.divider()
-    else:
-        # Welcome message for new chat - No emojis
-        st.markdown("""
-        <div style="text-align: center; padding: 50px 20px; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); border-radius: 12px; margin: 30px 0;">
-            <h3 style="color: #2c3e50; margin-bottom: 20px;">Welcome to 1421 AI Chat</h3>
-            <p style="color: #666; font-size: 1.1rem;">Ask any question about Chinese exploration, Zheng He's voyages, or the 1421 theory.</p>
-            <p style="color: #d4af37; margin-top: 20px;">Type your question in the box below to begin...</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    # Add bottom padding for fixed input
-    st.markdown('<div style="height: 100px;"></div>', unsafe_allow_html=True)
-    
-    # Question input at bottom - Fixed position
-    st.markdown("""
-    <div class="question-input-container">
-        <input type="text" id="chat-question-input" placeholder="Ask a question about Chinese exploration, Zheng He, or the 1421 theory...">
-        <button id="chat-research-btn" onclick="document.getElementById('chat_research_btn').click();">Research</button>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Hidden Streamlit components for the fixed input
-    col1, col2 = st.columns([4, 1])
-    with col1:
-        question = st.text_area(
-            "Hidden question",
-            value=st.session_state.current_question,
-            key="chat_question",
-            height=1,
-            label_visibility="collapsed",
-            placeholder=""
-        )
-    with col2:
-        ask = st.button("RESEARCH", type="primary", key="chat_research_btn", use_container_width=True)
-    
-    if (ask or st.session_state.auto_search) and question:
-        st.session_state.auto_search = False
-        with st.spinner("Researching historical records and searching the web..."):
-            result = system.perform_search(question)
-            
-            # Add to current chat session
-            for session in st.session_state.chat_sessions:
-                if session['id'] == st.session_state.current_chat_id:
-                    session['history'].append(result)
-                    # Update chat name based on first question if it's a new chat
-                    if len(session['history']) == 1:
-                        session['name'] = question[:30] + ('...' if len(question) > 30 else '')
-                    break
-            
-            # Auto-save to saved searches
-            SavedSearchesSystem.save_search(
-                question, result['answer'], result['sources_used'],
-                result['document_results'], result['web_results']
-            )
-            st.session_state.current_question = ""
-            st.rerun()
-
 def show_map_page(system):
     st.markdown('<h2 class="sub-header">FULL VOYAGE MAP</h2>', unsafe_allow_html=True)
     
+    # Fullscreen button
+    col1, col2 = st.columns([6, 1])
+    with col2:
+        if st.button("FULLSCREEN", key="fullscreen_btn", use_container_width=True):
+            st.session_state.map_fullscreen = not st.session_state.map_fullscreen
+            st.rerun()
+    
     with st.spinner("Loading geographical data..."):
         try:
-            # FIXED: This method now exists in the ResearchSystem class
             map_data = system.get_map_locations()
             st.session_state.map_data = map_data
             
@@ -1380,7 +1476,7 @@ def show_map_page(system):
                 if st.session_state.animation_playing:
                     if st.session_state.current_year < 1421:
                         st.session_state.current_year += 1
-                        time.sleep(1)  # 1 second per year
+                        time.sleep(1)
                         st.rerun()
                     else:
                         st.session_state.animation_playing = False
@@ -1388,8 +1484,16 @@ def show_map_page(system):
                 # Filter locations by current year
                 filtered_locs = [loc for loc in locations if loc.get('year', 1400) <= st.session_state.current_year]
                 
-                # Create map without title
+                # Create proper world map
                 fig = go.Figure()
+                
+                # Add world map base layer
+                fig.add_trace(go.Scattergeo(
+                    lon=[], lat=[],
+                    mode='markers',
+                    showlegend=False,
+                    hoverinfo='none'
+                ))
                 
                 if filtered_locs:
                     lats = [loc['lat'] for loc in filtered_locs]
@@ -1398,60 +1502,81 @@ def show_map_page(system):
                     years = [loc.get('year', 1400) for loc in filtered_locs]
                     events = [loc.get('event', 'Historical location') for loc in filtered_locs]
                     
+                    # Add location markers
                     fig.add_trace(go.Scattergeo(
                         lon=lons, lat=lats,
                         mode='markers+text',
                         marker=dict(
-                            size=12,
+                            size=[10 + (y - 1368) / 10 for y in years],
                             color=years,
                             colorscale='Viridis',
                             colorbar=dict(title="Year", x=1.02),
                             line=dict(width=1, color='white'),
-                            symbol='circle'
+                            symbol='circle',
+                            opacity=0.8
                         ),
                         text=names,
                         textposition="top center",
+                        textfont=dict(size=10, color='black'),
                         name='Historical Locations',
                         hovertemplate='<b>%{text}</b><br>Year: %{marker.color}<br>Event: %{customdata}<extra></extra>',
                         customdata=events
                     ))
                     
-                    # Add voyage routes
+                    # Add voyage routes with animation
                     if len(filtered_locs) > 2:
                         sorted_locs = sorted(filtered_locs, key=lambda x: x.get('year', 1400))
-                        route_lats = [loc['lat'] for loc in sorted_locs]
-                        route_lons = [loc['lon'] for loc in sorted_locs]
                         
-                        fig.add_trace(go.Scattergeo(
-                            lon=route_lons, lat=route_lats,
-                            mode='lines',
-                            line=dict(width=2, color='#d4af37', dash='dash'),
-                            name='Voyage Route',
-                            hoverinfo='none'
-                        ))
+                        # Create route lines
+                        for i in range(len(sorted_locs) - 1):
+                            fig.add_trace(go.Scattergeo(
+                                lon=[sorted_locs[i]['lon'], sorted_locs[i+1]['lon']],
+                                lat=[sorted_locs[i]['lat'], sorted_locs[i+1]['lat']],
+                                mode='lines',
+                                line=dict(
+                                    width=2, 
+                                    color='#d4af37', 
+                                    dash='solid'
+                                ),
+                                name=f'Route {sorted_locs[i]["year"]}-{sorted_locs[i+1]["year"]}',
+                                hoverinfo='text',
+                                text=f'{sorted_locs[i]["name"]} → {sorted_locs[i+1]["name"]}<br>{sorted_locs[i]["year"]} - {sorted_locs[i+1]["year"]}',
+                                showlegend=False
+                            ))
                 
+                # Update layout for proper world map
                 fig.update_layout(
                     title=None,
                     geo=dict(
-                        showland=True,
-                        landcolor='rgb(243,243,243)',
-                        coastlinecolor='rgb(204,204,204)',
-                        showcountries=True,
-                        countrycolor='rgb(204,204,204)',
-                        showocean=True,
-                        oceancolor='rgb(230,245,255)',
                         projection_type='natural earth',
+                        showland=True,
+                        landcolor='rgb(243, 243, 243)',
+                        countrycolor='rgb(204, 204, 204)',
+                        coastlinecolor='rgb(204, 204, 204)',
+                        showcountries=True,
+                        showocean=True,
+                        oceancolor='rgb(230, 245, 255)',
                         showlakes=True,
-                        lakecolor='rgb(230,245,255)'
+                        lakecolor='rgb(230, 245, 255)',
+                        showrivers=False,
+                        showsubunits=True,
+                        subunitcolor='rgb(204, 204, 204)',
+                        lataxis=dict(range=[-60, 80]),
+                        lonaxis=dict(range=[-180, 180]),
+                        center=dict(lat=20, lon=80)  # Center on Asia/Indian Ocean
                     ),
-                    height=600,
-                    showlegend=True,
-                    margin=dict(l=0, r=0, t=20, b=0)
+                    height=700 if not st.session_state.map_fullscreen else 900,
+                    margin=dict(l=0, r=0, t=0, b=0),
+                    hovermode='closest'
                 )
                 
+                # Display map with world-map class
+                map_container = 'fullscreen-map' if st.session_state.map_fullscreen else 'world-map'
+                st.markdown(f'<div id="voyage-map" class="{map_container}">', unsafe_allow_html=True)
                 st.plotly_chart(fig, use_container_width=True)
+                st.markdown('</div>', unsafe_allow_html=True)
                 
-                # Timeline
+                # Timeline section
                 st.divider()
                 st.subheader("Historical Timeline")
                 
@@ -1460,46 +1585,42 @@ def show_map_page(system):
                     timeline_df = timeline_df[timeline_df['year'] <= st.session_state.current_year]
                     timeline_df = timeline_df.sort_values('year')
                     
+                    # Create timeline chart
                     fig_timeline = go.Figure()
                     
-                    for i, event in enumerate(timeline_events):
-                        if event['year'] <= st.session_state.current_year:
-                            fig_timeline.add_trace(go.Scatter(
-                                x=[event['year'], event['year']],
-                                y=[i, i+0.8],
-                                mode='lines',
-                                line=dict(width=10, color='#d4af37'),
-                                name=event['location'],
-                                hoverinfo='text',
-                                text=f"<b>{event['location']}</b><br>Year: {event['year']}<br>{event['event']}",
-                                showlegend=False
-                            ))
-                    
+                    # Add year markers
                     fig_timeline.add_trace(go.Scatter(
                         x=timeline_df['year'],
-                        y=[0.5] * len(timeline_df),
+                        y=[1] * len(timeline_df),
                         mode='markers+text',
-                        marker=dict(size=8, color='#4a6491'),
+                        marker=dict(
+                            size=[12 + (y - 1368) / 10 for y in timeline_df['year']],
+                            color=timeline_df['year'],
+                            colorscale='Viridis',
+                            showscale=False,
+                            line=dict(width=1, color='white')
+                        ),
                         text=timeline_df['location'],
                         textposition='top center',
-                        hoverinfo='text',
-                        hovertemplate='<b>%{text}</b><br>Year: %{x}<extra></extra>',
-                        name='Locations',
-                        showlegend=False
+                        hovertemplate='<b>%{text}</b><br>Year: %{x}<br>Event: %{customdata}<extra></extra>',
+                        customdata=timeline_df['event'],
+                        name='Events'
                     ))
                     
                     fig_timeline.update_layout(
                         title=f"Exploration Timeline (1368-{st.session_state.current_year})",
                         xaxis_title="Year",
-                        xaxis=dict(range=[1368, 1421]),
-                        yaxis=dict(showticklabels=False, showgrid=False, zeroline=False, range=[0, len(timeline_events)+1]),
-                        height=400,
-                        margin=dict(l=20, r=20, t=40, b=20)
+                        xaxis=dict(range=[1368, 1421], tickmode='linear', tick0=1368, dtick=10),
+                        yaxis=dict(showticklabels=False, showgrid=False, zeroline=False, range=[0, 2]),
+                        height=300,
+                        margin=dict(l=20, r=20, t=40, b=20),
+                        hovermode='closest'
                     )
                     
                     st.plotly_chart(fig_timeline, use_container_width=True)
                     
-                    with st.expander("Timeline Details", expanded=True):
+                    # Timeline details
+                    with st.expander("TIMELINE DETAILS", expanded=False):
                         for year in sorted(timeline_df['year'].unique()):
                             year_events = timeline_df[timeline_df['year'] == year]
                             st.markdown(f"### {year}")
@@ -1638,6 +1759,7 @@ def render_left_sidebar():
         # Navigation - Yellow background with black text
         pages = [
             ("DASHBOARD", "dashboard"),
+            ("CHAT", "chat"),
             ("RESEARCH DOCUMENTS", "documents"),
             ("FULL VOYAGE MAP", "map"),
             ("ANALYTICS", "analytics"),
@@ -1667,7 +1789,6 @@ def render_left_sidebar():
             ''', unsafe_allow_html=True)
         
         # Chat History and Saved Searches - Below Settings
-        # This will appear after the navigation buttons and system status
         SavedSearchesSystem.render_left_sidebar_chat_history()
 
 # ========== MAIN ==========
@@ -1698,6 +1819,8 @@ def main():
     # Main content area - full width
     if st.session_state.current_page == "dashboard":
         show_dashboard(system)
+    elif st.session_state.current_page == "chat":
+        show_chat_page(system)
     elif st.session_state.current_page == "documents":
         show_documents_page(system)
     elif st.session_state.current_page == "map":
@@ -1708,10 +1831,6 @@ def main():
         show_settings_page(system)
     elif st.session_state.current_page == "feedback":
         FeedbackSystem.render_feedback_page()
-    
-    # Chat interface - shown on all pages except dashboard
-    if st.session_state.current_page != "dashboard":
-        show_chat_page(system)
 
 @st.cache_resource
 def init_system():
