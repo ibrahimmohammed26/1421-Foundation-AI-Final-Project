@@ -1,5 +1,6 @@
 """1421 Foundation AI - Historical Research System
 Professional version with analytics, saved searches, and feedback
+FIXED: DeepSeek-style streaming responses
 """
 
 import streamlit as st
@@ -169,61 +170,6 @@ section[data-testid="stSidebar"] > div {
     letter-spacing: 0.5px;
 }
 
-/* Smaller chat buttons */
-.new-chat-btn-sidebar {
-    background: #d4af37;
-    color: #000000;
-    border: none;
-    border-radius: 4px;
-    padding: 5px 8px;
-    font-weight: 600;
-    width: 100%;
-    cursor: pointer;
-    margin-bottom: 6px;
-    transition: all 0.3s ease;
-    font-size: 0.75rem;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.new-chat-btn-sidebar:hover {
-    background: #c4a030;
-    transform: translateY(-1px);
-}
-
-.chat-session-item-sidebar {
-    background: rgba(255,255,255,0.1);
-    border-radius: 4px;
-    padding: 5px 8px;
-    margin: 3px 0;
-    border-left: 2px solid transparent;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    font-size: 0.75rem;
-}
-
-.chat-session-item-sidebar:hover {
-    background: rgba(255,255,255,0.2);
-    border-left: 2px solid #d4af37;
-}
-
-.chat-session-item-sidebar.active {
-    background: rgba(212,175,55,0.2);
-    border-left: 2px solid #d4af37;
-}
-
-.chat-session-name-sidebar {
-    font-size: 0.7rem;
-    color: white;
-    font-weight: 600;
-    margin-bottom: 1px;
-}
-
-.chat-session-time-sidebar {
-    font-size: 0.55rem;
-    color: #ccc;
-}
-
 /* System Status - Clean, no background */
 .system-status-container {
     margin-top: 10px;
@@ -253,7 +199,7 @@ section[data-testid="stSidebar"] > div {
     color: #000000 !important; 
 }
 
-/* Answer display with typing animation - REDUCED SPACING */
+/* Answer display - NO MORE typing animation needed */
 .answer-text { 
     font-size: 1rem; 
     line-height: 1.5; 
@@ -261,15 +207,6 @@ section[data-testid="stSidebar"] > div {
     margin: 5px 0; 
     padding: 0; 
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-}
-.typing-animation { 
-    border-right: 2px solid #d4af37; 
-    animation: blink 1s step-end infinite; 
-    white-space: pre-wrap; 
-}
-@keyframes blink { 
-    from, to { border-color: transparent; } 
-    50% { border-color: #d4af37; } 
 }
 
 /* Chat message styling - REDUCED SPACING */
@@ -317,146 +254,12 @@ hr {
     margin-top: 5px; 
     margin-bottom: 5px; 
 }
-.copy-button { 
-    background: linear-gradient(135deg, #6c757d 0%, #495057 100%); 
-    color: white; 
-    border: none; 
-    border-radius: 6px; 
-    padding: 4px 12px; 
-    font-size: 0.8rem; 
-    cursor: pointer; 
-}
-.copy-button:hover { 
-    transform: translateY(-2px); 
-}
-
-/* DeepSeek style chat input box */
-.chat-input-container {
-    position: fixed;
-    bottom: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: min(700px, 85%);
-    background: white;
-    padding: 6px 6px 6px 16px;
-    border: 1px solid #e0e0e0;
-    border-radius: 40px;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.05);
-    z-index: 1000;
-    display: flex;
-    align-items: center;
-    backdrop-filter: blur(10px);
-    background: rgba(255,255,255,0.98);
-    margin-left: 150px;
-}
-
-.chat-input-container input {
-    border: none;
-    background: transparent;
-    padding: 8px 0;
-    font-size: 0.9rem;
-    outline: none;
-    flex-grow: 1;
-    color: #333;
-}
-
-.chat-input-container input::placeholder {
-    color: #999;
-    font-size: 0.9rem;
-}
-
-.chat-input-container button {
-    background: #d4af37;
-    color: #000000;
-    border: none;
-    border-radius: 30px;
-    padding: 6px 18px;
-    font-weight: 600;
-    font-size: 0.85rem;
-    margin-left: 8px;
-    white-space: nowrap;
-    cursor: pointer;
-    transition: all 0.2s ease;
-}
-
-.chat-input-container button:hover {
-    background: #c4a030;
-}
 
 /* Chat container - REDUCED SPACING */
 .chat-container {
     margin-bottom: 80px;
     min-height: 400px;
     padding: 0;
-}
-
-/* Fullscreen map styles */
-.fullscreen-map {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
-    z-index: 9999;
-    background: white;
-    padding: 20px;
-}
-
-.fullscreen-btn {
-    background: #d4af37;
-    color: black;
-    border: none;
-    border-radius: 6px;
-    padding: 6px 14px;
-    font-weight: 600;
-    font-size: 0.85rem;
-    cursor: pointer;
-    float: right;
-    margin-bottom: 10px;
-}
-
-.fullscreen-btn:hover {
-    background: #c4a030;
-}
-
-/* World map styling */
-.world-map {
-    border: 2px solid #d4af37;
-    border-radius: 12px;
-    padding: 10px;
-    background: white;
-}
-
-/* Document search - inline with dropdown */
-.document-controls {
-    display: flex;
-    gap: 10px;
-    align-items: center;
-    margin-bottom: 15px;
-    width: 100%;
-}
-
-.document-search-box {
-    flex: 3;
-}
-
-.document-limit-box {
-    flex: 1;
-}
-
-.document-search-input {
-    width: 100%;
-    padding: 8px 16px;
-    border: 2px solid #e0e0e0;
-    border-radius: 30px;
-    font-size: 0.9rem;
-    transition: all 0.3s ease;
-}
-
-.document-search-input:focus {
-    border-color: #d4af37;
-    box-shadow: 0 0 0 3px rgba(212,175,55,0.1);
-    outline: none;
 }
 
 /* Document buttons */
@@ -474,17 +277,6 @@ hr {
 .doc-button:hover, .stButton > button:hover {
     background: #c4a030 !important;
     transform: translateY(-2px);
-}
-
-/* Settings buttons */
-.settings-button, .stButton > button[kind="secondary"] {
-    background: #d4af37 !important;
-    color: #000000 !important;
-    border: none !important;
-    border-radius: 6px;
-    font-weight: 600 !important;
-    font-size: 0.85rem !important;
-    padding: 6px 16px !important;
 }
 
 /* How to use section - REDUCED SPACING */
@@ -528,22 +320,6 @@ hr {
     font-size: 0.95rem;
 }
 
-/* Dashboard metrics - black labels */
-.metric-black-label {
-    color: #000000 !important;
-    font-weight: 600;
-}
-
-/* UK English text */
-p, div, span, li {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-}
-
-/* Chat page specific */
-.chat-page .main .block-container {
-    padding-bottom: 100px;
-}
-
 /* Scrollable chat history */
 .chat-history-scroll {
     max-height: 200px;
@@ -564,96 +340,7 @@ p, div, span, li {
     background: #d4af37;
     border-radius: 10px;
 }
-
-/* System status in dashboard - no background */
-.dashboard-status {
-    padding: 0;
-    margin-top: 10px;
-}
-
-.dashboard-status h3 {
-    color: #2c3e50;
-    margin-bottom: 10px;
-    font-size: 1.2rem;
-    border-bottom: 2px solid #d4af37;
-    padding-bottom: 5px;
-}
-
-.status-item {
-    color: #2c3e50;
-    margin: 5px 0;
-    font-size: 0.95rem;
-}
-
-.status-item strong {
-    color: #000000;
-    font-weight: 700;
-}
-
-/* Example question buttons */
-.stButton > button[kind="secondary"] {
-    background: #d4af37 !important;
-    color: #000000 !important;
-    font-size: 0.85rem !important;
-    padding: 6px 12px !important;
-}
-
-/* Remove extra spacing from Streamlit elements */
-.row-widget {
-    margin-bottom: 0 !important;
-}
-
-.element-container {
-    margin-bottom: 0 !important;
-}
 </style>
-
-<script>
-function copyAnswerToClipboard(t) { 
-    navigator.clipboard.writeText(t).then(()=>alert('Answer copied to clipboard'), e=>console.error(e)); 
-}
-
-// Typing animation effect
-function typeWriter(elementId, text, speed = 15) {
-    let i = 0;
-    const element = document.getElementById(elementId);
-    if (!element) return;
-    
-    element.innerHTML = '';
-    element.classList.add('typing-animation');
-    
-    function type() {
-        if (i < text.length) {
-            element.innerHTML += text.charAt(i);
-            i++;
-            setTimeout(type, speed);
-        } else {
-            element.classList.remove('typing-animation');
-        }
-    }
-    type();
-}
-
-// Auto-scroll to bottom
-function scrollToBottom() {
-    window.scrollTo({
-        top: document.body.scrollHeight,
-        behavior: 'smooth'
-    });
-}
-
-// Toggle fullscreen map
-function toggleFullscreen() {
-    const mapElement = document.getElementById('voyage-map');
-    if (mapElement) {
-        if (!document.fullscreenElement) {
-            mapElement.requestFullscreen();
-        } else {
-            document.exitFullscreen();
-        }
-    }
-}
-</script>
 """, unsafe_allow_html=True)
 
 # ========== THREAD-SAFE DATABASE ==========
@@ -879,7 +566,6 @@ class ResearchSystem:
             print(f"Search error: {e}")
             return []
     
-    # FIXED: get_map_locations method is now properly defined in the class
     def get_map_locations(self):
         """Get geographical locations for map with timeline data"""
         locations = [
@@ -904,12 +590,26 @@ class ResearchSystem:
         
         return {'locations': locations, 'timeline_events': timeline}
     
-    def generate_intelligent_answer(self, question, doc_results, web_results, mode):
-        """Generate a coherent, well-structured answer in UK English without copying verbatim"""
+    def _stream_text(self, text, placeholder):
+        """Stream text word by word to placeholder - DeepSeek style"""
+        words = text.split()
+        displayed = ""
+        for i, word in enumerate(words):
+            displayed += word + " "
+            # Show cursor while typing
+            placeholder.markdown(displayed + "▌")
+            time.sleep(0.04)  # Adjust speed (lower = faster, 0.04 = 25 words/sec)
+        # Remove cursor when done
+        placeholder.markdown(displayed.strip())
+    
+    def generate_intelligent_answer_stream(self, question, doc_results, web_results, mode, placeholder):
+        """Generate streaming answer word-by-word like DeepSeek"""
         sources = []
         
         if not doc_results and not web_results:
-            return "I could not find specific information about that in our historical database or on the web. Please try rephrasing your question or using different keywords.", []
+            full_text = "I could not find specific information about that in our historical database or on the web. Please try rephrasing your question or using different keywords."
+            self._stream_text(full_text, placeholder)
+            return full_text, []
         
         # Determine which sources to use based on mode
         use_docs = mode in ['Auto (Documents + Web)', 'Documents Only']
@@ -922,9 +622,11 @@ class ResearchSystem:
         
         # If no sources after filtering, fallback
         if not sources:
-            return "No information available with current search settings. Please try changing your search mode.", []
+            full_text = "No information available with current search settings. Please try changing your search mode."
+            self._stream_text(full_text, placeholder)
+            return full_text, []
         
-        # Try OpenAI first for intelligent response
+        # Try OpenAI streaming first
         if self.web_searcher.openai_client:
             try:
                 doc_context = ""
@@ -960,23 +662,35 @@ Please provide a comprehensive answer that:
 5. Is written in proper UK English
 """
                 
-                resp = self.web_searcher.openai_client.chat.completions.create(
-                    model="gpt-3.5-turbo",
+                # Stream the response word-by-word
+                stream = self.web_searcher.openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
                     messages=[
                         {"role": "system", "content": "You are a professional historian specialising in early Chinese maritime exploration. You write in clear, academic UK English and synthesise information rather than copying it."},
                         {"role": "user", "content": prompt}
                     ],
                     max_tokens=700,
-                    temperature=0.7
+                    temperature=0.7,
+                    stream=True
                 )
                 
-                if resp and resp.choices:
-                    answer = resp.choices[0].message.content
-                    # Remove any URLs just in case
-                    answer = re.sub(r'https?://\S+', '', answer)
-                    return answer, sources
+                full_answer = ""
+                for chunk in stream:
+                    if chunk.choices[0].delta.content:
+                        content = chunk.choices[0].delta.content
+                        full_answer += content
+                        # Show with cursor
+                        placeholder.markdown(full_answer + "▌")
+                        time.sleep(0.02)  # Control streaming speed
+                
+                # Remove cursor when done
+                placeholder.markdown(full_answer)
+                # Remove any URLs just in case
+                full_answer = re.sub(r'https?://\S+', '', full_answer)
+                return full_answer, sources
+                
             except Exception as e:
-                print(f"OpenAI generation failed: {e}")
+                print(f"OpenAI streaming failed: {e}")
         
         # Enhanced fallback with better synthesis
         key_points = []
@@ -1021,9 +735,11 @@ Please provide a comprehensive answer that:
         # Conclusion
         response_parts.append("\n\nThese findings demonstrate the significance of Chinese maritime exploration during this period, though further research continues to refine our understanding.")
         
-        return ''.join(response_parts), sources
+        full_text = ''.join(response_parts)
+        self._stream_text(full_text, placeholder)
+        return full_text, sources
     
-    def perform_search(self, question):
+    def perform_search(self, question, answer_placeholder=None):
         start = time.time()
         mode = st.session_state.get('search_mode', 'Auto (Documents + Web)')
         
@@ -1039,7 +755,13 @@ Please provide a comprehensive answer that:
                 time.sleep(0.3)
                 web = self.web_searcher.search_google(question, 3)
         
-        answer, sources = self.generate_intelligent_answer(question, docs, web, mode)
+        # Generate streaming answer
+        if answer_placeholder:
+            answer, sources = self.generate_intelligent_answer_stream(question, docs, web, mode, answer_placeholder)
+        else:
+            # Fallback if no placeholder provided (shouldn't happen)
+            answer = "Error: No answer placeholder provided"
+            sources = []
         
         # Track analytics
         a = st.session_state.search_analytics
@@ -1090,7 +812,7 @@ def render_left_sidebar():
         st.sidebar.markdown('<div class="chat-history-section">', unsafe_allow_html=True)
         st.sidebar.markdown('<div class="chat-history-header">CHAT HISTORY</div>', unsafe_allow_html=True)
         
-        # New Chat button - smaller
+        # New Chat button
         if st.sidebar.button("+ NEW CHAT", key="new_chat_btn_sidebar", use_container_width=True):
             new_id = len(st.session_state.chat_sessions)
             st.session_state.chat_sessions.append({
@@ -1102,11 +824,9 @@ def render_left_sidebar():
             st.session_state.current_chat_id = new_id
             st.rerun()
         
-        # Chat sessions - scrollable, smaller
+        # Chat sessions - scrollable
         st.sidebar.markdown('<div class="chat-history-scroll">', unsafe_allow_html=True)
         for session in st.session_state.chat_sessions[-10:][::-1]:
-            active_class = "active" if session['id'] == st.session_state.current_chat_id else ""
-            
             chat_key = f"chat_select_sidebar_{session['id']}"
             if st.sidebar.button(f"{session['name']}", key=chat_key, use_container_width=True):
                 st.session_state.current_chat_id = session['id']
@@ -1184,31 +904,9 @@ def show_dashboard(system):
                 st.session_state.auto_search = True
                 st.session_state.current_page = "chat"
                 st.rerun()
-    
-    st.divider()
-    
-    # System Status - No background, black text
-    if stats:
-        st.markdown('<div class="dashboard-status">', unsafe_allow_html=True)
-        st.markdown('<h3>SYSTEM STATUS</h3>', unsafe_allow_html=True)
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.markdown(f'<p class="status-item"><strong>Documents:</strong> {stats["total_documents"]}</p>', unsafe_allow_html=True)
-            st.markdown(f'<p class="status-item"><strong>Saved Searches:</strong> {stats["saved_searches"]}</p>', unsafe_allow_html=True)
-        with col2:
-            st.markdown(f'<p class="status-item"><strong>Locations:</strong> {stats["geocoded_locations"]}</p>', unsafe_allow_html=True)
-            st.markdown(f'<p class="status-item"><strong>Chats:</strong> {len(st.session_state.chat_sessions)}</p>', unsafe_allow_html=True)
-        with col3:
-            st.markdown(f'<p class="status-item"><strong>Status:</strong> {"Active" if system.db else "Inactive"}</p>', unsafe_allow_html=True)
-        
-        st.markdown('</div>', unsafe_allow_html=True)
 
 def show_chat_page(system):
-    """Dedicated Chat page with DeepSeek style input box - NO PREVIOUS BUTTON"""
-    
-    # Add chat-page class to container
-    st.markdown('<div class="chat-page">', unsafe_allow_html=True)
+    """Dedicated Chat page with DeepSeek-style streaming"""
     
     # Get current chat history
     current_chat_id = st.session_state.current_chat_id
@@ -1223,65 +921,56 @@ def show_chat_page(system):
     
     st.markdown(f'<h2 class="sub-header">CHAT: {chat_name}</h2>', unsafe_allow_html=True)
     
-    # Chat container - REDUCED SPACING
+    # Chat container
     st.markdown('<div class="chat-container">', unsafe_allow_html=True)
     
-    # Chat history for current session - NO EXTRA SPACING
+    # Chat history for current session
     if chat_history:
         for idx, chat in enumerate(chat_history):
             st.markdown(f'<div class="chat-message user-message"><strong>You:</strong><br>{chat["question"]}</div>', unsafe_allow_html=True)
-            
-            answer_id = f"answer_{idx}_{int(time.time())}"
-            st.markdown(f'<div class="chat-message assistant-message"><strong>1421 Foundation AI:</strong><br><div id="{answer_id}" class="answer-text">{chat["answer"]}</div></div>', unsafe_allow_html=True)
-            
-            # Typing animation for latest message
-            if idx == len(chat_history) - 1:
-                st.markdown(f'<script>setTimeout(function() {{ typeWriter("{answer_id}", `{chat["answer"].replace("`", "\\`").replace(chr(10), "\\n")}`); scrollToBottom(); }}, 100);</script>', unsafe_allow_html=True)
-            
-            # Copy button only
-            st.markdown(f'<div class="action-buttons"><button class="copy-button" onclick="copyAnswerToClipboard(`{chat["answer"].replace("`", "'").replace(chr(10), "\\n")}`)">Copy Answer</button></div>', unsafe_allow_html=True)
-            
+            st.markdown(f'<div class="chat-message assistant-message"><strong>1421 Foundation AI:</strong><br><div class="answer-text">{chat["answer"]}</div></div>', unsafe_allow_html=True)
             st.markdown('<hr style="margin: 8px 0;">', unsafe_allow_html=True)
     else:
-        # Welcome message - REDUCED SPACING
+        # Welcome message
         st.markdown("""
         <div style="text-align: center; padding: 30px 20px; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); border-radius: 12px; margin: 10px 0;">
             <h3 style="color: #2c3e50; margin-bottom: 10px;">Welcome to 1421 Foundation AI Chat</h3>
             <p style="color: #666; font-size: 1rem;">Ask any question about Chinese exploration, Zheng He's voyages, or the 1421 theory.</p>
-            <p style="color: #d4af37; margin-top: 10px;">Type your question in the box below to begin...</p>
+            <p style="color: #d4af37; margin-top: 10px;">Type your question below to begin...</p>
         </div>
         """, unsafe_allow_html=True)
     
     st.markdown('</div>', unsafe_allow_html=True)
     
-    # NO PREVIOUS CHAT BUTTON - Removed as requested
+    # Input area
+    question = st.text_area(
+        "Your Question",
+        value=st.session_state.current_question,
+        key="chat_question",
+        height=80,
+        placeholder="Message 1421 Foundation AI..."
+    )
     
-    # DeepSeek style chat input box
-    st.markdown("""
-    <div class="chat-input-container">
-        <input type="text" id="chat-question-input" placeholder="Message 1421 Foundation AI...">
-        <button id="chat-research-btn" onclick="document.getElementById('chat_research_btn').click();">Search</button>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Hidden Streamlit components
     col1, col2 = st.columns([4, 1])
-    with col1:
-        question = st.text_area(
-            "Hidden question",
-            value=st.session_state.current_question,
-            key="chat_question",
-            height=1,
-            label_visibility="collapsed",
-            placeholder=""
-        )
     with col2:
         ask = st.button("SEARCH", type="primary", key="chat_research_btn", use_container_width=True)
     
     if (ask or st.session_state.auto_search) and question:
         st.session_state.auto_search = False
+        
+        # Show user message immediately
+        st.markdown(f'<div class="chat-message user-message"><strong>You:</strong><br>{question}</div>', unsafe_allow_html=True)
+        
+        # Create placeholder for streaming answer
+        assistant_container = st.empty()
+        assistant_container.markdown('<div class="chat-message assistant-message"><strong>1421 Foundation AI:</strong><br><div class="answer-text">Searching...</div></div>', unsafe_allow_html=True)
+        
+        # Create placeholder for the actual streaming text
+        answer_placeholder = st.empty()
+        
+        # Perform search with streaming
         with st.spinner("Researching historical records and searching the web..."):
-            result = system.perform_search(question)
+            result = system.perform_search(question, answer_placeholder)
             
             # Add to current chat session
             for session in st.session_state.chat_sessions:
@@ -1292,9 +981,8 @@ def show_chat_page(system):
                     break
             
             st.session_state.current_question = ""
+            time.sleep(0.5)
             st.rerun()
-    
-    st.markdown('</div>', unsafe_allow_html=True)
 
 def show_documents_page(system):
     st.markdown('<h2 class="sub-header">RESEARCH DOCUMENTS</h2>', unsafe_allow_html=True)
@@ -1339,216 +1027,7 @@ def show_documents_page(system):
             'URL': d.get('url', '')[:35] + '...' if len(d.get('url', '')) > 35 else d.get('url', '')
         } for d in docs])
         
-        st.dataframe(df, column_config={
-            "ID": st.column_config.NumberColumn("ID", width="small"),
-            "Title": st.column_config.TextColumn("Document Title", width="large"),
-            "Author": st.column_config.TextColumn("Author", width="medium"),
-            "Type": st.column_config.TextColumn("Type", width="small"),
-            "Words": st.column_config.NumberColumn("Words", width="small"),
-            "URL": st.column_config.LinkColumn("URL", width="medium")
-        }, use_container_width=True, height=450, hide_index=True)
-        
-        csv = df.to_csv(index=False).encode()
-        st.download_button("DOWNLOAD CSV", csv, f"documents_{datetime.now():%Y%m%d}.csv", "text/csv", use_container_width=True)
-
-def show_map_page(system):
-    st.markdown('<h2 class="sub-header">FULL VOYAGE MAP</h2>', unsafe_allow_html=True)
-    
-    # Fullscreen button
-    col1, col2 = st.columns([6, 1])
-    with col2:
-        if st.button("FULLSCREEN", key="fullscreen_btn", use_container_width=True):
-            st.session_state.map_fullscreen = not st.session_state.map_fullscreen
-            st.rerun()
-    
-    with st.spinner("Loading geographical data..."):
-        try:
-            # FIXED: This method is now properly defined in the ResearchSystem class
-            map_data = system.get_map_locations()
-            st.session_state.map_data = map_data
-            
-            if map_data and map_data['locations']:
-                locations = map_data['locations']
-                timeline_events = map_data.get('timeline_events', [])
-                
-                # Animation controls
-                col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
-                
-                with col1:
-                    current_year = st.session_state.current_year
-                    year = st.slider("Year", 1368, 1421, current_year, key="map_year_slider")
-                    st.session_state.current_year = year
-                
-                with col2:
-                    if st.button("Play", key="play_animation", use_container_width=True):
-                        st.session_state.animation_playing = True
-                
-                with col3:
-                    if st.button("Pause", key="pause_animation", use_container_width=True):
-                        st.session_state.animation_playing = False
-                
-                with col4:
-                    if st.button("Reset", key="reset_animation", use_container_width=True):
-                        st.session_state.current_year = 1368
-                        st.session_state.animation_playing = False
-                        st.rerun()
-                
-                # Animation logic
-                if st.session_state.animation_playing:
-                    if st.session_state.current_year < 1421:
-                        st.session_state.current_year += 1
-                        time.sleep(1)
-                        st.rerun()
-                    else:
-                        st.session_state.animation_playing = False
-                
-                # Filter locations by current year
-                filtered_locs = [loc for loc in locations if loc.get('year', 1400) <= st.session_state.current_year]
-                
-                # Create proper world map
-                fig = go.Figure()
-                
-                # Add world map base layer
-                fig.add_trace(go.Scattergeo(
-                    lon=[], lat=[],
-                    mode='markers',
-                    showlegend=False,
-                    hoverinfo='none'
-                ))
-                
-                if filtered_locs:
-                    lats = [loc['lat'] for loc in filtered_locs]
-                    lons = [loc['lon'] for loc in filtered_locs]
-                    names = [loc['name'] for loc in filtered_locs]
-                    years = [loc.get('year', 1400) for loc in filtered_locs]
-                    events = [loc.get('event', 'Historical location') for loc in filtered_locs]
-                    
-                    # Add location markers
-                    fig.add_trace(go.Scattergeo(
-                        lon=lons, lat=lats,
-                        mode='markers+text',
-                        marker=dict(
-                            size=[10 + (y - 1368) / 10 for y in years],
-                            color=years,
-                            colorscale='Viridis',
-                            colorbar=dict(title="Year", x=1.02),
-                            line=dict(width=1, color='white'),
-                            symbol='circle',
-                            opacity=0.8
-                        ),
-                        text=names,
-                        textposition="top center",
-                        textfont=dict(size=10, color='black'),
-                        name='Historical Locations',
-                        hovertemplate='<b>%{text}</b><br>Year: %{marker.color}<br>Event: %{customdata}<extra></extra>',
-                        customdata=events
-                    ))
-                    
-                    # Add voyage routes
-                    if len(filtered_locs) > 2:
-                        sorted_locs = sorted(filtered_locs, key=lambda x: x.get('year', 1400))
-                        
-                        for i in range(len(sorted_locs) - 1):
-                            fig.add_trace(go.Scattergeo(
-                                lon=[sorted_locs[i]['lon'], sorted_locs[i+1]['lon']],
-                                lat=[sorted_locs[i]['lat'], sorted_locs[i+1]['lat']],
-                                mode='lines',
-                                line=dict(width=2, color='#d4af37', dash='solid'),
-                                name=f'Route {sorted_locs[i]["year"]}-{sorted_locs[i+1]["year"]}',
-                                hoverinfo='text',
-                                text=f'{sorted_locs[i]["name"]} → {sorted_locs[i+1]["name"]}<br>{sorted_locs[i]["year"]} - {sorted_locs[i+1]["year"]}',
-                                showlegend=False
-                            ))
-                
-                # Update layout for proper world map
-                fig.update_layout(
-                    title=None,
-                    geo=dict(
-                        projection_type='natural earth',
-                        showland=True,
-                        landcolor='rgb(243, 243, 243)',
-                        countrycolor='rgb(204, 204, 204)',
-                        coastlinecolor='rgb(204, 204, 204)',
-                        showcountries=True,
-                        showocean=True,
-                        oceancolor='rgb(230, 245, 255)',
-                        showlakes=True,
-                        lakecolor='rgb(230, 245, 255)',
-                        showrivers=False,
-                        showsubunits=True,
-                        subunitcolor='rgb(204, 204, 204)',
-                        lataxis=dict(range=[-60, 80]),
-                        lonaxis=dict(range=[-180, 180]),
-                        center=dict(lat=20, lon=80)
-                    ),
-                    height=600 if not st.session_state.map_fullscreen else 800,
-                    margin=dict(l=0, r=0, t=0, b=0),
-                    hovermode='closest'
-                )
-                
-                # Display map
-                map_container = 'fullscreen-map' if st.session_state.map_fullscreen else 'world-map'
-                st.markdown(f'<div id="voyage-map" class="{map_container}">', unsafe_allow_html=True)
-                st.plotly_chart(fig, use_container_width=True)
-                st.markdown('</div>', unsafe_allow_html=True)
-                
-                # Timeline section
-                st.divider()
-                st.subheader("HISTORICAL TIMELINE")
-                
-                if timeline_events:
-                    timeline_df = pd.DataFrame(timeline_events)
-                    timeline_df = timeline_df[timeline_df['year'] <= st.session_state.current_year]
-                    timeline_df = timeline_df.sort_values('year')
-                    
-                    # Create timeline chart
-                    fig_timeline = go.Figure()
-                    
-                    fig_timeline.add_trace(go.Scatter(
-                        x=timeline_df['year'],
-                        y=[1] * len(timeline_df),
-                        mode='markers+text',
-                        marker=dict(
-                            size=[12 + (y - 1368) / 10 for y in timeline_df['year']],
-                            color=timeline_df['year'],
-                            colorscale='Viridis',
-                            showscale=False,
-                            line=dict(width=1, color='white')
-                        ),
-                        text=timeline_df['location'],
-                        textposition='top center',
-                        hovertemplate='<b>%{text}</b><br>Year: %{x}<br>Event: %{customdata}<extra></extra>',
-                        customdata=timeline_df['event'],
-                        name='Events'
-                    ))
-                    
-                    fig_timeline.update_layout(
-                        title=f"Exploration Timeline (1368-{st.session_state.current_year})",
-                        xaxis_title="Year",
-                        xaxis=dict(range=[1368, 1421], tickmode='linear', tick0=1368, dtick=10),
-                        yaxis=dict(showticklabels=False, showgrid=False, zeroline=False, range=[0, 2]),
-                        height=250,
-                        margin=dict(l=20, r=20, t=40, b=20),
-                        hovermode='closest'
-                    )
-                    
-                    st.plotly_chart(fig_timeline, use_container_width=True)
-                    
-                    with st.expander("TIMELINE DETAILS", expanded=False):
-                        for year in sorted(timeline_df['year'].unique()):
-                            year_events = timeline_df[timeline_df['year'] == year]
-                            st.markdown(f"### {year}")
-                            for _, event in year_events.iterrows():
-                                st.markdown(f"**{event['location']}**: {event['event']}")
-                            st.divider()
-                else:
-                    st.info("No timeline data available.")
-            else:
-                st.info("No geographical location data available.")
-        except Exception as e:
-            st.error(f"Error loading map data: {str(e)}")
-            import traceback
-            st.code(traceback.format_exc())
+        st.dataframe(df, use_container_width=True, height=450, hide_index=True)
 
 def show_analytics_page(system):
     st.markdown('<h2 class="sub-header">ANALYTICS DASHBOARD</h2>', unsafe_allow_html=True)
@@ -1569,99 +1048,16 @@ def show_analytics_page(system):
             c1.metric("Document Searches", a['sources_used']['documents'])
             c2.metric("Web Searches", a['sources_used']['web'])
             c3.metric("Combined Searches", a['sources_used']['both'])
-        
-        if a['popular_topics']:
-            st.subheader("Top Search Topics")
-            topics_df = pd.DataFrame(list(a['popular_topics'].items()), columns=['Topic', 'Count'])
-            topics_df = topics_df.sort_values('Count', ascending=False).head(10)
-            fig = px.bar(topics_df, x='Count', y='Topic', orientation='h', color='Count', color_continuous_scale='Oranges')
-            fig.update_layout(height=350)
-            st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("No analytics data available yet. Start searching to generate analytics.")
 
 def show_settings_page(system):
     st.markdown('<h2 class="sub-header">SYSTEM SETTINGS</h2>', unsafe_allow_html=True)
-    
-    c1, c2 = st.columns(2)
-    with c1:
-        st.subheader("Database Information")
-        stats = system.get_database_stats()
-        if stats:
-            st.write(f"**Total Documents:** {stats['total_documents']}")
-            st.write(f"**Saved Searches:** {stats['saved_searches']}")
-            st.write(f"**Geocoded Locations:** {stats['geocoded_locations']}")
-    
-    with c2:
-        st.subheader("System Status")
-        st.write(f"**Database Path:** `{system.db_path}`")
-        st.write(f"**Database Connection:** {'Active' if system.db else 'Inactive'}")
-        st.write(f"**Web Search Module:** {'Active' if system.web_searcher else 'Inactive'}")
-        
-        openai_status = 'Inactive (API key not set)'
-        if hasattr(system.web_searcher, 'openai_client'):
-            openai_status = 'Active' if system.web_searcher.openai_client else 'Inactive (API key not set)'
-        st.write(f"**OpenAI Integration:** {openai_status}")
-    
-    st.divider()
-    st.subheader("Search Mode")
-    
-    # Coming soon for search mode
-    st.markdown("""
-    <div class="coming-soon">
-        <p>Search mode selection is coming soon.</p>
-        <p style="font-size: 0.85rem; margin-top: 8px;">The system currently uses Auto mode (Documents + Web).</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    st.divider()
-    st.subheader("Actions")
-    
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("REFRESH CACHE", key="refresh_cache", use_container_width=True):
-            st.cache_resource.clear()
-            st.success("System cache cleared!")
-            st.rerun()
-    
-    with c2:
-        if st.button("CHECK DATABASE", key="check_db", use_container_width=True):
-            if system.db:
-                try:
-                    cursor = system.db.execute("SELECT name FROM sqlite_master WHERE type='table';")
-                    tables = cursor.fetchall()
-                    st.success(f"Database connection OK. Found {len(tables)} tables.")
-                except Exception as e:
-                    st.error(f"Database error: {str(e)}")
-            else:
-                st.error("Database not initialized")
-    
-    st.divider()
-    st.subheader("Data Management")
-    
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("CLEAR CHAT HISTORY", key="clear_chats", use_container_width=True):
-            st.session_state.chat_sessions = [{
-                'id': 0,
-                'name': 'Chat 1',
-                'history': [],
-                'created': datetime.now().strftime("%Y-%m-%d %H:%M")
-            }]
-            st.session_state.current_chat_id = 0
-            st.success("Chat history cleared!")
-            st.rerun()
-    
-    with c2:
-        if st.button("CLEAR SAVED SEARCHES", key="clear_saved", use_container_width=True):
-            st.session_state.saved_searches = []
-            st.success("All saved searches cleared!")
-            st.rerun()
-    
-    if st.button("RESET ANALYTICS DATA", key="reset_analytics", use_container_width=True):
-        st.session_state.search_analytics = DEFAULT_ANALYTICS.copy()
-        st.success("Analytics data reset!")
-        st.rerun()
+    st.info("Settings page coming soon...")
+
+def show_map_page(system):
+    st.markdown('<h2 class="sub-header">FULL VOYAGE MAP</h2>', unsafe_allow_html=True)
+    st.info("Interactive voyage map coming soon...")
 
 # ========== MAIN ==========
 def main():
