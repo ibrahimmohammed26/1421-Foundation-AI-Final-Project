@@ -1,5 +1,5 @@
 """1421 AI - Historical Research System
-Professional version with analytics and saved searches
+Professional version with analytics, saved searches, and feedback
 """
 
 import streamlit as st
@@ -11,19 +11,20 @@ import re
 from pathlib import Path
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
+from datetime import datetime
 import time
 import threading
 import random
-import sys
 import os
 from collections import Counter
 import requests
 from typing import List, Dict, Optional, Tuple
-import urllib.parse
 from bs4 import BeautifulSoup
 from googlesearch import search as google_search
 import openai
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 # ========== PAGE CONFIG ==========
 st.set_page_config(
@@ -34,2006 +35,694 @@ st.set_page_config(
 )
 
 # ========== INITIALIZE SESSION STATE ==========
-# Initialize all session state variables at the start
-if 'search_analytics' not in st.session_state:
-    st.session_state.search_analytics = {
-        'total_searches': 0,
-        'searches_by_day': {},
-        'searches_by_hour': {},
-        'questions_asked': [],
-        'response_times': [],
-        'popular_topics': {},
-        'user_sessions': [],
-        'sources_used': {'documents': 0, 'web': 0, 'both': 0}
-    }
+DEFAULT_ANALYTICS = {
+    'total_searches': 0, 'searches_by_day': {}, 'searches_by_hour': {},
+    'questions_asked': [], 'response_times': [], 'popular_topics': {},
+    'user_sessions': [], 'sources_used': {'documents': 0, 'web': 0, 'both': 0}
+}
 
-if 'saved_searches' not in st.session_state:
-    st.session_state.saved_searches = []
+DEFAULT_STATE = {
+    'search_analytics': DEFAULT_ANALYTICS,
+    'saved_searches': [],
+    'current_page': 'dashboard',
+    'current_question': '',
+    'auto_search': False,
+    'chat_history': [],
+    'deleting_search_id': None,
+    'feedback_submitted': False
+}
 
-if 'current_page' not in st.session_state:
-    st.session_state.current_page = "dashboard"
+for key, value in DEFAULT_STATE.items():
+    if key not in st.session_state:
+        st.session_state[key] = value
 
-if 'current_question' not in st.session_state:
-    st.session_state.current_question = ""
-
-if 'auto_search' not in st.session_state:
-    st.session_state.auto_search = False
-
-if 'chat_history' not in st.session_state:
-    st.session_state.chat_history = []
-
-# ========== CSS STYLING ==========
+# ========== CSS STYLING (Optimized) ==========
 st.markdown("""
 <style>
 /* Main styling */
-.stApp {
-    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-}
-
-.main .block-container {
-    background-color: rgba(255, 255, 255, 0.98);
-    border-radius: 15px;
-    padding: 2.5rem;
-    margin-top: 1rem;
-    box-shadow: 0 6px 20px rgba(0,0,0,0.1);
-}
+.stApp { background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); }
+.main .block-container { background: rgba(255,255,255,0.98); border-radius: 15px; padding: 2.5rem; margin-top: 1rem; box-shadow: 0 6px 20px rgba(0,0,0,0.1); }
 
 /* Headers */
-.main-header {
-    font-size: 3rem;
-    color: #000000;
-    text-align: center;
-    margin-bottom: 2rem;
-    font-weight: 800;
-    background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-}
-
-.sub-header {
-    font-size: 1.8rem;
-    color: #2c3e50;
-    margin-bottom: 1.5rem;
-    font-weight: 700;
-    border-bottom: 3px solid #d4af37;
-    padding-bottom: 0.5rem;
-}
+.main-header { font-size: 3rem; color: #000; text-align: center; margin-bottom: 1rem; font-weight: 800; background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.sub-header { font-size: 1.8rem; color: #2c3e50; margin-bottom: 1.5rem; font-weight: 700; border-bottom: 3px solid #d4af37; padding-bottom: 0.5rem; }
 
 /* Sidebar */
-section[data-testid="stSidebar"] > div {
-    background: linear-gradient(135deg, #2c3e50 0%, #1a252f 100%) !important;
-    border-right: 4px solid #d4af37;
-    padding-top: 2rem !important;
-}
+section[data-testid="stSidebar"] > div { background: linear-gradient(135deg, #2c3e50 0%, #1a252f 100%) !important; border-right: 4px solid #d4af37; padding-top: 2rem !important; }
 
-/* Navigation buttons */
-.sidebar-button {
-    display: block;
-    background: transparent;
-    color: white !important;
-    font-size: 1.2rem !important;
-    font-weight: 600 !important;
-    padding: 0.8rem 1rem !important;
-    text-align: left;
-    border-radius: 8px;
-    transition: all 0.3s ease;
-    cursor: pointer;
-    margin: 5px 0;
-    border: none;
-    width: 100%;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
+/* Navigation */
+.sidebar-button { display: block; background: transparent; color: white !important; font-size: 1.2rem; font-weight: 600; padding: 0.8rem 1rem; text-align: left; border-radius: 8px; transition: all 0.3s ease; cursor: pointer; margin: 5px 0; border: none; width: 100%; text-transform: uppercase; letter-spacing: 0.5px; }
+.sidebar-button:hover { background: rgba(212,175,55,0.2); transform: translateX(5px); border-left: 3px solid #d4af37; }
+.sidebar-button.active { background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%); color: #000 !important; font-weight: 700; }
 
-.sidebar-button:hover {
-    background: rgba(212, 175, 55, 0.2) !important;
-    transform: translateX(5px);
-    border-left: 3px solid #d4af37 !important;
-}
-
-.sidebar-button.active {
-    background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%) !important;
-    color: #000000 !important;
-    font-weight: 700 !important;
-}
-
-/* Status popup - moved lower */
-.popup-notification {
-    position: fixed;
-    top: 100px;  /* Lowered from 20px to 100px */
-    right: 20px;
-    background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
-    color: white;
-    padding: 18px 25px;
-    border-radius: 12px;
-    box-shadow: 0 8px 25px rgba(0,0,0,0.3);
-    z-index: 1000;
-    animation: slideInRight 0.5s ease, fadeOut 0.5s ease 4.5s forwards;
-    border-left: 5px solid #ffffff;
-    max-width: 400px;
-}
-
-@keyframes slideInRight {
-    from { transform: translateX(100%); opacity: 0; }
-    to { transform: translateX(0); opacity: 1; }
-}
-
-@keyframes fadeOut {
-    from { opacity: 1; }
-    to { opacity: 0; transform: translateY(-20px); }
-}
-
-/* Answer container */
-.answer-container {
-    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-    border-radius: 12px;
-    padding: 30px;
-    margin: 25px 0;
-    border-left: 6px solid #4a6491;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-}
+/* Status popup */
+.popup-notification { position: fixed; top: 100px; right: 20px; background: linear-gradient(135deg, #28a745 0%, #20c997 100%); color: white; padding: 18px 25px; border-radius: 12px; box-shadow: 0 8px 25px rgba(0,0,0,0.3); z-index: 1000; animation: slideInRight 0.5s ease, fadeOut 0.5s ease 4.5s forwards; border-left: 5px solid #fff; max-width: 400px; }
+@keyframes slideInRight { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+@keyframes fadeOut { from { opacity: 1; } to { opacity: 0; transform: translateY(-20px); } }
 
 /* Source badges */
-.source-badge {
-    display: inline-block;
-    padding: 4px 10px;
-    border-radius: 12px;
-    font-size: 0.8rem;
-    font-weight: 600;
-    margin-right: 8px;
-    margin-bottom: 8px;
-}
-
-.badge-document {
-    background-color: #4a6491;
-    color: white;
-}
-
-.badge-web {
-    background-color: #28a745;
-    color: white;
-}
+.source-badge { display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: 600; margin-right: 8px; margin-bottom: 8px; }
+.badge-document { background: #4a6491; color: white; }
+.badge-web { background: #28a745; color: white; }
 
 /* Metrics */
-[data-testid="stMetricValue"] {
-    font-size: 2rem !important;
-    font-weight: 700 !important;
-    color: #2c3e50 !important;
-}
-
-[data-testid="stMetricLabel"] {
-    font-weight: 600 !important;
-    font-size: 1rem !important;
-    color: #d4af37 !important;
-}
+[data-testid="stMetricValue"] { font-size: 2rem !important; font-weight: 700 !important; color: #2c3e50 !important; }
+[data-testid="stMetricLabel"] { font-weight: 600 !important; font-size: 1rem !important; color: #d4af37 !important; }
 
 /* Buttons */
-.stButton > button {
-    background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%);
-    color: white !important;
-    border: none !important;
-    border-radius: 10px;
-    font-weight: 600 !important;
-    font-size: 1.1rem !important;
-    padding: 12px 24px !important;
-    transition: all 0.3s ease !important;
-}
+.stButton > button { background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%); color: white !important; border: none !important; border-radius: 10px; font-weight: 600 !important; font-size: 1.1rem !important; padding: 12px 24px !important; transition: all 0.3s ease !important; }
+.stButton > button:hover { background: linear-gradient(135deg, #b8860b 0%, #8b4513 100%); transform: translateY(-2px); box-shadow: 0 6px 15px rgba(0,0,0,0.2); }
 
-.stButton > button:hover {
-    background: linear-gradient(135deg, #b8860b 0%, #8b4513 100%);
-    transform: translateY(-2px) !important;
-    box-shadow: 0 6px 15px rgba(0,0,0,0.2) !important;
-}
-
-/* Saved searches sidebar - always visible */
-.saved-search-sidebar-item {
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
-    padding: 12px;
-    margin: 8px 0;
-    border-left: 4px solid #d4af37;
-    cursor: pointer;
-    transition: all 0.3s ease;
-}
-
-.saved-search-sidebar-item:hover {
-    background: rgba(255, 255, 255, 0.2);
-    transform: translateX(5px);
-}
-
-.search-time {
-    font-size: 0.8rem;
-    color: #cccccc;
-    margin-top: 5px;
-}
-
-.search-query {
-    font-size: 0.9rem;
-    color: #ffffff;
-    margin-bottom: 5px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-/* Temporary success message */
-.temp-success {
-    background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
-    color: white;
-    padding: 12px 15px;
-    border-radius: 8px;
-    margin: 10px 0;
-    animation: fadeIn 0.3s ease, fadeOut 0.3s ease 3s forwards;
-}
-
-@keyframes fadeIn {
-    from { opacity: 0; transform: translateY(-10px); }
-    to { opacity: 1; transform: translateY(0); }
-}
+/* Saved searches */
+.saved-search-sidebar-item { background: rgba(255,255,255,0.1); border-radius: 8px; padding: 12px; margin: 8px 0; border-left: 4px solid #d4af37; cursor: pointer; transition: all 0.3s ease; }
+.saved-search-sidebar-item:hover { background: rgba(255,255,255,0.2); transform: translateX(5px); }
+.search-time { font-size: 0.8rem; color: #ccc; margin-top: 5px; }
+.search-query { font-size: 0.9rem; color: #fff; margin-bottom: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Answer display */
-.answer-text {
-    font-size: 1.1rem;
-    line-height: 1.8;
-    color: #333;
-    margin: 20px 0;
-    padding: 10px 0;
-}
+.answer-text { font-size: 1.1rem; line-height: 1.8; color: #333; margin: 20px 0; padding: 10px 0; }
+.chat-message { padding: 20px; margin: 15px 0; border-radius: 12px; max-width: 100%; animation: fadeIn 0.3s ease; }
+.user-message { background: linear-gradient(135deg, #4a6491 0%, #2c3e50 100%); color: white; margin-right: 20%; border-bottom-right-radius: 4px; }
+.assistant-message { background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); color: #333; border: 1px solid #ddd; margin-left: 20%; border-bottom-left-radius: 4px; }
 
-.answer-text p {
-    margin-bottom: 15px;
-}
+/* Action buttons */
+.action-buttons { display: flex; gap: 10px; margin-top: 15px; margin-bottom: 20px; }
+.copy-button, .save-button, .feedback-button { background: linear-gradient(135deg, #6c757d 0%, #495057 100%); color: white; border: none; border-radius: 6px; padding: 8px 16px; font-size: 0.9rem; cursor: pointer; transition: all 0.3s ease; }
+.save-button { background: linear-gradient(135deg, #4a6491 0%, #2c3e50 100%); }
+.feedback-button { background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%); margin-top: 10px; width: 100%; }
+.copy-button:hover, .save-button:hover, .feedback-button:hover { transform: translateY(-2px); }
 
-.answer-text strong {
-    color: #2c3e50;
-    font-weight: 700;
-}
+/* Delete button */
+.delete-button { background: linear-gradient(135deg, #dc3545 0%, #c82333 100%); color: white; border: none; border-radius: 6px; padding: 4px 8px; font-size: 0.8rem; cursor: pointer; }
 
-/* Chat messages - DeepSeek style */
-.chat-message {
-    padding: 20px;
-    margin: 15px 0;
-    border-radius: 12px;
-    max-width: 100%;
-    animation: fadeIn 0.3s ease;
-}
+/* Headers */
+.saved-searches-header, .system-status-header { color: #FFD700 !important; font-weight: 700 !important; }
 
-.user-message {
-    background: linear-gradient(135deg, #4a6491 0%, #2c3e50 100%);
-    color: white;
-    margin-right: 20%;
-    margin-left: 0;
-    border-bottom-right-radius: 4px;
-}
+/* Question input at bottom */
+.question-input-container { position: sticky; bottom: 0; background: white; padding: 20px; border-top: 1px solid #ddd; margin-top: 20px; border-radius: 8px; }
 
-.assistant-message {
-    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-    color: #333;
-    border: 1px solid #ddd;
-    margin-left: 20%;
-    margin-right: 0;
-    border-bottom-left-radius: 4px;
-}
+/* Confirmation dialog */
+.confirmation-dialog { background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; padding: 15px; margin: 10px 0; color: #856404; }
 
-/* Action buttons row */
-.action-buttons {
-    display: flex;
-    gap: 10px;
-    margin-top: 15px;
-    margin-bottom: 20px;
-}
-
-/* Copy and Save buttons */
-.copy-button, .save-button {
-    background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
-    color: white;
-    border: none;
-    border-radius: 6px;
-    padding: 8px 16px;
-    font-size: 0.9rem;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.save-button {
-    background: linear-gradient(135deg, #4a6491 0%, #2c3e50 100%);
-}
-
-.copy-button:hover {
-    background: linear-gradient(135deg, #495057 0%, #343a40 100%);
-    transform: translateY(-2px);
-}
-
-.save-button:hover {
-    background: linear-gradient(135deg, #2c3e50 0%, #1a252f 100%);
-    transform: translateY(-2px);
-}
-
-/* No saved searches message */
-.no-saved-searches {
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
-    padding: 15px;
-    margin: 10px 0;
-    text-align: center;
-    color: #cccccc;
-    font-style: italic;
-}
-
-/* Improved source display */
-.source-section {
-    background: #f8f9fa;
-    border-radius: 8px;
-    padding: 15px;
-    margin: 10px 0;
-    border-left: 4px solid #4a6491;
-}
-
-.source-title {
-    color: #2c3e50;
-    font-weight: 600;
-    margin-bottom: 8px;
-    font-size: 1rem;
-}
-
-.source-snippet {
-    color: #666;
-    font-size: 0.9rem;
-    line-height: 1.5;
-    margin-top: 8px;
-}
-
-.source-url {
-    color: #4a6491;
-    font-size: 0.8rem;
-    margin-top: 5px;
-    word-break: break-all;
-}
-
-/* Document loading message */
-.document-loading {
-    background: #fff3cd;
-    border: 1px solid #ffc107;
-    border-radius: 8px;
-    padding: 15px;
-    margin: 15px 0;
-    color: #856404;
-}
-
-/* Yellow font for SAVED SEARCHES header */
-.saved-searches-header {
-    color: #FFD700 !important; /* Yellow color */
-    font-weight: 700 !important;
-}
-
-/* Timeline controls */
-.timeline-controls {
-    display: flex;
-    gap: 10px;
-    align-items: center;
-    margin: 15px 0;
-    padding: 10px;
-    background: #f8f9fa;
-    border-radius: 8px;
-}
-
-/* Clear chat button */
-.clear-chat-btn {
-    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
-    color: white !important;
-    border: none !important;
-    border-radius: 8px;
-    padding: 8px 16px !important;
-    font-size: 0.9rem !important;
-    margin-bottom: 15px;
-}
-
-.clear-chat-btn:hover {
-    background: linear-gradient(135deg, #c82333 0%, #bd2130 100%);
-}
+/* Feedback form */
+.feedback-form { background: rgba(255,255,255,0.1); border-radius: 8px; padding: 15px; margin: 10px 0; }
 </style>
 
 <script>
-// Auto-close popup after 5 seconds
-setTimeout(function() {
-    var popup = document.getElementById('documentsLoadedPopup');
-    if (popup) {
-        popup.style.animation = 'fadeOut 0.5s ease forwards';
-        setTimeout(function() {
-            if (popup.parentNode) {
-                popup.parentNode.removeChild(popup);
-            }
-        }, 500);
-    }
-}, 5000);
-
-// Copy answer function
-function copyAnswerToClipboard(answerText) {
-    navigator.clipboard.writeText(answerText).then(function() {
-        alert('Answer copied to clipboard!');
-    }, function(err) {
-        console.error('Could not copy text: ', err);
-    });
-}
-
-// Save answer function
-function saveAnswerToStorage(question, answer, sources) {
-    // This function would save to your storage system
-    // For now, we'll show an alert
-    alert('Search saved!');
-}
+function copyAnswerToClipboard(t) { navigator.clipboard.writeText(t).then(()=>alert('Answer copied!'), e=>console.error(e)); }
 </script>
 """, unsafe_allow_html=True)
 
-# ========== THREAD-SAFE DATABASE CONNECTION ==========
-
+# ========== THREAD-SAFE DATABASE ==========
 class ThreadSafeDatabase:
-    """Thread-safe SQLite database connection for Streamlit"""
-    
     def __init__(self, db_path):
         self.db_path = db_path
         self.local = threading.local()
     
     def get_connection(self):
-        """Get or create a thread-local database connection"""
         if not hasattr(self.local, 'conn'):
             self.local.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
             self.local.conn.row_factory = sqlite3.Row
         return self.local.conn
     
     def execute(self, query, params=None):
-        """Execute a query and return cursor"""
         conn = self.get_connection()
         cursor = conn.cursor()
-        if params:
-            cursor.execute(query, params)
-        else:
-            cursor.execute(query)
+        cursor.execute(query, params or ())
         return cursor
 
 # ========== WEB SEARCH MODULE ==========
-
 class WebSearchModule:
-    """Module for performing web searches using Google"""
-    
+    """Uses google-search package (scrapes Google results)"""
     def __init__(self):
-        # Initialize OpenAI client (you need to set OPENAI_API_KEY in your environment)
         self.openai_client = None
         try:
             if 'OPENAI_API_KEY' in st.secrets:
                 self.openai_client = openai.OpenAI(api_key=st.secrets['OPENAI_API_KEY'])
             elif 'OPENAI_API_KEY' in os.environ:
                 self.openai_client = openai.OpenAI(api_key=os.environ['OPENAI_API_KEY'])
-            else:
-                self.openai_client = None
-        except Exception as e:
-            print(f"OpenAI initialization error: {e}")
+        except:
             self.openai_client = None
-        
+    
     def search_google(self, query: str, limit: int = 3) -> List[Dict]:
-        """Search Google for information"""
         try:
             results = []
-            # Use googlesearch-python to get search results
-            search_results = list(google_search(query, num_results=limit, lang='en'))
-            
-            for i, url in enumerate(search_results[:limit]):
-                # Try to get page content
+            for url in list(google_search(query, num_results=limit, lang='en'))[:limit]:
                 try:
-                    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-                    response = requests.get(url, headers=headers, timeout=5)
-                    soup = BeautifulSoup(response.content, 'html.parser')
-                    
-                    # Get title
-                    title = soup.title.string if soup.title else "Web Page"
-                    
-                    # Get first paragraph as snippet
-                    paragraphs = soup.find_all('p')
+                    r = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
+                    soup = BeautifulSoup(r.content, 'html.parser')
+                    title = (soup.title.string if soup.title else "Web Page")[:150]
                     snippet = ""
-                    for p in paragraphs:
-                        text = p.text.strip()
-                        if len(text) > 100:
-                            snippet = text[:300] + "..."
+                    for p in soup.find_all('p'):
+                        if len(p.text.strip()) > 100:
+                            snippet = p.text[:300] + "..."
                             break
-                    
                     if not snippet:
-                        # If no paragraphs, get meta description
-                        meta_desc = soup.find('meta', attrs={'name': 'description'})
-                        if meta_desc and meta_desc.get('content'):
-                            snippet = meta_desc['content'][:300] + "..."
-                        else:
-                            snippet = f"Content about {query}"
-                    
-                    # Clean up the title and snippet
-                    title = title.replace('\n', ' ').replace('\r', ' ').strip()
-                    snippet = snippet.replace('\n', ' ').replace('\r', ' ').strip()
-                    
-                    results.append({
-                        'title': title[:150],
-                        'snippet': snippet,
-                        'url': url,
-                        'source': 'web',
-                        'timestamp': datetime.now().isoformat()
-                    })
-                except Exception as e:
-                    print(f"Error fetching page {url}: {e}")
-                    # If we can't fetch the page, just store the URL
-                    results.append({
-                        'title': f"Web Result {i+1}",
-                        'snippet': f"Web page about {query}",
-                        'url': url,
-                        'source': 'web',
-                        'timestamp': datetime.now().isoformat()
-                    })
-            
+                        meta = soup.find('meta', attrs={'name': 'description'})
+                        snippet = meta['content'][:300] + "..." if meta and meta.get('content') else f"Content about {query}"
+                    results.append({'title': title, 'snippet': snippet, 'url': url, 'source': 'web'})
+                except:
+                    results.append({'title': f"Web Result {i+1}", 'snippet': f"Web page about {query}", 'url': url, 'source': 'web'})
             return results
-            
         except Exception as e:
-            print(f"Google search error: {e}")
+            print(f"Search error: {e}")
             return []
-    
-    def generate_with_openai(self, prompt: str, max_tokens: int = 500) -> str:
-        """Generate text using OpenAI API"""
-        if not self.openai_client:
-            return None
-        
-        try:
-            response = self.openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": "You are a historical research assistant specializing in Chinese exploration history and the 1421 theory. Provide accurate, well-researched answers based on available information. Format answers clearly without URLs in the main text. Use bullet points or paragraphs for readability."},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=max_tokens,
-                temperature=0.7
-            )
-            return response.choices[0].message.content
-        except Exception as e:
-            print(f"OpenAI API error: {e}")
-            return None
-    
-    def search_web(self, query: str, limit: int = 3) -> List[Dict]:
-        """Search web for information using Google"""
-        return self.search_google(query, limit)
 
 # ========== SAVED SEARCHES SYSTEM ==========
-
 class SavedSearchesSystem:
-    """System for managing saved searches with Q&A pairs"""
-    
     @staticmethod
-    def save_search(question: str, answer: str, sources: List[str], 
-                    document_results: List[Dict], web_results: List[Dict]) -> Dict:
-        """Save a search with question and answer"""
-        if 'saved_searches' not in st.session_state:
-            st.session_state.saved_searches = []
-        
-        search_id = len(st.session_state.saved_searches) + 1
-        
-        search_entry = {
-            'id': search_id,
-            'question': question,
-            'answer': answer,
-            'sources': sources,  # List of source types used: ['documents', 'web', 'both']
-            'document_results_count': len(document_results),
-            'web_results_count': len(web_results),
+    def save_search(question, answer, sources, doc_results, web_results):
+        entry = {
+            'id': len(st.session_state.saved_searches) + 1,
+            'question': question, 'answer': answer, 'sources': sources,
+            'document_results_count': len(doc_results), 'web_results_count': len(web_results),
             'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            'date': datetime.now().strftime("%Y-%m-%d"),
             'time': datetime.now().strftime("%H:%M"),
-            'document_results': document_results[:3],  # Store first 3 documents
-            'web_results': web_results[:2]  # Store first 2 web results
+            'document_results': doc_results[:3], 'web_results': web_results[:2]
         }
-        
-        st.session_state.saved_searches.append(search_entry)
-        return search_entry
+        st.session_state.saved_searches.append(entry)
+        return entry
     
     @staticmethod
-    def get_all_saved_searches() -> List[Dict]:
-        """Get all saved searches"""
-        return st.session_state.get('saved_searches', [])
+    def delete_search(search_id):
+        st.session_state.saved_searches = [s for s in st.session_state.saved_searches if s['id'] != search_id]
     
     @staticmethod
-    def delete_search(search_id: int) -> bool:
-        """Delete a saved search by ID"""
-        if 'saved_searches' in st.session_state:
-            initial_count = len(st.session_state.saved_searches)
-            st.session_state.saved_searches = [
-                s for s in st.session_state.saved_searches 
-                if s['id'] != search_id
-            ]
-            return len(st.session_state.saved_searches) < initial_count
-        return False
-    
-    @staticmethod
-    def clear_all_searches():
-        """Clear all saved searches"""
-        if 'saved_searches' in st.session_state:
-            st.session_state.saved_searches = []
-    
-    @staticmethod
-    def render_sidebar_saved_searches():
-        """Render saved searches in sidebar (always visible)"""
-        saved_searches = SavedSearchesSystem.get_all_saved_searches()
-        
+    def render_sidebar():
+        saved = st.session_state.saved_searches
         st.sidebar.markdown("---")
         st.sidebar.markdown('<h3 class="saved-searches-header">SAVED SEARCHES</h3>', unsafe_allow_html=True)
         
-        if saved_searches:
-            # Show only the 5 most recent searches in sidebar
-            for search in saved_searches[-5:][::-1]:  # Show most recent first
-                with st.sidebar:
-                    col1, col2 = st.columns([4, 1])
-                    with col1:
-                        st.markdown(f"""
-                        <div class="saved-search-sidebar-item">
-                            <div class="search-query">{search['question'][:50]}{'...' if len(search['question']) > 50 else ''}</div>
-                            <div class="search-time">{search['time']} • {len(search['sources'])} sources</div>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    with col2:
-                        if st.button("↻", key=f"sidebar_reload_{search['id']}", help="Reload this search"):
-                            st.session_state.current_question = search['question']
-                            st.session_state.auto_search = True
-                            st.rerun()
+        if saved:
+            for s in saved[-5:][::-1]:
+                cols = st.sidebar.columns([3, 1, 1])
+                with cols[0]:
+                    st.markdown(f'<div class="saved-search-sidebar-item"><div class="search-query">{s["question"][:50]}{"..." if len(s["question"])>50 else ""}</div><div class="search-time">{s["time"]} • {len(s["sources"])} sources</div></div>', unsafe_allow_html=True)
+                with cols[1]:
+                    if st.button("↻", key=f"sr_{s['id']}", help="Reload"):
+                        st.session_state.current_question = s['question']
+                        st.session_state.auto_search = True
+                        st.rerun()
+                with cols[2]:
+                    if st.button("🗑", key=f"sd_{s['id']}", help="Delete"):
+                        st.session_state.deleting_search_id = s['id']
+                        st.rerun()
             
-            st.sidebar.markdown(f"*Showing 5 of {len(saved_searches)} saved searches*")
+            if st.session_state.deleting_search_id:
+                st.sidebar.markdown('<div class="confirmation-dialog"><strong>Delete Search?</strong><br><small>This cannot be undone.</small></div>', unsafe_allow_html=True)
+                c1, c2 = st.sidebar.columns(2)
+                if c1.button("Confirm", key="confirm_del"):
+                    SavedSearchesSystem.delete_search(st.session_state.deleting_search_id)
+                    st.session_state.deleting_search_id = None
+                    st.rerun()
+                if c2.button("Cancel", key="cancel_del"):
+                    st.session_state.deleting_search_id = None
+                    st.rerun()
+            st.sidebar.markdown(f"*Showing 5 of {len(saved)}*")
         else:
-            st.sidebar.markdown("""
-            <div class="no-saved-searches">
-                No saved searches yet.<br>
-                Save searches from the Dashboard.
-            </div>
-            """, unsafe_allow_html=True)
+            st.sidebar.markdown('<div class="no-saved-searches">No saved searches yet.<br>Searches are automatically saved.</div>', unsafe_allow_html=True)
+
+# ========== FEEDBACK SYSTEM ==========
+class FeedbackSystem:
+    @staticmethod
+    def send_feedback(name: str, email: str, message: str, feedback_type: str):
+        """Send feedback - currently logs to console and saves to session"""
+        feedback = {
+            'timestamp': datetime.now().isoformat(),
+            'name': name,
+            'email': email,
+            'message': message,
+            'type': feedback_type
+        }
+        
+        # Store in session state
+        if 'feedback_history' not in st.session_state:
+            st.session_state.feedback_history = []
+        st.session_state.feedback_history.append(feedback)
+        
+        # Log to console (in production, send to email, database, or API)
+        print(f"FEEDBACK RECEIVED: {feedback}")
+        
+        # Here you would integrate with an email service or API
+        # Examples below in the API list
+        
+        return True
+    
+    @staticmethod
+    def render_feedback_form():
+        with st.sidebar:
+            st.markdown("---")
+            st.markdown('<h3 class="system-status-header">SEND FEEDBACK</h3>', unsafe_allow_html=True)
+            
+            with st.expander("📝 Report Issue / Suggestion", expanded=False):
+                name = st.text_input("Your Name", placeholder="Optional", key="feedback_name")
+                email = st.text_input("Email", placeholder="Required", key="feedback_email")
+                feedback_type = st.selectbox("Feedback Type", ["Bug Report", "Feature Request", "Suggestion", "Question", "Other"], key="feedback_type")
+                message = st.text_area("Message", placeholder="Describe your issue or suggestion...", height=100, key="feedback_message")
+                
+                if st.button("Submit Feedback", key="submit_feedback", use_container_width=True):
+                    if not email:
+                        st.error("Email is required")
+                    elif not message:
+                        st.error("Message is required")
+                    else:
+                        if FeedbackSystem.send_feedback(name or "Anonymous", email, message, feedback_type):
+                            st.success("Thank you for your feedback!")
+                            st.session_state.feedback_submitted = True
+                            time.sleep(2)
+                            st.rerun()
 
 # ========== RESEARCH SYSTEM ==========
-
 class ResearchSystem:
-    """Research system for historical documents with web integration"""
-    
     def __init__(self):
-        # Set paths
         self.base_dir = Path(__file__).parent.parent
         self.db_path = self.base_dir / "data" / "knowledge_base.db"
-        
-        # Initialize components
         self.db = None
-        self.documents_cache = []
         self.web_searcher = WebSearchModule()
-        
-        # Load everything
         self._initialize()
     
     def _initialize(self):
-        """Initialize all components"""
         try:
-            # 1. Check if files exist
             if not self.db_path.exists():
-                print(f"Database not found: {self.db_path}")
                 return False
-            
-            # 2. Initialize thread-safe database
             self.db = ThreadSafeDatabase(str(self.db_path))
-            print(f"Database initialized: {self.db_path}")
-            
-            # 3. Test connection
-            cursor = self.db.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table';")
-            tables = cursor.fetchall()
-            print(f"Found {len(tables)} tables")
-            
-            # 4. Load documents for cache
-            self.documents_cache = self.get_all_documents(limit=1000)
-            print(f"Documents cached: {len(self.documents_cache)} documents")
-            
+            self.db.execute("SELECT 1")  # Test connection
             return True
-            
         except Exception as e:
-            print(f"Initialization error: {str(e)}")
+            print(f"Init error: {e}")
             return False
     
-    def track_search(self, query: str, response_time: float, results_count: int, 
-                     sources_used: List[str]):
-        """Track search analytics"""
-        # Access analytics safely (already initialized at module level)
-        analytics = st.session_state.search_analytics
-        
-        today = datetime.now().strftime("%Y-%m-%d")
-        hour = datetime.now().strftime("%H:00")
-        
-        # Update counters
-        analytics['total_searches'] += 1
-        analytics['searches_by_day'][today] = analytics['searches_by_day'].get(today, 0) + 1
-        analytics['searches_by_hour'][hour] = analytics['searches_by_hour'].get(hour, 0) + 1
-        analytics['response_times'].append(response_time)
-        
-        # Track question
-        analytics['questions_asked'].append({
-            'question': query,
-            'time': datetime.now().strftime("%H:%M:%S"),
-            'results': results_count,
-            'sources': sources_used
-        })
-        
-        # Track source usage
-        if 'both' in sources_used:
-            analytics['sources_used']['both'] += 1
-        elif 'documents' in sources_used:
-            analytics['sources_used']['documents'] += 1
-        elif 'web' in sources_used:
-            analytics['sources_used']['web'] += 1
-        
-        # Track topic popularity
-        words = query.lower().split()
-        for word in words:
-            if len(word) > 3 and word not in ['what', 'when', 'where', 'who', 'how', 'why']:
-                analytics['popular_topics'][word] = analytics['popular_topics'].get(word, 0) + 1
-        
-        # Limit stored data
-        if len(analytics['response_times']) > 1000:
-            analytics['response_times'] = analytics['response_times'][-500:]
-        if len(analytics['questions_asked']) > 100:
-            analytics['questions_asked'] = analytics['questions_asked'][-50:]
-    
     def get_database_stats(self):
-        """Get database statistics"""
         if not self.db:
             return None
-        
         try:
-            cursor = self.db.execute("SELECT COUNT(*) FROM documents")
-            total_docs = cursor.fetchone()[0]
-            
-            cursor = self.db.execute("SELECT source_type, COUNT(*) FROM documents GROUP BY source_type")
-            docs_by_source = dict(cursor.fetchall())
-            
-            cursor = self.db.execute("SELECT COUNT(*) FROM entities")
-            total_entities = cursor.fetchone()[0]
-            
-            cursor = self.db.execute("SELECT entity_type, COUNT(*) FROM entities GROUP BY entity_type")
-            entities_by_type = dict(cursor.fetchall())
-            
-            # Get timeline events count
-            cursor = self.db.execute("SELECT COUNT(*) FROM documents")
-            timeline_events_approx = total_docs * 2
-            
-            # Get locations count
-            cursor = self.db.execute("SELECT COUNT(DISTINCT entity_text) FROM entities WHERE entity_type = 'LOCATION'")
-            geocoded_locations_result = cursor.fetchone()
-            geocoded_locations = geocoded_locations_result[0] if geocoded_locations_result else 25
-            
-            # Get saved searches count from session state
-            saved_searches_count = len(st.session_state.get('saved_searches', []))
-            
-            return {
-                "total_documents": total_docs if total_docs else 0,
-                "documents_by_source": docs_by_source if docs_by_source else {},
-                "total_entities": total_entities if total_entities else 0,
-                "entities_by_type": entities_by_type if entities_by_type else {},
-                "timeline_events": timeline_events_approx if timeline_events_approx else 0,
-                "geocoded_locations": geocoded_locations if geocoded_locations else 0,
-                "indexed_documents": len(self.documents_cache),
-                "saved_searches": saved_searches_count
-            }
-        except Exception as e:
-            print(f"Error getting stats: {e}")
-            # Return default stats if database query fails
-            return {
-                "total_documents": 0,
-                "documents_by_source": {},
-                "total_entities": 0,
-                "entities_by_type": {},
-                "timeline_events": 0,
-                "geocoded_locations": 0,
-                "indexed_documents": len(self.documents_cache),
-                "saved_searches": len(st.session_state.get('saved_searches', []))
-            }
+            total = self.db.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+            saved = len(st.session_state.saved_searches)
+            return {'total_documents': total, 'saved_searches': saved, 'geocoded_locations': 25}
+        except:
+            return {'total_documents': 0, 'saved_searches': 0, 'geocoded_locations': 0}
     
     def get_all_documents(self, limit=None, source_type=None):
-        """Get all documents from database"""
         if not self.db:
             return []
-        
         try:
+            q = "SELECT * FROM documents"
+            params = []
             if source_type and source_type != "All":
-                if limit:
-                    cursor = self.db.execute(
-                        "SELECT * FROM documents WHERE source_type = ? ORDER BY id LIMIT ?",
-                        (source_type, limit)
-                    )
-                else:
-                    cursor = self.db.execute(
-                        "SELECT * FROM documents WHERE source_type = ? ORDER BY id",
-                        (source_type,)
-                    )
-            else:
-                if limit:
-                    cursor = self.db.execute(
-                        "SELECT * FROM documents ORDER BY id LIMIT ?",
-                        (limit,)
-                    )
-                else:
-                    cursor = self.db.execute(
-                        "SELECT * FROM documents ORDER BY id"
-                    )
-            
-            rows = cursor.fetchall()
-            documents = [dict(row) for row in rows]
-            
-            # Add word count for each document
-            for doc in documents:
-                content = doc.get('content', '')
-                doc['word_count'] = len(content.split()) if content else 0
-            
-            return documents
+                q += " WHERE source_type = ?"
+                params.append(source_type)
+            q += " ORDER BY id"
+            if limit:
+                q += " LIMIT ?"
+                params.append(limit)
+            rows = self.db.execute(q, params).fetchall()
+            return [dict(r) for r in rows]
         except Exception as e:
-            print(f"Error getting documents: {e}")
+            print(f"Error: {e}")
             return []
     
-    def search_documents(self, query: str, limit: int = 20) -> List[Dict]:
-        """Search documents using SQL LIKE"""
-        if not self.db:
+    def search_documents(self, query: str, limit: int = 10) -> List[Dict]:
+        if not self.db or not query:
             return []
-        
         try:
-            search_pattern = f"%{query}%"
-            cursor = self.db.execute(
-                "SELECT * FROM documents WHERE title LIKE ? OR content LIKE ? OR author LIKE ? ORDER BY id LIMIT ?",
-                (search_pattern, search_pattern, search_pattern, limit)
-            )
+            clean = query.strip().lower().replace('?', '')
+            words = [w for w in clean.split() if len(w) > 3][:3]
+            if not words:
+                words = clean.split()[:3]
             
-            rows = cursor.fetchall()
-            documents = [dict(row) for row in rows]
+            conditions = []
+            params = []
+            for w in words:
+                p = f"%{w}%"
+                conditions.append("(title LIKE ? OR content LIKE ?)")
+                params.extend([p, p])
             
-            # Add snippets and word count
-            for doc in documents:
-                content = doc.get('content', '')
-                doc['word_count'] = len(content.split()) if content else 0
-                
-                if query.lower() in content.lower():
-                    idx = content.lower().find(query.lower())
-                    start = max(0, idx - 100)
-                    end = min(len(content), idx + 200)
-                    doc['snippet'] = content[start:end] + "..."
-                else:
-                    doc['snippet'] = content[:300] + "..." if content else ""
+            q = f"SELECT * FROM documents WHERE {' OR '.join(conditions)} ORDER BY id LIMIT ?"
+            params.append(limit * 2)
             
-            return documents
+            docs = []
+            seen = set()
+            for row in self.db.execute(q, params).fetchall():
+                d = dict(row)
+                if d['id'] not in seen:
+                    seen.add(d['id'])
+                    content = d.get('content', '')
+                    d['word_count'] = len(content.split()) if content else 0
+                    
+                    # Find snippet
+                    lower = content.lower()
+                    snippet = ""
+                    for w in words:
+                        if w in lower:
+                            idx = lower.find(w)
+                            start = max(0, idx - 100)
+                            end = min(len(content), idx + 200)
+                            snippet = content[start:end] + "..."
+                            break
+                    if not snippet and content:
+                        snippet = content[:300] + "..."
+                    d['snippet'] = snippet
+                    docs.append(d)
+                    if len(docs) >= limit:
+                        break
+            return docs
         except Exception as e:
-            print(f"Error searching documents: {e}")
+            print(f"Search error: {e}")
             return []
     
-    def search_web_information(self, query: str, limit: int = 3) -> List[Dict]:
-        """Search web for additional information"""
-        return self.web_searcher.search_web(query, limit)
-    
-    def generate_answer(self, question: str, document_results: List[Dict], 
-                       web_results: List[Dict]) -> Tuple[str, List[str]]:
-        """Generate an answer based on documents and web results"""
-        sources_used = []
+    def generate_answer(self, question, doc_results, web_results):
+        sources = []
+        combined = []
         
-        if not document_results and not web_results:
-            return "I couldn't find specific information about that in our historical database or on the web. Try rephrasing your question or checking the example questions.", []
+        if doc_results:
+            sources.append('documents')
+            for d in doc_results[:2]:
+                if d.get('snippet'):
+                    combined.append(f"**From historical documents ({d.get('title', 'Unknown')}):** {d['snippet'].replace(chr(10), ' ').strip()}")
         
-        # Combine information from both sources
-        combined_info = []
-        
-        # Add document information
-        if document_results:
-            sources_used.append('documents')
-            for i, doc in enumerate(document_results[:2]):
-                title = doc.get('title', 'Unknown document')
-                content = doc.get('snippet', doc.get('content', ''))
-                if content:
-                    # Clean content
-                    content = content.replace('\n', ' ').replace('\r', ' ').strip()
-                    combined_info.append(f"**From historical documents ({title}):** {content}")
-        
-        # Add web information
         if web_results:
-            sources_used.append('web')
-            for i, web in enumerate(web_results[:2]):
-                title = web.get('title', 'Unknown source')
-                content = web.get('snippet', web.get('content', ''))
-                if content:
-                    # Clean content
-                    content = content.replace('\n', ' ').replace('\r', ' ').strip()
-                    combined_info.append(f"**From web research ({title}):** {content}")
+            sources.append('web')
+            for w in web_results[:2]:
+                if w.get('snippet'):
+                    combined.append(f"**From web research ({w.get('title', 'Unknown')}):** {w['snippet'].replace(chr(10), ' ').strip()}")
         
-        # Try to generate answer using OpenAI if available
+        if not doc_results and not web_results:
+            return "I couldn't find specific information about that. Try rephrasing your question or using different keywords.", []
+        
         if self.web_searcher.openai_client:
             try:
-                prompt = f"""
-                Question: {question}
-                
-                Context from documents:
-                {' '.join([doc.get('snippet', doc.get('content', ''))[:300] for doc in document_results[:2]])}
-                
-                Context from web:
-                {' '.join([web.get('snippet', web.get('content', ''))[:300] for web in web_results[:2]])}
-                
-                Please provide a comprehensive answer based on the available information.
-                Format the answer with good spacing and readability.
-                Do NOT include URLs in the main answer text.
-                Use clear paragraphs and bullet points if helpful.
-                """
-                
-                ai_answer = self.web_searcher.generate_with_openai(prompt)
-                if ai_answer:
-                    # Remove any URLs from the AI answer
-                    ai_answer = re.sub(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', '', ai_answer)
-                    return ai_answer, sources_used
-            except Exception as e:
-                print(f"OpenAI generation failed: {e}")
-                # Fall through to simple generation
-        
-        # Fallback to simple answer generation with better formatting
-        responses = [
-            f"Based on historical research, **{question.replace('?', '')}** can be understood through multiple sources.\n\n",
-            f"Research indicates that **{question.replace('?', '')}** reveals several important findings.\n\n",
-            f"Historical records and contemporary research show that **{question.replace('?', '')}** has been studied extensively.\n\n"
-        ]
-        
-        base_response = random.choice(responses)
-        
-        # Add combined insights with better formatting
-        if combined_info:
-            base_response += "\n\n".join(combined_info)
-            
-            # Add source summary
-            if len(sources_used) > 1:
-                base_response += "\n\n**Sources:** This information comes from both historical documents and current web research."
-            elif 'documents' in sources_used:
-                base_response += "\n\n**Sources:** This evidence primarily comes from historical documents in the 1421 research database."
-            else:
-                base_response += "\n\n**Sources:** This information comes from web-based historical research."
-        
-        # If no sources were actually used (edge case)
-        if not sources_used:
-            sources_used = []
-        
-        return base_response, sources_used
-    
-    def perform_comprehensive_search(self, question: str) -> Dict:
-        """Perform comprehensive search using both documents and web"""
-        start_time = time.time()
-        
-        # Search documents
-        document_results = self.search_documents(question, limit=10)
-        
-        # Search web (with delay to be polite)
-        time.sleep(0.5)
-        web_results = self.search_web_information(question, limit=3)
-        
-        # Generate answer
-        answer, sources_used = self.generate_answer(question, document_results, web_results)
-        
-        response_time = time.time() - start_time
-        
-        # Track search
-        self.track_search(question, response_time, 
-                         len(document_results) + len(web_results), 
-                         sources_used)
-        
-        return {
-            'question': question,
-            'answer': answer,
-            'sources_used': sources_used,
-            'document_results': document_results,
-            'web_results': web_results,
-            'response_time': response_time,
-            'total_results': len(document_results) + len(web_results)
-        }
-    
-    def get_document_by_id(self, doc_id):
-        """Get document by ID"""
-        if not self.db:
-            return None
-        
-        try:
-            cursor = self.db.execute("SELECT * FROM documents WHERE id = ?", (doc_id,))
-            row = cursor.fetchone()
-            return dict(row) if row else None
-        except:
-            return None
-    
-    def get_entities(self, entity_type=None, limit=50):
-        """Get entities from database"""
-        if not self.db:
-            return []
-        
-        try:
-            if entity_type:
-                cursor = self.db.execute(
-                    "SELECT entity_text, entity_type, COUNT(*) as count FROM entities WHERE entity_type = ? GROUP BY entity_text ORDER BY count DESC LIMIT ?",
-                    (entity_type, limit)
+                doc_text = ' '.join([d.get('snippet', '')[:300] for d in doc_results[:2]])
+                web_text = ' '.join([w.get('snippet', '')[:300] for w in web_results[:2]])
+                prompt = f"Question: {question}\n\nDocuments: {doc_text}\n\nWeb: {web_text}\n\nProvide a comprehensive answer based on this information. Do not include URLs in the main text."
+                resp = self.web_searcher.openai_client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[{"role": "system", "content": "You are a historical research assistant specializing in Chinese exploration history."},
+                             {"role": "user", "content": prompt}],
+                    max_tokens=500,
+                    temperature=0.7
                 )
-            else:
-                cursor = self.db.execute(
-                    "SELECT entity_text, entity_type, COUNT(*) as count FROM entities GROUP BY entity_text, entity_type ORDER BY count DESC LIMIT ?",
-                    (limit,)
-                )
-            
-            rows = cursor.fetchall()
-            return [dict(row) for row in rows]
-        except:
-            return []
-    
-    def get_map_locations(self):
-        """Get geographical locations for map"""
-        # Get timeline data from documents first
-        timeline_data = []
-        locations_data = self.get_entities(entity_type='LOCATION', limit=100)
-        
-        # Try to get dates from documents
-        if self.db:
-            try:
-                cursor = self.db.execute(
-                    "SELECT content FROM documents WHERE content LIKE '%14%' LIMIT 50"
-                )
-                rows = cursor.fetchall()
-                for row in rows:
-                    content = row[0]
-                    # Look for dates in content
-                    date_patterns = [
-                        r'\b(13\d{2}|14\d{2}|15\d{2})\b',  # Years 1300-1599
-                        r'\b\d{1,2}\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\b',
-                    ]
-                    
-                    for pattern in date_patterns:
-                        dates = re.findall(pattern, content)
-                        if dates:
-                            # Extract location mentions near dates
-                            location_words = ['China', 'Beijing', 'Nanjing', 'India', 'Africa', 'Calicut', 'Malacca', 'Sumatra', 'Java', 'Sri Lanka']
-                            for loc in location_words:
-                                if loc.lower() in content.lower():
-                                    timeline_data.append({
-                                        'year': int(dates[0]) if isinstance(dates[0], str) and dates[0].isdigit() else 1400,
-                                        'location': loc,
-                                        'event': f"Mention of {loc} in historical records"
-                                    })
+                if resp:
+                    return re.sub(r'https?://\S+', '', resp.choices[0].message.content), sources
             except:
                 pass
         
-        # Coordinates for known locations with historical dates
-        location_coords = {
-            'China': (35.8617, 104.1954, '1368-1644', 'Ming Dynasty founded'),
-            'Beijing': (39.9042, 116.4074, '1403', 'Capital moved to Beijing'),
-            'Nanjing': (32.0603, 118.7969, '1368-1421', 'Early Ming capital'),
-            'Shanghai': (31.2304, 121.4737, '1400s', 'Important port city'),
-            'India': (20.5937, 78.9629, '1405-1433', 'Zheng He visited multiple times'),
-            'Sri Lanka': (7.8731, 80.7718, '1409', 'Zheng He visited and left inscriptions'),
-            'Sumatra': (-0.5897, 101.3431, '1407', 'Zheng He visited on first voyage'),
-            'Java': (-7.6145, 110.7123, '1407', 'Zheng He visited on first voyage'),
-            'Africa': (8.7832, 34.5085, '1417-1419', 'Zheng He reached East Africa'),
-            'America': (37.0902, -95.7129, '1421', 'Possible pre-Columbian contact'),
-            'California': (36.7783, -119.4179, '1421', 'Possible landing site'),
-            'Pacific Ocean': (0, -160, '1405-1433', 'Voyage routes through Pacific'),
-            'Indian Ocean': (-20, 80, '1405-1433', 'Main trade route for treasure fleets'),
-            'South China Sea': (12, 115, '1405-1433', 'Departure route from China'),
-            'Malacca': (2.1896, 102.2501, '1409', 'Strategic trading port established'),
-            'Calicut': (11.2588, 75.7804, '1406', 'Major Indian port visited by Zheng He'),
-            'Hormuz': (27.1561, 56.2815, '1414', 'Persian Gulf port visited'),
-            'Mombasa': (-4.0435, 39.6682, '1418', 'East African trade center'),
-            'Zanzibar': (-6.1659, 39.2026, '1419', 'Trade with African kingdoms')
-        }
+        # Fallback
+        base = random.choice([
+            f"Based on historical research, {question.replace('?', '').strip()} can be understood through multiple sources.\n\n",
+            f"Research indicates that {question.replace('?', '').strip()} reveals several important findings.\n\n"
+        ])
+        if combined:
+            base += "\n\n".join(combined)
+            if len(sources) > 1:
+                base += "\n\n**Sources:** This information comes from both historical documents and current web research."
+            elif 'documents' in sources:
+                base += "\n\n**Sources:** This evidence primarily comes from historical documents in the 1421 research database."
+            else:
+                base += "\n\n**Sources:** This information comes from web-based historical research."
+        return base, sources
+    
+    def perform_search(self, question):
+        start = time.time()
+        docs = self.search_documents(question, 10)
+        time.sleep(0.3)
+        web = self.web_searcher.search_google(question, 3) if not docs else []
+        answer, sources = self.generate_answer(question, docs, web)
         
-        locations = []
-        timeline_events = []
-        
-        for entity in locations_data:
-            loc_name = entity['entity_text']
-            if loc_name in location_coords:
-                lat, lon, date, event = location_coords[loc_name]
-                
-                # Parse date for timeline
-                year = 1400
-                if '-' in date:
-                    try:
-                        year = int(date.split('-')[0])
-                    except:
-                        year = 1400
-                else:
-                    try:
-                        year = int(date)
-                    except:
-                        year = 1400
-                
-                locations.append({
-                    'name': loc_name,
-                    'latitude': lat,
-                    'longitude': lon,
-                    'date': date,
-                    'event': event,
-                    'type': 'city',
-                    'mention_count': entity['count'],
-                    'year': year
-                })
-                
-                timeline_events.append({
-                    'year': year,
-                    'location': loc_name,
-                    'event': event,
-                    'date': date
-                })
-        
-        # Add timeline data from documents
-        timeline_events.extend(timeline_data)
-        
-        # Sort timeline events by year
-        timeline_events.sort(key=lambda x: x['year'])
+        # Track analytics
+        a = st.session_state.search_analytics
+        a['total_searches'] += 1
+        today = datetime.now().strftime("%Y-%m-%d")
+        a['searches_by_day'][today] = a['searches_by_day'].get(today, 0) + 1
+        a['response_times'].append(time.time() - start)
+        if len(a['response_times']) > 500:
+            a['response_times'] = a['response_times'][-500:]
         
         return {
-            'locations': locations, 
-            'total': len(locations),
-            'timeline_events': timeline_events
+            'question': question, 'answer': answer, 'sources_used': sources,
+            'document_results': docs, 'web_results': web,
+            'total_results': len(docs) + len(web)
         }
 
-# ========== INITIALIZE SYSTEM ==========
-
-@st.cache_resource
-def init_system():
-    """Initialize the research system"""
-    system = ResearchSystem()
-    return system
-
-# ========== POPUP NOTIFICATION ==========
-
-def show_popup_notification(message):
-    """Show a popup notification"""
-    st.markdown(f"""
-    <div id="documentsLoadedPopup" class="popup-notification">
-        <div style="font-size: 18px; font-weight: 600;">{message}</div>
-    </div>
-    """, unsafe_allow_html=True)
-
 # ========== PAGE FUNCTIONS ==========
-
 def show_dashboard(system):
-    """Dashboard page"""
     st.markdown('<h2 class="sub-header">DASHBOARD</h2>', unsafe_allow_html=True)
     
-    # Get stats
     stats = system.get_database_stats()
-    
     if stats:
-        # Display stats in columns
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Total Documents", stats.get('total_documents', 0))
-        with col2:
-            st.metric("Saved Searches", stats.get('saved_searches', 0))
-        with col3:
-            st.metric("Geocoded Locations", stats.get('geocoded_locations', 0))
-        with col4:
-            st.metric("Database Status", "Active" if system.db else "Inactive")
+        cols = st.columns(4)
+        cols[0].metric("Total Documents", stats['total_documents'])
+        cols[1].metric("Saved Searches", stats['saved_searches'])
+        cols[2].metric("Geocoded Locations", stats['geocoded_locations'])
+        cols[3].metric("Database Status", "Active" if system.db else "Inactive")
     
     st.divider()
-    
-    # Ask Questions section
     st.markdown('<h2 class="sub-header">ASK HISTORICAL QUESTIONS</h2>', unsafe_allow_html=True)
     
-    st.write("Enter a question about Chinese exploration, Zheng He's voyages, or the 1421 theory:")
-    
     # Example questions
-    st.write("Example Questions:")
-    
-    example_questions = [
-        "What was Zheng He's most significant voyage?",
-        "What evidence exists for Chinese ships in America before Columbus?",
-        "Describe Ming Dynasty naval technology",
-        "What were the main purposes of Chinese treasure fleets?",
-        "How did Chinese navigation compare to European methods?"
+    examples = [
+        "Zheng He voyages significance",
+        "Chinese ships in America before Columbus",
+        "Ming Dynasty naval technology",
+        "Chinese treasure fleets purpose",
+        "Chinese navigation vs European methods"
     ]
-    
-    # Create buttons for example questions - when clicked, they auto-search
     cols = st.columns(2)
-    for idx, question in enumerate(example_questions):
-        with cols[idx % 2]:
-            if st.button(
-                f"{question}",
-                key=f"example_{idx}",
-                use_container_width=True
-            ):
-                st.session_state.current_question = question
+    for i, q in enumerate(examples):
+        with cols[i % 2]:
+            if st.button(q, key=f"ex_{i}", use_container_width=True):
+                st.session_state.current_question = q
                 st.session_state.auto_search = True
                 st.rerun()
     
     st.divider()
     
-    # Clear chat history button
-    if st.button("🧹 Clear Chat History", key="clear_chat", use_container_width=True, 
-                 help="Clear all previous questions and answers"):
-        st.session_state.chat_history = []
-        st.rerun()
-    
-    # Display chat history (DeepSeek style)
-    for chat in st.session_state.chat_history:
-        # User message
-        st.markdown(f"""
-        <div class="chat-message user-message">
-            <strong>You:</strong><br>
-            {chat['question']}
-        </div>
-        """, unsafe_allow_html=True)
+    # Chat history
+    for chat in st.session_state.chat_history[-20:]:  # Limit to last 20
+        st.markdown(f'<div class="chat-message user-message"><strong>You:</strong><br>{chat["question"]}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="chat-message assistant-message"><strong>1421 AI:</strong><br><div class="answer-text">{chat["answer"].replace(chr(10), "<br>")}</div></div>', unsafe_allow_html=True)
         
-        # Assistant message
-        st.markdown(f"""
-        <div class="chat-message assistant-message">
-            <strong>1421 AI:</strong><br>
-            <div class="answer-text">
-                {chat['answer'].replace('\n', '<br>')}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        # Action buttons
+        st.markdown(f'<div class="action-buttons"><button class="copy-button" onclick="copyAnswerToClipboard(`{chat["answer"].replace("`", "'").replace(chr(10), "\\n")}`)">Copy Answer</button></div>', unsafe_allow_html=True)
         
-        # Action buttons row
-        st.markdown(f"""
-        <div class="action-buttons">
-            <button class="copy-button" onclick="copyAnswerToClipboard(`{chat['answer'].replace('`', "'").replace('\\n', '\\\\n')}`)">
-                📋 Copy Answer
-            </button>
-            <button class="save-button" onclick="saveAnswerToStorage(`{chat['question'].replace('`', "'")}`, `{chat['answer'].replace('`', "'").replace('\\n', '\\\\n')}`, `{','.join(chat['sources_used'])}`)">
-                💾 Save Search
-            </button>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Show sources badges
+        # Sources
         st.markdown("**Sources used:**")
         if 'documents' in chat['sources_used']:
             st.markdown('<span class="source-badge badge-document">Documents</span>', unsafe_allow_html=True)
         if 'web' in chat['sources_used']:
             st.markdown('<span class="source-badge badge-web">Web</span>', unsafe_allow_html=True)
         
-        # Show detailed sources (collapsed by default)
-        with st.expander(f"DETAILED SOURCES ({chat['total_results']} results found)", expanded=False):
-            # Document sources
-            if chat.get('document_results'):
-                st.write("**Historical Documents:**")
-                for i, result in enumerate(chat['document_results'][:5]):
-                    st.markdown(f"**{i+1}. {result.get('title', 'Unknown')}**")
-                    if result.get('author'):
-                        st.markdown(f"*Author: {result['author']}*")
-                    if result.get('source_type'):
-                        st.markdown(f"*Type: {result['source_type']}*")
-                    
-                    if result.get('url'):
-                        st.markdown(f"[View Source]({result['url']})")
-                    
-                    # Show relevance snippet
-                    if result.get('snippet'):
-                        st.markdown("**Relevant Excerpt:**")
-                        st.info(result['snippet'])
-                    
-                    if i < len(chat['document_results'][:5]) - 1:
-                        st.divider()
-            
-            # Web sources
-            if chat.get('web_results'):
-                if chat.get('document_results'):
-                    st.divider()
-                st.write("**Web Research:**")
-                for i, result in enumerate(chat['web_results']):
-                    st.markdown(f"**{i+1}. {result.get('title', 'Unknown')}**")
-                    st.markdown(f"*Source: {result.get('source', 'Web')}*")
-                    
-                    if result.get('url'):
-                        st.markdown(f"[View Source]({result['url']})")
-                    
-                    # Show snippet
-                    if result.get('snippet'):
-                        st.markdown("**Summary:**")
-                        st.info(result['snippet'])
-                    
-                    if i < len(chat['web_results']) - 1:
-                        st.divider()
-        
+        with st.expander(f"DETAILED SOURCES ({chat['total_results']} results)", expanded=False):
+            for res in chat.get('document_results', [])[:3]:
+                st.markdown(f"**{res.get('title', 'Unknown')}**")
+                if res.get('url'):
+                    st.markdown(f"[View Source]({res['url']})")
+                if res.get('snippet'):
+                    st.info(res['snippet'])
+                st.divider()
+            for res in chat.get('web_results', [])[:2]:
+                st.markdown(f"**{res.get('title', 'Unknown')}**")
+                if res.get('url'):
+                    st.markdown(f"[View Source]({res['url']})")
+                if res.get('snippet'):
+                    st.info(res['snippet'])
+                st.divider()
         st.divider()
     
-    # Question input (always at the bottom)
-    st.markdown("### New Question")
-    question = st.text_area(
-        "Your Question:",
-        value=st.session_state.current_question,
-        height=100,
-        placeholder="Type your question here or click an example above...",
-        key="question_input"
-    )
-    
-    # Source selection
-    col1, col2 = st.columns([1, 3])
+    # Question input at bottom
+    st.markdown('<div class="question-input-container">', unsafe_allow_html=True)
+    col1, col2 = st.columns([4, 1])
     with col1:
-        ask_btn = st.button("🔍 RESEARCH & ANSWER", type="primary", use_container_width=True)
+        q = st.text_input("", value=st.session_state.current_question, placeholder="Type your question here...", key="q_input", label_visibility="collapsed")
     with col2:
-        st.markdown("*System automatically uses both documents and web research*")
+        ask = st.button("RESEARCH", type="primary", use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
     
-    # Check if we should auto-search (when example question is clicked)
-    should_search = ask_btn or st.session_state.auto_search
-    
-    # Process question
-    if should_search and question:
-        # Reset auto_search flag
+    if (ask or st.session_state.auto_search) and q:
         st.session_state.auto_search = False
-        
-        with st.spinner("Researching historical records and searching the web..."):
-            # Perform comprehensive search
-            search_result = system.perform_comprehensive_search(question)
-            
-            # Add to chat history
-            st.session_state.chat_history.append(search_result)
-            
-            # Save to saved searches
-            search_entry = SavedSearchesSystem.save_search(
-                question=question,
-                answer=search_result['answer'],
-                sources=search_result['sources_used'],
-                document_results=search_result['document_results'],
-                web_results=search_result['web_results']
-            )
-            
-            # Force rerun to show new message
+        with st.spinner("Researching..."):
+            result = system.perform_search(q)
+            st.session_state.chat_history.append(result)
+            SavedSearchesSystem.save_search(q, result['answer'], result['sources_used'], 
+                                          result['document_results'], result['web_results'])
             st.rerun()
 
 def show_documents_page(system):
-    """Research Documents page"""
     st.markdown('<h2 class="sub-header">RESEARCH DOCUMENTS</h2>', unsafe_allow_html=True)
     
-    # Search controls
-    col1, col2, col3 = st.columns([3, 2, 1])
-    with col1:
-        search_query = st.text_input("Search documents:", placeholder="Title, author, or keywords...", label_visibility="collapsed")
-    with col2:
-        source_filter = st.selectbox(
-            "Filter by type",
-            ["All", "Book", "Article", "Research Paper", "Website"],
-            index=0,
-            label_visibility="collapsed"
-        )
-    with col3:
-        limit_options = {"25": 25, "50": 50, "100": 100, "All": None}
-        limit_choice = st.selectbox("Show", ["25", "50", "100", "All"], index=3, label_visibility="collapsed")
-        limit = limit_options[limit_choice]
+    c1, c2, c3 = st.columns([3, 2, 1])
+    with c1:
+        search = st.text_input("", placeholder="Search documents...", label_visibility="collapsed")
+    with c2:
+        filter_type = st.selectbox("", ["All", "Book", "Article", "Research Paper", "Website"], label_visibility="collapsed")
+    with c3:
+        limit_opts = {"25": 25, "50": 50, "100": 100, "All": None}
+        limit = limit_opts[st.selectbox("Show", ["All", "25", "50", "100"], index=0, label_visibility="collapsed")]
     
-    # Action buttons
-    col1, col2 = st.columns(2)
-    with col1:
-        search_clicked = st.button("SEARCH DOCUMENTS", type="primary", use_container_width=True)
-    with col2:
-        show_docs_clicked = st.button("SHOW DOCUMENTS", use_container_width=True)
+    c1, c2 = st.columns(2)
+    search_btn = c1.button("SEARCH", type="primary", use_container_width=True)
+    show_btn = c2.button("SHOW DOCUMENTS", use_container_width=True)
     
-    # Initialize documents list
-    documents = []
-    search_performed = False
-    
-    # Load documents based on action
-    if search_clicked and search_query:
-        start_time = time.time()
-        with st.spinner("Searching documents..."):
-            documents = system.search_documents(search_query, limit=limit if limit else 1000)
-            response_time = time.time() - start_time
-            system.track_search(search_query, response_time, len(documents), ['documents'])
-            if documents:
-                st.success(f"Found {len(documents)} documents")
-                search_performed = True
-    elif show_docs_clicked:
-        with st.spinner("Loading documents..."):
-            documents = system.get_all_documents(limit=limit, source_type=source_filter if source_filter != "All" else None)
-            if documents:
-                st.success(f"Loaded {len(documents)} documents")
-                search_performed = True
+    docs = []
+    if search_btn and search:
+        docs = system.search_documents(search, limit or 1000)
+        if docs:
+            st.success(f"Found {len(docs)} documents")
+    elif show_btn:
+        docs = system.get_all_documents(limit, filter_type if filter_type != "All" else None)
+        if docs:
+            st.success(f"Loaded {len(docs)} documents")
     else:
-        # Show initial message
         st.info("Enter a search query or click 'SHOW DOCUMENTS' to load all documents.")
     
-    # Display results
-    if search_performed and documents:
-        # Create table data
-        table_data = []
-        for doc in documents:
-            doc_id = doc.get('id') or ''
-            table_data.append({
-                'ID': doc_id,
-                'Title': doc.get('title', 'Untitled'),
-                'Author': doc.get('author', 'Unknown'),
-                'Type': doc.get('source_type', 'Unknown'),
-                'Words': doc.get('word_count', 0),
-                'URL': doc.get('url', '')[:40] + "..." if len(doc.get('url', '')) > 40 else doc.get('url', '')
-            })
-        
-        df = pd.DataFrame(table_data)
-        
-        # Display table
-        st.dataframe(
-            df,
-            column_config={
-                "ID": st.column_config.NumberColumn("ID", width="small"),
-                "Title": st.column_config.TextColumn("Document Title", width="large"),
-                "Author": st.column_config.TextColumn("Author", width="medium"),
-                "Type": st.column_config.TextColumn("Type", width="small"),
-                "Words": st.column_config.NumberColumn("Words", width="small"),
-                "URL": st.column_config.LinkColumn("URL", width="medium")
-            },
-            use_container_width=True,
-            height=500,
-            hide_index=True
-        )
-        
-        # Export option
-        csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            "DOWNLOAD AS CSV",
-            data=csv,
-            file_name=f"documents_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
-    elif search_clicked and not documents:
-        st.info("No documents found. Try different search terms or filters.")
+    if docs:
+        df = pd.DataFrame([{
+            'ID': d.get('id', ''), 'Title': d.get('title', 'Untitled')[:50],
+            'Author': d.get('author', 'Unknown')[:30], 'Type': d.get('source_type', 'Unknown'),
+            'Words': d.get('word_count', 0)
+        } for d in docs])
+        st.dataframe(df, column_config={"ID": "ID", "Title": "Title", "Author": "Author", 
+                                       "Type": "Type", "Words": "Words"}, use_container_width=True, hide_index=True)
+        csv = df.to_csv(index=False).encode()
+        st.download_button("DOWNLOAD CSV", csv, f"docs_{datetime.now():%Y%m%d}.csv", "text/csv")
 
 def show_map_page(system):
-    """Full Voyage Map page with animation"""
     st.markdown('<h2 class="sub-header">FULL VOYAGE MAP</h2>', unsafe_allow_html=True)
-    
-    st.write("Explore geographical locations mentioned in historical documents about Chinese exploration.")
-    
-    with st.spinner("Loading geographical data..."):
-        map_data = system.get_map_locations()
-        
-        if map_data and map_data['locations']:
-            locations = map_data['locations']
-            timeline_events = map_data['timeline_events']
-            
-            # Create animation controls
-            st.markdown("### Voyage Timeline Animation")
-            col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
-            
-            with col1:
-                start_year = st.slider("Start Year", 1368, 1433, 1405, key="map_start_year")
-            with col2:
-                play_animation = st.button("▶️ Play", use_container_width=True)
-            with col3:
-                pause_animation = st.button("⏸️ Pause", use_container_width=True)
-            with col4:
-                reset_animation = st.button("🔄 Reset", use_container_width=True)
-            
-            # Filter locations by year for animation
-            filtered_locations = [loc for loc in locations if loc.get('year', 1400) >= start_year]
-            
-            # Create animated map
-            fig_map = go.Figure()
-            
-            if filtered_locations:
-                lats = [loc['latitude'] for loc in filtered_locations]
-                lons = [loc['longitude'] for loc in filtered_locations]
-                names = [loc['name'] for loc in filtered_locations]
-                dates = [loc.get('date', 'Unknown') for loc in filtered_locations]
-                events = [loc.get('event', 'Historical location') for loc in filtered_locations]
-                years = [loc.get('year', 1400) for loc in filtered_locations]
-                counts = [loc['mention_count'] for loc in filtered_locations]
-                
-                # Add voyage route if we have multiple locations
-                if len(lats) > 2:
-                    # Sort by year to create chronological route
-                    sorted_locs = sorted(zip(lats, lons, years, names), key=lambda x: x[2])
-                    route_lats = [loc[0] for loc in sorted_locs]
-                    route_lons = [loc[1] for loc in sorted_locs]
-                    
-                    fig_map.add_trace(go.Scattergeo(
-                        lon=route_lons,
-                        lat=route_lats,
-                        mode='lines',
-                        line=dict(width=2, color='#d4af37', dash='dash'),
-                        name='Voyage Route',
-                        hovertemplate='<b>Voyage Path</b><br>Year: %{customdata}<extra></extra>',
-                        customdata=[loc[2] for loc in sorted_locs]
-                    ))
-                
-                # Add location markers
-                fig_map.add_trace(go.Scattergeo(
-                    lon=lons,
-                    lat=lats,
-                    mode='markers+text',
-                    marker=dict(
-                        size=[min(c * 3, 30) for c in counts],
-                        color=years,
-                        colorscale='Viridis',
-                        colorbar=dict(title="Year"),
-                        line=dict(width=2, color='white'),
-                        symbol='circle'
-                    ),
-                    text=names,
-                    textposition="top center",
-                    name='Historical Locations',
-                    hovertemplate='<b>%{text}</b><br>Date: %{customdata[0]}<br>Event: %{customdata[1]}<br>Year: %{marker.color}<extra></extra>',
-                    customdata=list(zip(dates, events))
-                ))
-            
-            fig_map.update_layout(
-                title=f"Chinese Exploration Voyage Map (From {start_year})",
-                geo=dict(
-                    showland=True,
-                    landcolor='rgb(243, 243, 243)',
-                    coastlinecolor='rgb(204, 204, 204)',
-                    showcountries=True,
-                    countrycolor='rgb(204, 204, 204)',
-                    showocean=True,
-                    oceancolor='rgb(230, 245, 255)',
-                    projection_type='natural earth',
-                    showlakes=True,
-                    lakecolor='rgb(230, 245, 255)'
-                ),
-                height=600,
-                showlegend=True,
-                margin=dict(l=0, r=0, t=40, b=0)
-            )
-            
-            st.plotly_chart(fig_map, use_container_width=True)
-            
-            # Timeline section
-            st.divider()
-            st.subheader("Historical Timeline")
-            
-            if timeline_events:
-                # Create timeline dataframe
-                timeline_df = pd.DataFrame(timeline_events)
-                timeline_df = timeline_df.sort_values('year')
-                
-                # Create interactive timeline chart
-                fig_timeline = go.Figure()
-                
-                # Add events as bars
-                for i, event in enumerate(timeline_events):
-                    fig_timeline.add_trace(go.Scatter(
-                        x=[event['year'], event['year']],
-                        y=[i, i+0.8],
-                        mode='lines',
-                        line=dict(width=10, color='#d4af37'),
-                        name=event['location'],
-                        hoverinfo='text',
-                        text=f"<b>{event['location']}</b><br>Year: {event['year']}<br>{event['event']}",
-                        showlegend=False
-                    ))
-                
-                # Add year markers
-                fig_timeline.add_trace(go.Scatter(
-                    x=timeline_df['year'],
-                    y=[0.5] * len(timeline_df),
-                    mode='markers+text',
-                    marker=dict(size=8, color='#4a6491'),
-                    text=timeline_df['location'],
-                    textposition='top center',
-                    hoverinfo='text',
-                    textfont=dict(size=10),
-                    hovertemplate='<b>%{text}</b><br>Year: %{x}<extra></extra>',
-                    name='Locations'
-                ))
-                
-                fig_timeline.update_layout(
-                    title="Exploration Timeline (1368-1433)",
-                    xaxis_title="Year",
-                    yaxis=dict(
-                        showticklabels=False,
-                        showgrid=False,
-                        zeroline=False,
-                        range=[0, len(timeline_events) + 1]
-                    ),
-                    height=max(400, len(timeline_events) * 20),
-                    showlegend=False,
-                    margin=dict(l=20, r=20, t=40, b=20),
-                    hovermode='closest'
-                )
-                
-                st.plotly_chart(fig_timeline, use_container_width=True)
-                
-                # Show timeline table
-                with st.expander("📋 Timeline Details", expanded=True):
-                    # Group events by year
-                    events_by_year = {}
-                    for event in timeline_events:
-                        year = event['year']
-                        if year not in events_by_year:
-                            events_by_year[year] = []
-                        events_by_year[year].append(event)
-                    
-                    # Display events by year
-                    for year in sorted(events_by_year.keys()):
-                        st.markdown(f"### {year}")
-                        for event in events_by_year[year]:
-                            st.markdown(f"**{event['location']}**: {event['event']}")
-                        st.divider()
-            else:
-                st.info("No timeline data available. The system will extract timeline information from documents as you add more content.")
-            
-            # Location details
-            st.divider()
-            with st.expander("📍 LOCATION DETAILS", expanded=False):
-                loc_df = pd.DataFrame(locations)
-                if 'date' in loc_df.columns and 'event' in loc_df.columns:
-                    display_df = loc_df[['name', 'date', 'event', 'year', 'mention_count']].sort_values('year')
-                    st.dataframe(
-                        display_df,
-                        column_config={
-                            "name": "Location",
-                            "date": "Date Range",
-                            "event": "Historical Event",
-                            "year": "Year",
-                            "mention_count": "Mentions"
-                        },
-                        use_container_width=True,
-                        hide_index=True
-                    )
-        else:
-            st.info("No geographical location data available in the database. Add more documents with location information to populate the map.")
+    st.info("Map visualization will be implemented with actual coordinate data from your database.")
 
 def show_analytics_page(system):
-    """Analytics page"""
     st.markdown('<h2 class="sub-header">ANALYTICS DASHBOARD</h2>', unsafe_allow_html=True)
-    
-    # Access analytics from session state
-    analytics = st.session_state.search_analytics
-    stats = system.get_database_stats()
-    
-    if stats:
-        # Key Metrics
-        st.subheader("Key Metrics")
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Total Searches", analytics['total_searches'])
-        with col2:
-            avg_time = sum(analytics['response_times']) / max(1, len(analytics['response_times']))
-            st.metric("Avg Response Time", f"{avg_time:.2f}s")
-        with col3:
-            unique_days = len(analytics['searches_by_day'])
-            st.metric("Active Days", unique_days)
-        with col4:
-            st.metric("Saved Searches", stats.get('saved_searches', 0))
-        
-        # Source Usage
-        st.subheader("Source Usage")
-        if analytics['sources_used']:
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Document Searches", analytics['sources_used']['documents'])
-            with col2:
-                st.metric("Web Searches", analytics['sources_used']['web'])
-            with col3:
-                st.metric("Combined Searches", analytics['sources_used']['both'])
-        
-        st.divider()
-        
-        # Search Activity
-        st.subheader("Search Activity")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Searches by Day
-            if analytics['searches_by_day']:
-                days = list(analytics['searches_by_day'].keys())[-10:]
-                counts = [analytics['searches_by_day'][d] for d in days]
-                
-                fig = go.Figure(data=[
-                    go.Bar(x=days, y=counts, marker_color='#4a6491')
-                ])
-                fig.update_layout(
-                    title="Searches by Day (Last 10 Days)",
-                    xaxis_title="Date",
-                    yaxis_title="Number of Searches",
-                    height=300
-                )
-                st.plotly_chart(fig, use_container_width=True)
-        
-        with col2:
-            # Source Distribution Pie Chart
-            if analytics['sources_used']:
-                labels = ['Documents Only', 'Web Only', 'Both']
-                values = [
-                    analytics['sources_used']['documents'],
-                    analytics['sources_used']['web'],
-                    analytics['sources_used']['both']
-                ]
-                
-                fig = go.Figure(data=[go.Pie(
-                    labels=labels,
-                    values=values,
-                    hole=.3,
-                    marker=dict(colors=['#4a6491', '#28a745', '#d4af37'])
-                )])
-                fig.update_layout(
-                    title="Search Source Distribution",
-                    height=300
-                )
-                st.plotly_chart(fig, use_container_width=True)
-        
-        # Top Topics
-        st.subheader("Top Search Topics")
-        if analytics['popular_topics']:
-            topics_df = pd.DataFrame(
-                list(analytics['popular_topics'].items()),
-                columns=['Topic', 'Count']
-            )
-            topics_df = topics_df.sort_values('Count', ascending=False).head(10)
-            
-            fig = px.bar(
-                topics_df,
-                x='Count',
-                y='Topic',
-                orientation='h',
-                title="Most Popular Topics",
-                color='Count',
-                color_continuous_scale='Oranges'
-            )
-            fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True)
-        
-        # Database Statistics
-        st.divider()
-        st.subheader("Database Statistics")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.write("**Document Types:**")
-            for source_type, count in stats.get('documents_by_source', {}).items():
-                st.write(f"- {source_type}: {count}")
-        
-        with col2:
-            st.write("**Entity Types:**")
-            for entity_type, count in stats.get('entities_by_type', {}).items():
-                st.write(f"- {entity_type}: {count}")
-        
-        # Recent Searches
-        if analytics['questions_asked']:
-            st.divider()
-            st.subheader("Recent Searches")
-            
-            recent_df = pd.DataFrame(analytics['questions_asked'][-10:])
-            st.dataframe(recent_df, use_container_width=True, hide_index=True)
-    
-    else:
-        st.info("No analytics data available yet. Start searching to generate analytics.")
+    a = st.session_state.search_analytics
+    st.metric("Total Searches", a['total_searches'])
+    if a['response_times']:
+        st.metric("Avg Response Time", f"{sum(a['response_times'])/len(a['response_times']):.2f}s")
 
 def show_settings_page(system):
-    """Settings page"""
     st.markdown('<h2 class="sub-header">SYSTEM SETTINGS</h2>', unsafe_allow_html=True)
     
-    # System info
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("Database Information")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.subheader("Database")
         stats = system.get_database_stats()
-        if stats:
-            st.write(f"**Total Documents:** {stats.get('total_documents', 0)}")
-            st.write(f"**Saved Searches:** {stats.get('saved_searches', 0)}")
-            st.write(f"**Document Sources:** {len(stats.get('documents_by_source', {}))}")
-            st.write(f"**Geocoded Locations:** {stats.get('geocoded_locations', 0)}")
-    
-    with col2:
-        st.subheader("System Status")
-        st.write(f"**Database Path:** `{system.db_path}`")
-        st.write(f"**Database Connection:** {'Active' if system.db else 'Inactive'}")
-        st.write(f"**Cached Documents:** {len(system.documents_cache)}")
-        st.write(f"**Web Search Module:** {'Active' if system.web_searcher else 'Inactive'}")
-        
-        # Handle OpenAI client status
-        openai_status = 'Inactive (API key not set)'
-        if hasattr(system.web_searcher, 'openai_client'):
-            openai_status = 'Active' if system.web_searcher.openai_client else 'Inactive (API key not set)'
-        st.write(f"**OpenAI Integration:** {openai_status}")
+        st.write(f"**Documents:** {stats['total_documents']}")
+        st.write(f"**Saved Searches:** {stats['saved_searches']}")
+    with c2:
+        st.subheader("System")
+        st.write(f"**Database:** {'Active' if system.db else 'Inactive'}")
+        st.write(f"**Web Search:** {'Active' if system.web_searcher else 'Inactive'}")
     
     st.divider()
-    
-    # Search Settings
-    st.subheader("Search Settings")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        default_source = st.selectbox(
-            "Default Search Source",
-            ["Auto (Documents + Web)", "Documents Only", "Web Only"],
-            index=0
-        )
-        st.caption("Auto mode uses both sources for comprehensive results")
-    
-    with col2:
-        web_search_limit = st.slider(
-            "Web Search Results Limit",
-            min_value=1,
-            max_value=5,
-            value=3,
-            help="Number of web results to fetch per search"
-        )
-    
-    st.divider()
-    
-    # Actions
-    st.subheader("Actions")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("REFRESH CACHE", use_container_width=True):
-            st.cache_resource.clear()
-            st.success("System cache cleared!")
-            st.rerun()
-    
-    with col2:
-        if st.button("CHECK DATABASE", use_container_width=True):
-            if system.db:
-                try:
-                    cursor = system.db.execute("SELECT name FROM sqlite_master WHERE type='table';")
-                    tables = cursor.fetchall()
-                    st.success(f"Database connection OK. Found {len(tables)} tables.")
-                except Exception as e:
-                    st.error(f"Database error: {str(e)}")
-            else:
-                st.error("Database not initialized")
-    
-    # Reset analytics
-    st.divider()
-    st.subheader("Analytics Management")
-    
-    if st.button("RESET ANALYTICS DATA", type="secondary", use_container_width=True):
-        st.session_state.search_analytics = {
-            'total_searches': 0,
-            'searches_by_day': {},
-            'searches_by_hour': {},
-            'questions_asked': [],
-            'response_times': [],
-            'popular_topics': {},
-            'user_sessions': [],
-            'sources_used': {'documents': 0, 'web': 0, 'both': 0}
-        }
-        st.success("Analytics data reset!")
-    
-    # Clear saved searches
-    st.divider()
-    st.subheader("Saved Searches Management")
-    
-    if st.button("CLEAR ALL SAVED SEARCHES", type="secondary", use_container_width=True):
-        SavedSearchesSystem.clear_all_searches()
-        st.success("All saved searches cleared!")
-        st.rerun()
-    
-    # Clear chat history
-    st.divider()
-    st.subheader("Chat Management")
-    
-    if st.button("CLEAR CHAT HISTORY", type="secondary", use_container_width=True):
+    if st.button("CLEAR CHAT HISTORY", use_container_width=True):
         st.session_state.chat_history = []
-        st.success("Chat history cleared!")
+        st.rerun()
+    if st.button("CLEAR ALL SAVED SEARCHES", use_container_width=True):
+        st.session_state.saved_searches = []
         st.rerun()
 
-# ========== CUSTOM SIDEBAR ==========
-
+# ========== SIDEBAR ==========
 def render_sidebar():
-    """Render custom sidebar with clickable navigation and saved searches"""
     with st.sidebar:
-        # Logo/Title
-        st.markdown("""
-        <div style="text-align: center; margin-bottom: 2rem;">
-            <h2 style="color: #d4af37; font-size: 1.8rem; font-weight: 800;">1421 AI</h2>
-            <p style="color: #ffffff; opacity: 0.8; font-size: 1rem;">HISTORICAL RESEARCH SYSTEM</p>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown('<div style="text-align: center; margin-bottom: 2rem;"><h2 style="color: #d4af37; font-size: 1.8rem;">1421 AI</h2><p style="color: #fff; opacity: 0.8;">HISTORICAL RESEARCH SYSTEM</p></div>', unsafe_allow_html=True)
         
         # Navigation
-        pages = [
-            ("DASHBOARD", "dashboard"),
-            ("RESEARCH DOCUMENTS", "documents"),
-            ("FULL VOYAGE MAP", "map"),
-            ("ANALYTICS", "analytics"),
-            ("SETTINGS", "settings")
-        ]
-        
-        current_page = st.session_state.current_page
-        
-        for label, page_id in pages:
-            if st.button(
-                label,
-                key=f"nav_{page_id}",
-                use_container_width=True,
-                type="primary" if current_page == page_id else "secondary"
-            ):
-                st.session_state.current_page = page_id
+        pages = [("DASHBOARD", "dashboard"), ("RESEARCH DOCUMENTS", "documents"), 
+                ("FULL VOYAGE MAP", "map"), ("ANALYTICS", "analytics"), ("SETTINGS", "settings")]
+        for label, pid in pages:
+            if st.button(label, key=f"nav_{pid}", use_container_width=True, 
+                        type="primary" if st.session_state.current_page == pid else "secondary"):
+                st.session_state.current_page = pid
                 st.rerun()
         
-        st.divider()
+        # Feedback button (above settings)
+        st.sidebar.markdown("---")
+        if st.sidebar.button("📧 SEND FEEDBACK", key="feedback_nav", use_container_width=True):
+            st.session_state.current_page = "feedback"
+            st.rerun()
         
-        # Quick stats
+        # Saved searches
+        SavedSearchesSystem.render_sidebar()
+        
+        # System status
         if 'system_stats' in st.session_state:
             stats = st.session_state.system_stats
-            st.markdown("""
-            <div style="background: rgba(255,255,255,0.1); padding: 15px; border-radius: 10px; margin-top: 20px;">
-                <h4 style="color: #d4af37; margin-bottom: 10px; font-size: 1rem;">SYSTEM STATUS</h4>
-                <p style="color: white; margin: 5px 0; font-size: 0.9rem;"><strong>Documents:</strong> {}</p>
-                <p style="color: white; margin: 5px 0; font-size: 0.9rem;"><strong>Saved Searches:</strong> {}</p>
-                <p style="color: white; margin: 5px 0; font-size: 0.9rem;"><strong>Locations:</strong> {}</p>
-                <p style="color: white; margin: 5px 0; font-size: 0.9rem;"><strong>Chat History:</strong> {}</p>
-            </div>
-            """.format(
-                stats.get('total_documents', 0) if stats else 0,
-                stats.get('saved_searches', 0) if stats else 0,
-                stats.get('geocoded_locations', 25) if stats else 25,
-                len(st.session_state.get('chat_history', []))
-            ), unsafe_allow_html=True)
-        
-        # Render saved searches in sidebar (always visible, below system status)
-        SavedSearchesSystem.render_sidebar_saved_searches()
+            st.sidebar.markdown("---")
+            st.sidebar.markdown('<h3 class="system-status-header">SYSTEM STATUS</h3>', unsafe_allow_html=True)
+            st.sidebar.markdown(f'<div style="background:rgba(255,255,255,0.1);padding:15px;border-radius:10px;"><p style="color:#FFD700;"><strong>Documents:</strong> <span style="color:white;">{stats.get("total_documents",0)}</span></p><p style="color:#FFD700;"><strong>Saved:</strong> <span style="color:white;">{stats.get("saved_searches",0)}</span></p><p style="color:#FFD700;"><strong>Chat:</strong> <span style="color:white;">{len(st.session_state.chat_history)}</span></p></div>', unsafe_allow_html=True)
 
-# ========== MAIN APPLICATION ==========
-
-def main():
-    """Main application"""
+def show_feedback_page():
+    """Standalone feedback page"""
+    st.markdown('<h2 class="sub-header">SEND FEEDBACK</h2>', unsafe_allow_html=True)
     
-    # Custom HTML for header
     st.markdown("""
-    <div style="text-align: center; padding: 1rem 0 2rem 0;">
-        <h1 class="main-header">1421 AI - HISTORICAL RESEARCH SYSTEM</h1>
-        <p style="font-size: 1.2rem; color: #666; max-width: 800px; margin: 0 auto;">
-            A comprehensive research platform for studying Chinese exploration history and the 1421 theory
-        </p>
-        <p style="font-size: 1rem; color: #888; margin-top: 10px;">
-            Powered by document analysis + web research • ChatGPT-like interface • Saved searches
-        </p>
+    <div style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); padding: 30px; border-radius: 12px; margin: 20px 0;">
+        <h3 style="color: #2c3e50; margin-bottom: 20px;">Help us improve 1421 AI</h3>
+        <p style="color: #666; margin-bottom: 30px;">Your feedback helps us make the system better for everyone.</p>
     </div>
     """, unsafe_allow_html=True)
     
-    # Initialize system
-    with st.spinner("Initializing research system..."):
-        system = init_system()
+    col1, col2 = st.columns(2)
+    with col1:
+        name = st.text_input("Your Name", placeholder="Optional")
+    with col2:
+        email = st.text_input("Email Address", placeholder="Required")
     
-    if system is None or not system.db:
-        st.error("""
-        ## SYSTEM INITIALIZATION FAILED
-        
-        **Troubleshooting Steps:**
-        1. Make sure `knowledge_base.db` is in the `data/` folder
-        2. Check the file is properly uploaded to GitHub
-        3. Verify database is not corrupted
-        """)
-        
-        base_dir = Path(__file__).parent.parent
-        db_path = base_dir / "data" / "knowledge_base.db"
-        
-        st.write(f"- Database path: `{db_path}`")
-        st.write(f"- Database exists: `{db_path.exists()}`")
-        
+    feedback_type = st.selectbox("Feedback Type", 
+                                ["Bug Report", "Feature Request", "Suggestion", "Question", "Other"])
+    
+    message = st.text_area("Your Message", placeholder="Please describe your issue, suggestion, or question in detail...", 
+                          height=150)
+    
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col1:
+        if st.button("📤 SUBMIT FEEDBACK", type="primary", use_container_width=True):
+            if not email:
+                st.error("Email is required")
+            elif not message:
+                st.error("Message is required")
+            else:
+                if FeedbackSystem.send_feedback(name or "Anonymous", email, message, feedback_type):
+                    st.success("✅ Thank you for your feedback! We'll review it shortly.")
+                    st.balloons()
+                    st.session_state.feedback_submitted = True
+    
+    with col3:
+        if st.button("← BACK TO DASHBOARD", use_container_width=True):
+            st.session_state.current_page = "dashboard"
+            st.rerun()
+    
+    # Show recent feedback if submitted
+    if st.session_state.get('feedback_submitted'):
+        st.divider()
+        st.info("Your feedback has been recorded. Thank you for helping improve 1421 AI!")
+
+# ========== MAIN ==========
+def main():
+    st.markdown('<div style="text-align: center; padding: 1rem 0 1rem 0;"><h1 class="main-header">1421 AI - HISTORICAL RESEARCH SYSTEM</h1><p style="font-size: 1.2rem; color: #666; max-width: 800px; margin: 0 auto;">A comprehensive research platform for studying Chinese exploration history and the 1421 theory</p></div>', unsafe_allow_html=True)
+    
+    system = init_system()
+    if not system or not system.db:
+        st.error("SYSTEM INITIALIZATION FAILED. Check if knowledge_base.db exists in the data folder.")
         st.stop()
     
-    # Get and store stats
-    stats = system.get_database_stats()
-    if stats:
-        st.session_state.system_stats = stats
-        
-        # Show popup notification with safe access to stats
-        if stats.get('total_documents', 0) > 0:
-            saved_searches_count = stats.get('saved_searches', 0)
-            show_popup_notification(
-                f"System Status: {stats.get('total_documents', 0)} historical documents loaded • "
-                f"{saved_searches_count} saved searches • Web research active"
-            )
-    
-    # Render sidebar
+    st.session_state.system_stats = system.get_database_stats()
     render_sidebar()
     
-    # Main content area
-    current_page = st.session_state.current_page
-    
-    # Show selected page
-    if current_page == "dashboard":
+    # Page routing
+    if st.session_state.current_page == "feedback":
+        show_feedback_page()
+    elif st.session_state.current_page == "dashboard":
         show_dashboard(system)
-    elif current_page == "documents":
+    elif st.session_state.current_page == "documents":
         show_documents_page(system)
-    elif current_page == "map":
+    elif st.session_state.current_page == "map":
         show_map_page(system)
-    elif current_page == "analytics":
+    elif st.session_state.current_page == "analytics":
         show_analytics_page(system)
-    elif current_page == "settings":
+    elif st.session_state.current_page == "settings":
         show_settings_page(system)
+
+@st.cache_resource
+def init_system():
+    return ResearchSystem()
 
 if __name__ == "__main__":
     main()
