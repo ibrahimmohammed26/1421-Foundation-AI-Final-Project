@@ -22,6 +22,7 @@ from collections import Counter
 import requests
 from typing import List, Dict, Optional, Tuple
 import hashlib
+import hmac
 
 # Optional imports - graceful fallback
 try:
@@ -77,6 +78,9 @@ DEFAULT_STATE = {
     'chat_sessions': [],
     'current_chat_id': 0,
     'show_nav': True,
+    'logged_in': False,
+    'username': '',
+    'user_id': None,
 }
 
 for key, value in DEFAULT_STATE.items():
@@ -108,6 +112,7 @@ st.markdown("""
     max-width: 1400px;
     margin-left: auto;
     margin-right: auto;
+    padding-bottom: 100px;  /* Space for fixed input */
 }
 
 /* Brand font */
@@ -144,11 +149,17 @@ st.markdown("""
     padding-bottom: 0.5rem;
 }
 
-/* Sidebar styling */
+/* Sidebar styling - REMOVED the black and gold icon */
 section[data-testid="stSidebar"] > div {
     background: linear-gradient(135deg, #2c3e50 0%, #1a252f 100%) !important;
     border-right: 4px solid #d4af37;
-    padding-top: 1rem !important;
+    padding-top: 0.5rem !important;
+}
+
+/* Remove any potential icons */
+.stSidebar [data-testid="stImage"], 
+.stSidebar [data-testid="stLogo"] {
+    display: none !important;
 }
 
 /* Nav buttons */
@@ -332,14 +343,61 @@ section[data-testid="stSidebar"] > div {
     border-left: 6px solid #d4af37;
 }
 
-/* Chat input fixed at bottom */
-.chat-input-area {
-    position: sticky;
-    bottom: 0;
+/* FIXED: DeepSeek-style sticky input at bottom */
+.sticky-input-container {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(800px, 90%);
     background: white;
-    padding: 15px 0;
-    border-top: 1px solid #eee;
-    z-index: 100;
+    padding: 10px 10px 10px 20px;
+    border: 1px solid #e0e0e0;
+    border-radius: 40px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    backdrop-filter: blur(10px);
+    background: rgba(255,255,255,0.98);
+    margin-left: 150px; /* Account for sidebar */
+}
+
+.sticky-input-container input {
+    border: none;
+    background: transparent;
+    padding: 12px 0;
+    font-size: 1rem;
+    outline: none;
+    flex-grow: 1;
+    color: #333;
+}
+
+.sticky-input-container input::placeholder {
+    color: #999;
+    font-size: 0.95rem;
+}
+
+.sticky-input-container button {
+    background: #d4af37;
+    color: #000000;
+    border: none;
+    border-radius: 30px;
+    padding: 10px 24px;
+    font-weight: 600;
+    margin-left: 10px;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.sticky-input-container button:hover {
+    background: #c4a030;
+}
+
+/* Hide the original input */
+.hidden-input {
+    display: none;
 }
 
 /* Main content buttons */
@@ -354,7 +412,7 @@ section[data-testid="stSidebar"] > div {
     background: #c4a030 !important;
 }
 
-/* Map controls - buttons above slider */
+/* Map controls */
 .map-controls {
     display: flex;
     gap: 10px;
@@ -371,7 +429,7 @@ section[data-testid="stSidebar"] > div {
     margin-bottom: 20px;
 }
 
-/* Larger timeline */
+/* Timeline styling */
 .timeline-container {
     margin-top: 30px;
     padding: 20px;
@@ -398,21 +456,22 @@ section[data-testid="stSidebar"] > div {
     margin-right: 15px;
 }
 
-/* Example question buttons */
-.example-question-btn {
-    background: #f8f9fa;
-    border: 1px solid #d4af37;
-    border-radius: 6px;
-    padding: 8px;
-    margin: 4px;
-    text-align: center;
-    cursor: pointer;
-    transition: all 0.3s ease;
+/* Login form styling */
+.login-container {
+    max-width: 400px;
+    margin: 50px auto;
+    padding: 30px;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+    border-left: 6px solid #d4af37;
 }
 
-.example-question-btn:hover {
-    background: #d4af37;
-    color: #000;
+.login-title {
+    font-family: 'Cinzel', serif;
+    color: #2c3e50;
+    text-align: center;
+    margin-bottom: 30px;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -435,6 +494,114 @@ class ThreadSafeDatabase:
         cursor = conn.cursor()
         cursor.execute(query, params or ())
         return cursor
+
+
+# ========== USER AUTHENTICATION SYSTEM ==========
+class UserAuthSystem:
+    """Handles user registration, login, and session management"""
+    
+    def __init__(self, db_path):
+        self.db_path = db_path
+        self._init_users_table()
+    
+    def _init_users_table(self):
+        """Create users table if it doesn't exist"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                email TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                last_login TEXT,
+                is_active INTEGER DEFAULT 1
+            )
+        ''')
+        conn.commit()
+        conn.close()
+    
+    def _hash_password(self, password: str) -> str:
+        """Hash a password using SHA-256 with salt"""
+        salt = "1421_foundation_salt"  # In production, use a random salt per user
+        return hashlib.sha256(f"{password}{salt}".encode()).hexdigest()
+    
+    def register_user(self, username: str, email: str, password: str) -> Tuple[bool, str]:
+        """Register a new user"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Check if username exists
+            cursor.execute("SELECT id FROM users WHERE username = ?", (username,))
+            if cursor.fetchone():
+                conn.close()
+                return False, "Username already exists"
+            
+            # Check if email exists
+            cursor.execute("SELECT id FROM users WHERE email = ?", (email,))
+            if cursor.fetchone():
+                conn.close()
+                return False, "Email already registered"
+            
+            # Create new user
+            password_hash = self._hash_password(password)
+            created_at = datetime.now().isoformat()
+            
+            cursor.execute('''
+                INSERT INTO users (username, email, password_hash, created_at)
+                VALUES (?, ?, ?, ?)
+            ''', (username, email, password_hash, created_at))
+            
+            conn.commit()
+            user_id = cursor.lastrowid
+            conn.close()
+            
+            return True, f"User registered successfully with ID: {user_id}"
+        except Exception as e:
+            return False, f"Registration error: {str(e)}"
+    
+    def login_user(self, username: str, password: str) -> Tuple[bool, str, dict]:
+        """Login a user"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            password_hash = self._hash_password(password)
+            
+            cursor.execute('''
+                SELECT id, username, email, created_at FROM users 
+                WHERE username = ? AND password_hash = ? AND is_active = 1
+            ''', (username, password_hash))
+            
+            user = cursor.fetchone()
+            
+            if user:
+                # Update last login
+                cursor.execute('''
+                    UPDATE users SET last_login = ? WHERE id = ?
+                ''', (datetime.now().isoformat(), user[0]))
+                conn.commit()
+                
+                user_data = {
+                    'id': user[0],
+                    'username': user[1],
+                    'email': user[2],
+                    'created_at': user[3]
+                }
+                conn.close()
+                return True, "Login successful", user_data
+            else:
+                conn.close()
+                return False, "Invalid username or password", {}
+        except Exception as e:
+            return False, f"Login error: {str(e)}", {}
+    
+    def get_user_chats(self, user_id: int) -> List[Dict]:
+        """Get all chats for a user (for future implementation)"""
+        # This would be implemented when we add user-specific chat storage
+        return []
 
 
 # ========== WEB SEARCH MODULE ==========
@@ -721,10 +888,87 @@ Provide a comprehensive answer that:
         }
 
 
+# ========== LOGIN PAGE ==========
+def show_login_page():
+    """Display login/registration page"""
+    
+    st.markdown('<div class="brand-title">1421 Foundation AI</div>', unsafe_allow_html=True)
+    st.markdown('<div class="brand-subtitle">Historical Maritime Research Platform</div>', unsafe_allow_html=True)
+    
+    # Initialize auth system
+    auth_db_path = Path(__file__).parent / "data" / "users.db"
+    auth = UserAuthSystem(str(auth_db_path))
+    
+    # Create tabs for login and registration
+    tab1, tab2 = st.tabs(["LOGIN", "REGISTER"])
+    
+    with tab1:
+        with st.form("login_form"):
+            st.markdown('<div class="login-container">', unsafe_allow_html=True)
+            st.markdown('<h3 class="login-title">Login to Your Account</h3>', unsafe_allow_html=True)
+            
+            username = st.text_input("Username", placeholder="Enter your username")
+            password = st.text_input("Password", type="password", placeholder="Enter your password")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                submitted = st.form_submit_button("LOGIN", use_container_width=True)
+            
+            if submitted:
+                if username and password:
+                    success, message, user_data = auth.login_user(username, password)
+                    if success:
+                        st.session_state.logged_in = True
+                        st.session_state.username = user_data['username']
+                        st.session_state.user_id = user_data['id']
+                        st.success(f"Welcome back, {username}!")
+                        st.rerun()
+                    else:
+                        st.error(message)
+                else:
+                    st.warning("Please enter both username and password")
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+    
+    with tab2:
+        with st.form("register_form"):
+            st.markdown('<div class="login-container">', unsafe_allow_html=True)
+            st.markdown('<h3 class="login-title">Create New Account</h3>', unsafe_allow_html=True)
+            
+            new_username = st.text_input("Username", placeholder="Choose a username")
+            new_email = st.text_input("Email", placeholder="Enter your email")
+            new_password = st.text_input("Password", type="password", placeholder="Choose a password")
+            confirm_password = st.text_input("Confirm Password", type="password", placeholder="Confirm your password")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                submitted = st.form_submit_button("REGISTER", use_container_width=True)
+            
+            if submitted:
+                if not new_username or not new_email or not new_password:
+                    st.warning("All fields are required")
+                elif new_password != confirm_password:
+                    st.error("Passwords do not match")
+                elif len(new_password) < 6:
+                    st.error("Password must be at least 6 characters")
+                else:
+                    success, message = auth.register_user(new_username, new_email, new_password)
+                    if success:
+                        st.success("Registration successful! Please login.")
+                    else:
+                        st.error(message)
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+
+
 # ========== PAGE: DASHBOARD ==========
 def show_dashboard(system):
     st.markdown('<div class="brand-title">1421 Foundation AI Research System</div>', unsafe_allow_html=True)
     st.markdown('<div class="brand-subtitle">Historical Maritime Research Platform</div>', unsafe_allow_html=True)
+
+    # Show welcome message with username
+    if st.session_state.logged_in:
+        st.markdown(f"### Welcome back, {st.session_state.username}! 👋")
 
     stats = system.get_database_stats()
     cols = st.columns(4)
@@ -812,7 +1056,6 @@ def show_chat_page(system):
         # List all chat sessions
         for session in reversed(st.session_state.chat_sessions[-20:]):
             is_active = session['id'] == current_chat_id
-            active_class = "active" if is_active else ""
             
             # Create a container for the chat session
             cols = st.columns([4, 1])
@@ -833,15 +1076,8 @@ def show_chat_page(system):
     with chat_col:
         st.markdown(f'<div class="sub-header">{current_session["name"]}</div>', unsafe_allow_html=True)
 
-        # Check for auto-search from example questions
-        if st.session_state.auto_search and st.session_state.current_question:
-            question = st.session_state.current_question
-            st.session_state.auto_search = False
-        else:
-            question = st.session_state.current_question
-
-        # Chat messages in a scrollable container
-        chat_container = st.container(height=500)
+        # Chat messages container
+        chat_container = st.container(height=450)
         with chat_container:
             if not chat_history:
                 st.markdown("""
@@ -875,37 +1111,63 @@ def show_chat_page(system):
                             if res.get('url'):
                                 st.markdown(f"[View]({res['url']})")
 
-        # Input at bottom
-        st.markdown("---")
-        input_col, btn_col = st.columns([5, 1])
-        with input_col:
-            question_input = st.text_input(
-                "Ask a question",
-                value=question if question else "",
-                key="chat_q",
-                label_visibility="collapsed",
-                placeholder="Ask about Chinese exploration, Zheng He, or the 1421 theory..."
-            )
-        with btn_col:
-            ask = st.button("Research", type="primary", key="chat_ask", use_container_width=True)
-
-        # Process the question
-        if (ask or (question and st.session_state.auto_search)) and question_input:
-            with st.spinner("Researching..."):
-                result = system.perform_search(question_input)
-                
-                # Update the current chat session
-                for session in st.session_state.chat_sessions:
-                    if session['id'] == st.session_state.current_chat_id:
-                        session['history'].append(result)
-                        # Update chat name with the question (first 6 words)
-                        words = question_input.strip().split()
-                        summary = ' '.join(words[:6]) + ('...' if len(words) > 6 else '')
-                        session['name'] = summary
-                        break
-                
-                st.session_state.current_question = ""
-                st.rerun()
+    # Hidden inputs for the sticky bar
+    st.markdown('<div class="hidden-input">', unsafe_allow_html=True)
+    question_input = st.text_input("Hidden", key="hidden_q", label_visibility="collapsed")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # FIXED: DeepSeek-style sticky input at bottom
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown("""
+        <div class="sticky-input-container">
+            <input type="text" id="sticky-question" placeholder="Ask about Chinese exploration, Zheng He, or the 1421 theory...">
+            <button id="sticky-research" onclick="document.getElementById('sticky_research_btn').click();">Research</button>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Hidden button to trigger search
+    ask = st.button("Research", key="sticky_research_btn", type="primary")
+    
+    # Get the question from either source
+    question = st.session_state.current_question
+    
+    # FIXED: Auto-search when coming from example question
+    if st.session_state.auto_search and question:
+        st.session_state.auto_search = False
+        with st.spinner("Researching..."):
+            result = system.perform_search(question)
+            
+            # Update the current chat session
+            for session in st.session_state.chat_sessions:
+                if session['id'] == st.session_state.current_chat_id:
+                    session['history'].append(result)
+                    # Update chat name with the question
+                    words = question.strip().split()
+                    summary = ' '.join(words[:6]) + ('...' if len(words) > 6 else '')
+                    session['name'] = summary
+                    break
+            
+            st.session_state.current_question = ""
+            st.rerun()
+    
+    # Handle manual search
+    if ask and question_input:
+        with st.spinner("Researching..."):
+            result = system.perform_search(question_input)
+            
+            # Update the current chat session
+            for session in st.session_state.chat_sessions:
+                if session['id'] == st.session_state.current_chat_id:
+                    session['history'].append(result)
+                    # Update chat name with the question
+                    words = question_input.strip().split()
+                    summary = ' '.join(words[:6]) + ('...' if len(words) > 6 else '')
+                    session['name'] = summary
+                    break
+            
+            st.session_state.current_question = ""
+            st.rerun()
 
 
 # ========== PAGE: DOCUMENTS ==========
@@ -957,7 +1219,7 @@ def show_map_page(system):
     locations = map_data['locations']
     timeline = map_data['timeline_events']
 
-    # Map controls - buttons above the slider (FIXED)
+    # Map controls - buttons above the slider
     st.markdown('<div class="map-controls">', unsafe_allow_html=True)
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -973,13 +1235,13 @@ def show_map_page(system):
             st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Year slider - larger and below buttons
+    # Year slider - below buttons
     st.markdown('<div class="map-slider-container">', unsafe_allow_html=True)
     year = st.slider("Year", 1368, 1421, st.session_state.current_year, key="map_slider")
     st.session_state.current_year = year
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Animation logic - FIXED
+    # Animation logic
     if st.session_state.animation_playing:
         if st.session_state.current_year < 1421:
             st.session_state.current_year += 1
@@ -1015,7 +1277,7 @@ def show_map_page(system):
 
         st_folium(m, width=None, height=500, use_container_width=True)
     else:
-        # Plotly geo fallback - proper world map
+        # Plotly geo fallback
         fig = go.Figure()
 
         if filtered:
@@ -1057,13 +1319,12 @@ def show_map_page(system):
         )
         st.plotly_chart(fig, use_container_width=True)
 
-    # Timeline - LARGER and improved styling
+    # Timeline
     st.divider()
     st.markdown(f'<h3 style="font-family: \'Cinzel\', serif;">Historical Timeline (to {st.session_state.current_year})</h3>', unsafe_allow_html=True)
     
     filtered_events = [e for e in timeline if e['year'] <= st.session_state.current_year]
     
-    # Larger timeline container with scrolling
     st.markdown('<div class="timeline-container">', unsafe_allow_html=True)
     for ev in filtered_events:
         st.markdown(f"""
@@ -1156,6 +1417,21 @@ def show_settings_page(system):
     st.session_state.search_mode = mode
 
     st.divider()
+    st.subheader("Account")
+    if st.session_state.logged_in:
+        st.write(f"Logged in as: **{st.session_state.username}**")
+        if st.button("LOGOUT", use_container_width=True):
+            st.session_state.logged_in = False
+            st.session_state.username = ''
+            st.session_state.user_id = None
+            st.rerun()
+    else:
+        st.info("Not logged in")
+        if st.button("GO TO LOGIN", use_container_width=True):
+            st.session_state.current_page = 'login'
+            st.rerun()
+
+    st.divider()
     c1, c2 = st.columns(2)
     with c1:
         if st.button("CLEAR CHAT HISTORY", use_container_width=True):
@@ -1178,8 +1454,15 @@ def show_settings_page(system):
 # ========== LEFT SIDEBAR NAVIGATION ==========
 def render_sidebar():
     with st.sidebar:
-        st.markdown('<div class="brand-title" style="font-size:1.4rem;">1421 Foundation AI</div>', unsafe_allow_html=True)
-        st.markdown('<div class="brand-subtitle" style="font-size:0.65rem;">Research System</div>', unsafe_allow_html=True)
+        # REMOVED the black and gold icon - just showing title only
+        st.markdown('<div style="text-align: center; margin-bottom: 10px;">', unsafe_allow_html=True)
+        st.markdown('<h2 style="color: #d4af37; font-family: Cinzel; margin:0;">1421 FOUNDATION</h2>', unsafe_allow_html=True)
+        st.markdown('<p style="color: #888; font-size:0.7rem;">Research System</p>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        # Show user info if logged in
+        if st.session_state.logged_in:
+            st.markdown(f"<p style='color: #d4af37; text-align:center;'>Welcome, {st.session_state.username}</p>", unsafe_allow_html=True)
 
         pages = [
             ("🏠  DASHBOARD", "dashboard"),
@@ -1190,6 +1473,10 @@ def render_sidebar():
             ("✉️  FEEDBACK", "feedback"),
             ("⚙️  SETTINGS", "settings"),
         ]
+
+        # Add login/logout button based on status
+        if not st.session_state.logged_in:
+            pages.append(("🔐  LOGIN", "login"))
 
         for label, pid in pages:
             btn_type = "primary" if st.session_state.current_page == pid else "secondary"
@@ -1207,12 +1494,18 @@ def init_system():
 def main():
     system = init_system()
 
+    # Check if we need to show login page
+    if not st.session_state.logged_in and st.session_state.current_page != 'login':
+        st.session_state.current_page = 'login'
+
     # Left sidebar navigation
     render_sidebar()
 
     # Route pages
     page = st.session_state.current_page
-    if page == "dashboard":
+    if page == "login":
+        show_login_page()
+    elif page == "dashboard":
         show_dashboard(system)
     elif page == "chat":
         show_chat_page(system)
