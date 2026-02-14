@@ -22,7 +22,6 @@ from collections import Counter
 import requests
 from typing import List, Dict, Optional, Tuple
 import hashlib
-import hmac
 
 # Optional imports - graceful fallback
 try:
@@ -112,7 +111,7 @@ st.markdown("""
     max-width: 1400px;
     margin-left: auto;
     margin-right: auto;
-    padding-bottom: 100px;  /* Space for fixed input */
+    padding-bottom: 100px;
 }
 
 /* Brand font */
@@ -149,7 +148,7 @@ st.markdown("""
     padding-bottom: 0.5rem;
 }
 
-/* Sidebar styling - REMOVED the black and gold icon */
+/* Sidebar styling */
 section[data-testid="stSidebar"] > div {
     background: linear-gradient(135deg, #2c3e50 0%, #1a252f 100%) !important;
     border-right: 4px solid #d4af37;
@@ -360,7 +359,7 @@ section[data-testid="stSidebar"] > div {
     align-items: center;
     backdrop-filter: blur(10px);
     background: rgba(255,255,255,0.98);
-    margin-left: 150px; /* Account for sidebar */
+    margin-left: 150px;
 }
 
 .sticky-input-container input {
@@ -412,16 +411,18 @@ section[data-testid="stSidebar"] > div {
     background: #c4a030 !important;
 }
 
-/* Map controls */
+/* Map controls - single play/pause toggle button */
 .map-controls {
     display: flex;
     gap: 10px;
     margin-bottom: 15px;
     align-items: center;
+    justify-content: center;
 }
 
 .map-controls .stButton {
-    flex: 1;
+    flex: 0 1 auto;
+    min-width: 120px;
 }
 
 .map-slider-container {
@@ -473,6 +474,13 @@ section[data-testid="stSidebar"] > div {
     text-align: center;
     margin-bottom: 30px;
 }
+
+/* System status */
+.system-status {
+    color: #d4af37;
+    font-size: 0.8rem;
+    margin: 5px 0;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -485,7 +493,8 @@ class ThreadSafeDatabase:
 
     def get_connection(self):
         if not hasattr(self.local, 'conn'):
-            self.local.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+            # FIXED: Added timeout and better error handling
+            self.local.conn = sqlite3.connect(str(self.db_path), check_same_thread=False, timeout=10)
             self.local.conn.row_factory = sqlite3.Row
         return self.local.conn
 
@@ -494,114 +503,6 @@ class ThreadSafeDatabase:
         cursor = conn.cursor()
         cursor.execute(query, params or ())
         return cursor
-
-
-# ========== USER AUTHENTICATION SYSTEM ==========
-class UserAuthSystem:
-    """Handles user registration, login, and session management"""
-    
-    def __init__(self, db_path):
-        self.db_path = db_path
-        self._init_users_table()
-    
-    def _init_users_table(self):
-        """Create users table if it doesn't exist"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT UNIQUE NOT NULL,
-                email TEXT UNIQUE NOT NULL,
-                password_hash TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                last_login TEXT,
-                is_active INTEGER DEFAULT 1
-            )
-        ''')
-        conn.commit()
-        conn.close()
-    
-    def _hash_password(self, password: str) -> str:
-        """Hash a password using SHA-256 with salt"""
-        salt = "1421_foundation_salt"  # In production, use a random salt per user
-        return hashlib.sha256(f"{password}{salt}".encode()).hexdigest()
-    
-    def register_user(self, username: str, email: str, password: str) -> Tuple[bool, str]:
-        """Register a new user"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            # Check if username exists
-            cursor.execute("SELECT id FROM users WHERE username = ?", (username,))
-            if cursor.fetchone():
-                conn.close()
-                return False, "Username already exists"
-            
-            # Check if email exists
-            cursor.execute("SELECT id FROM users WHERE email = ?", (email,))
-            if cursor.fetchone():
-                conn.close()
-                return False, "Email already registered"
-            
-            # Create new user
-            password_hash = self._hash_password(password)
-            created_at = datetime.now().isoformat()
-            
-            cursor.execute('''
-                INSERT INTO users (username, email, password_hash, created_at)
-                VALUES (?, ?, ?, ?)
-            ''', (username, email, password_hash, created_at))
-            
-            conn.commit()
-            user_id = cursor.lastrowid
-            conn.close()
-            
-            return True, f"User registered successfully with ID: {user_id}"
-        except Exception as e:
-            return False, f"Registration error: {str(e)}"
-    
-    def login_user(self, username: str, password: str) -> Tuple[bool, str, dict]:
-        """Login a user"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            password_hash = self._hash_password(password)
-            
-            cursor.execute('''
-                SELECT id, username, email, created_at FROM users 
-                WHERE username = ? AND password_hash = ? AND is_active = 1
-            ''', (username, password_hash))
-            
-            user = cursor.fetchone()
-            
-            if user:
-                # Update last login
-                cursor.execute('''
-                    UPDATE users SET last_login = ? WHERE id = ?
-                ''', (datetime.now().isoformat(), user[0]))
-                conn.commit()
-                
-                user_data = {
-                    'id': user[0],
-                    'username': user[1],
-                    'email': user[2],
-                    'created_at': user[3]
-                }
-                conn.close()
-                return True, "Login successful", user_data
-            else:
-                conn.close()
-                return False, "Invalid username or password", {}
-        except Exception as e:
-            return False, f"Login error: {str(e)}", {}
-    
-    def get_user_chats(self, user_id: int) -> List[Dict]:
-        """Get all chats for a user (for future implementation)"""
-        # This would be implemented when we add user-specific chat storage
-        return []
 
 
 # ========== WEB SEARCH MODULE ==========
@@ -888,6 +789,116 @@ Provide a comprehensive answer that:
         }
 
 
+# ========== USER AUTHENTICATION SYSTEM ==========
+class UserAuthSystem:
+    """Handles user registration, login, and session management"""
+    
+    def __init__(self):
+        # FIXED: Create data directory if it doesn't exist
+        data_dir = Path(__file__).parent / "data"
+        data_dir.mkdir(exist_ok=True)
+        self.db_path = data_dir / "users.db"
+        self._init_users_table()
+    
+    def _init_users_table(self):
+        """Create users table if it doesn't exist"""
+        try:
+            # FIXED: Added timeout and better error handling
+            conn = sqlite3.connect(str(self.db_path), timeout=10)
+            cursor = conn.cursor()
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE NOT NULL,
+                    email TEXT UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    last_login TEXT,
+                    is_active INTEGER DEFAULT 1
+                )
+            ''')
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            print(f"Error creating users table: {e}")
+    
+    def _hash_password(self, password: str) -> str:
+        """Hash a password using SHA-256 with salt"""
+        salt = "1421_foundation_salt"  # In production, use environment variable
+        return hashlib.sha256(f"{password}{salt}".encode()).hexdigest()
+    
+    def register_user(self, username: str, email: str, password: str) -> Tuple[bool, str]:
+        """Register a new user"""
+        try:
+            conn = sqlite3.connect(str(self.db_path), timeout=10)
+            cursor = conn.cursor()
+            
+            # Check if username exists
+            cursor.execute("SELECT id FROM users WHERE username = ?", (username,))
+            if cursor.fetchone():
+                conn.close()
+                return False, "Username already exists"
+            
+            # Check if email exists
+            cursor.execute("SELECT id FROM users WHERE email = ?", (email,))
+            if cursor.fetchone():
+                conn.close()
+                return False, "Email already registered"
+            
+            # Create new user
+            password_hash = self._hash_password(password)
+            created_at = datetime.now().isoformat()
+            
+            cursor.execute('''
+                INSERT INTO users (username, email, password_hash, created_at)
+                VALUES (?, ?, ?, ?)
+            ''', (username, email, password_hash, created_at))
+            
+            conn.commit()
+            user_id = cursor.lastrowid
+            conn.close()
+            
+            return True, f"User registered successfully"
+        except Exception as e:
+            return False, f"Registration error: {str(e)}"
+    
+    def login_user(self, username: str, password: str) -> Tuple[bool, str, dict]:
+        """Login a user"""
+        try:
+            conn = sqlite3.connect(str(self.db_path), timeout=10)
+            cursor = conn.cursor()
+            
+            password_hash = self._hash_password(password)
+            
+            cursor.execute('''
+                SELECT id, username, email, created_at FROM users 
+                WHERE username = ? AND password_hash = ? AND is_active = 1
+            ''', (username, password_hash))
+            
+            user = cursor.fetchone()
+            
+            if user:
+                # Update last login
+                cursor.execute('''
+                    UPDATE users SET last_login = ? WHERE id = ?
+                ''', (datetime.now().isoformat(), user[0]))
+                conn.commit()
+                
+                user_data = {
+                    'id': user[0],
+                    'username': user[1],
+                    'email': user[2],
+                    'created_at': user[3]
+                }
+                conn.close()
+                return True, "Login successful", user_data
+            else:
+                conn.close()
+                return False, "Invalid username or password", {}
+        except Exception as e:
+            return False, f"Login error: {str(e)}", {}
+
+
 # ========== LOGIN PAGE ==========
 def show_login_page():
     """Display login/registration page"""
@@ -896,8 +907,7 @@ def show_login_page():
     st.markdown('<div class="brand-subtitle">Historical Maritime Research Platform</div>', unsafe_allow_html=True)
     
     # Initialize auth system
-    auth_db_path = Path(__file__).parent / "data" / "users.db"
-    auth = UserAuthSystem(str(auth_db_path))
+    auth = UserAuthSystem()
     
     # Create tabs for login and registration
     tab1, tab2 = st.tabs(["LOGIN", "REGISTER"])
@@ -922,6 +932,7 @@ def show_login_page():
                         st.session_state.username = user_data['username']
                         st.session_state.user_id = user_data['id']
                         st.success(f"Welcome back, {username}!")
+                        st.session_state.current_page = 'dashboard'
                         st.rerun()
                     else:
                         st.error(message)
@@ -955,6 +966,9 @@ def show_login_page():
                     success, message = auth.register_user(new_username, new_email, new_password)
                     if success:
                         st.success("Registration successful! Please login.")
+                        # Switch to login tab
+                        st.session_state.login_tab = 0
+                        st.rerun()
                     else:
                         st.error(message)
             
@@ -1076,6 +1090,13 @@ def show_chat_page(system):
     with chat_col:
         st.markdown(f'<div class="sub-header">{current_session["name"]}</div>', unsafe_allow_html=True)
 
+        # FIXED: Check for auto-search from example questions
+        if st.session_state.auto_search and st.session_state.current_question:
+            question = st.session_state.current_question
+            st.session_state.auto_search = False
+        else:
+            question = ""
+
         # Chat messages container
         chat_container = st.container(height=450)
         with chat_container:
@@ -1111,63 +1132,54 @@ def show_chat_page(system):
                             if res.get('url'):
                                 st.markdown(f"[View]({res['url']})")
 
-    # Hidden inputs for the sticky bar
-    st.markdown('<div class="hidden-input">', unsafe_allow_html=True)
-    question_input = st.text_input("Hidden", key="hidden_q", label_visibility="collapsed")
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    # FIXED: DeepSeek-style sticky input at bottom
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
+        # FIXED: Sticky input bar
         st.markdown("""
         <div class="sticky-input-container">
             <input type="text" id="sticky-question" placeholder="Ask about Chinese exploration, Zheng He, or the 1421 theory...">
             <button id="sticky-research" onclick="document.getElementById('sticky_research_btn').click();">Research</button>
         </div>
         """, unsafe_allow_html=True)
-    
-    # Hidden button to trigger search
-    ask = st.button("Research", key="sticky_research_btn", type="primary")
-    
-    # Get the question from either source
-    question = st.session_state.current_question
-    
-    # FIXED: Auto-search when coming from example question
-    if st.session_state.auto_search and question:
-        st.session_state.auto_search = False
-        with st.spinner("Researching..."):
-            result = system.perform_search(question)
-            
-            # Update the current chat session
-            for session in st.session_state.chat_sessions:
-                if session['id'] == st.session_state.current_chat_id:
-                    session['history'].append(result)
-                    # Update chat name with the question
-                    words = question.strip().split()
-                    summary = ' '.join(words[:6]) + ('...' if len(words) > 6 else '')
-                    session['name'] = summary
-                    break
-            
-            st.session_state.current_question = ""
-            st.rerun()
-    
-    # Handle manual search
-    if ask and question_input:
-        with st.spinner("Researching..."):
-            result = system.perform_search(question_input)
-            
-            # Update the current chat session
-            for session in st.session_state.chat_sessions:
-                if session['id'] == st.session_state.current_chat_id:
-                    session['history'].append(result)
-                    # Update chat name with the question
-                    words = question_input.strip().split()
-                    summary = ' '.join(words[:6]) + ('...' if len(words) > 6 else '')
-                    session['name'] = summary
-                    break
-            
-            st.session_state.current_question = ""
-            st.rerun()
+        
+        # Hidden input and button
+        question_input = st.text_input("Hidden", key="sticky_q", label_visibility="collapsed", placeholder="")
+        ask = st.button("Research", key="sticky_research_btn", type="primary")
+        
+        # FIXED: Handle auto-search from example
+        if st.session_state.auto_search and st.session_state.current_question:
+            with st.spinner("Researching..."):
+                result = system.perform_search(st.session_state.current_question)
+                
+                # Update the current chat session
+                for session in st.session_state.chat_sessions:
+                    if session['id'] == st.session_state.current_chat_id:
+                        session['history'].append(result)
+                        # Update chat name with the question
+                        words = st.session_state.current_question.strip().split()
+                        summary = ' '.join(words[:6]) + ('...' if len(words) > 6 else '')
+                        session['name'] = summary
+                        break
+                
+                st.session_state.current_question = ""
+                st.session_state.auto_search = False
+                st.rerun()
+        
+        # Handle manual search
+        if ask and question_input:
+            with st.spinner("Researching..."):
+                result = system.perform_search(question_input)
+                
+                # Update the current chat session
+                for session in st.session_state.chat_sessions:
+                    if session['id'] == st.session_state.current_chat_id:
+                        session['history'].append(result)
+                        # Update chat name with the question
+                        words = question_input.strip().split()
+                        summary = ' '.join(words[:6]) + ('...' if len(words) > 6 else '')
+                        session['name'] = summary
+                        break
+                
+                st.session_state.current_question = ""
+                st.rerun()
 
 
 # ========== PAGE: DOCUMENTS ==========
@@ -1219,29 +1231,32 @@ def show_map_page(system):
     locations = map_data['locations']
     timeline = map_data['timeline_events']
 
-    # Map controls - buttons above the slider
+    # FIXED: Single play/pause toggle button
     st.markdown('<div class="map-controls">', unsafe_allow_html=True)
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns([1, 1])
     with col1:
-        if st.button("▶ PLAY", key="play_map", use_container_width=True):
-            st.session_state.animation_playing = True
+        if st.session_state.animation_playing:
+            if st.button("⏸ PAUSE", key="pause_map", use_container_width=True):
+                st.session_state.animation_playing = False
+                st.rerun()
+        else:
+            if st.button("▶ PLAY", key="play_map", use_container_width=True):
+                st.session_state.animation_playing = True
+                st.rerun()
     with col2:
-        if st.button("⏸ PAUSE", key="pause_map", use_container_width=True):
-            st.session_state.animation_playing = False
-    with col3:
         if st.button("↺ RESET", key="reset_map", use_container_width=True):
             st.session_state.current_year = 1368
             st.session_state.animation_playing = False
             st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Year slider - below buttons
+    # Year slider
     st.markdown('<div class="map-slider-container">', unsafe_allow_html=True)
     year = st.slider("Year", 1368, 1421, st.session_state.current_year, key="map_slider")
     st.session_state.current_year = year
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Animation logic
+    # FIXED: Animation logic
     if st.session_state.animation_playing:
         if st.session_state.current_year < 1421:
             st.session_state.current_year += 1
@@ -1424,6 +1439,7 @@ def show_settings_page(system):
             st.session_state.logged_in = False
             st.session_state.username = ''
             st.session_state.user_id = None
+            st.session_state.current_page = 'dashboard'
             st.rerun()
     else:
         st.info("Not logged in")
@@ -1454,7 +1470,7 @@ def show_settings_page(system):
 # ========== LEFT SIDEBAR NAVIGATION ==========
 def render_sidebar():
     with st.sidebar:
-        # REMOVED the black and gold icon - just showing title only
+        # Just showing title only
         st.markdown('<div style="text-align: center; margin-bottom: 10px;">', unsafe_allow_html=True)
         st.markdown('<h2 style="color: #d4af37; font-family: Cinzel; margin:0;">1421 FOUNDATION</h2>', unsafe_allow_html=True)
         st.markdown('<p style="color: #888; font-size:0.7rem;">Research System</p>', unsafe_allow_html=True)
@@ -1471,12 +1487,14 @@ def render_sidebar():
             ("🗺️  VOYAGE MAP", "map"),
             ("📊  ANALYTICS", "analytics"),
             ("✉️  FEEDBACK", "feedback"),
-            ("⚙️  SETTINGS", "settings"),
         ]
-
-        # Add login/logout button based on status
+        
+        # Add login/logout button above settings
         if not st.session_state.logged_in:
             pages.append(("🔐  LOGIN", "login"))
+        
+        # Settings always at the bottom
+        pages.append(("⚙️  SETTINGS", "settings"))
 
         for label, pid in pages:
             btn_type = "primary" if st.session_state.current_page == pid else "secondary"
@@ -1494,31 +1512,31 @@ def init_system():
 def main():
     system = init_system()
 
-    # Check if we need to show login page
-    if not st.session_state.logged_in and st.session_state.current_page != 'login':
-        st.session_state.current_page = 'login'
-
-    # Left sidebar navigation
-    render_sidebar()
-
-    # Route pages
-    page = st.session_state.current_page
-    if page == "login":
+    # Check if we need to show login page (but don't force redirect)
+    if not st.session_state.logged_in and st.session_state.current_page == 'login':
         show_login_page()
-    elif page == "dashboard":
-        show_dashboard(system)
-    elif page == "chat":
-        show_chat_page(system)
-    elif page == "documents":
-        show_documents_page(system)
-    elif page == "map":
-        show_map_page(system)
-    elif page == "analytics":
-        show_analytics_page(system)
-    elif page == "feedback":
-        show_feedback_page()
-    elif page == "settings":
-        show_settings_page(system)
+    else:
+        # Left sidebar navigation
+        render_sidebar()
+
+        # Route pages
+        page = st.session_state.current_page
+        if page == "login":
+            show_login_page()
+        elif page == "dashboard":
+            show_dashboard(system)
+        elif page == "chat":
+            show_chat_page(system)
+        elif page == "documents":
+            show_documents_page(system)
+        elif page == "map":
+            show_map_page(system)
+        elif page == "analytics":
+            show_analytics_page(system)
+        elif page == "feedback":
+            show_feedback_page()
+        elif page == "settings":
+            show_settings_page(system)
 
 
 if __name__ == "__main__":
