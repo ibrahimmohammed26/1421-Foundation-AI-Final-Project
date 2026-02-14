@@ -1,8 +1,8 @@
-"""1421 Foundation AI - Historical Research System
-Professional version with analytics, saved searches, and feedback
-FIXED: DeepSeek-style streaming responses
 """
-
+1421 Foundation AI Research System
+Complete Streamlit Application - Single File
+Uses GPT-4o-mini, SQLite, and vector database support
+"""
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -20,32 +20,47 @@ import os
 from collections import Counter
 import requests
 from typing import List, Dict, Optional, Tuple
-from bs4 import BeautifulSoup
-from googlesearch import search as google_search
-import openai
-
+import hashlib
+# Optional imports - graceful fallback
+try:
+    from bs4 import BeautifulSoup
+    HAS_BS4 = True
+except ImportError:
+    HAS_BS4 = False
+try:
+    from googlesearch import search as google_search
+    HAS_GOOGLE = True
+except ImportError:
+    HAS_GOOGLE = False
+try:
+    import openai
+    HAS_OPENAI = True
+except ImportError:
+    HAS_OPENAI = False
+try:
+    import folium
+    from streamlit_folium import st_folium
+    HAS_FOLIUM = True
+except ImportError:
+    HAS_FOLIUM = False
 # ========== PAGE CONFIG ==========
 st.set_page_config(
-    page_title="1421 Foundation AI - Historical Research System",
+    page_title="1421 Foundation AI Research System",
     page_icon="🗺️",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
-
 # ========== INITIALIZE SESSION STATE ==========
 DEFAULT_ANALYTICS = {
     'total_searches': 0, 'searches_by_day': {}, 'searches_by_hour': {},
     'questions_asked': [], 'response_times': [], 'popular_topics': {},
     'user_sessions': [], 'sources_used': {'documents': 0, 'web': 0, 'both': 0}
 }
-
 DEFAULT_STATE = {
     'search_analytics': DEFAULT_ANALYTICS,
-    'saved_searches': [],
     'current_page': 'dashboard',
     'current_question': '',
     'auto_search': False,
-    'deleting_search_id': None,
     'feedback_submitted': False,
     'animation_playing': False,
     'current_year': 1368,
@@ -53,327 +68,234 @@ DEFAULT_STATE = {
     'search_mode': 'Auto (Documents + Web)',
     'chat_sessions': [],
     'current_chat_id': 0,
-    'map_fullscreen': False,
-    'show_world_map': True
+    'show_nav': True,
 }
-
 for key, value in DEFAULT_STATE.items():
     if key not in st.session_state:
         st.session_state[key] = value
-
 # Initialize default chat session
 if not st.session_state.chat_sessions:
     st.session_state.chat_sessions = [{
         'id': 0,
-        'name': 'Chat 1',
+        'name': 'New Chat',
         'history': [],
         'created': datetime.now().strftime("%Y-%m-%d %H:%M")
     }]
-
-# ========== CSS STYLING - Professional, No Emojis ==========
+# ========== CSS STYLING ==========
 st.markdown("""
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&family=Inter:wght@400;500;600;700&display=swap');
 /* Main styling */
 .stApp { background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); }
-.main .block-container { 
-    background: rgba(255,255,255,0.98); 
-    border-radius: 15px; 
-    padding: 1.5rem 2rem; 
-    margin-top: 1rem; 
-    box-shadow: 0 6px 20px rgba(0,0,0,0.1); 
-    max-width: 1400px; 
-    margin-left: auto; 
-    margin-right: auto; 
-    min-height: calc(100vh - 100px);
-    position: relative;
-    padding-bottom: 100px;
+.main .block-container {
+    background: rgba(255,255,255,0.98);
+    border-radius: 15px;
+    padding: 2rem;
+    margin-top: 1rem;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.1);
+    max-width: 1400px;
+    margin-left: auto;
+    margin-right: auto;
 }
-
-/* Remove extra spacing */
-.block-container {
-    padding-top: 1rem !important;
-    padding-bottom: 1rem !important;
+/* Brand font */
+.brand-title {
+    font-family: 'Cinzel', serif !important;
+    font-size: 2.2rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-align: center;
+    margin-bottom: 0.3rem;
+    letter-spacing: 1px;
 }
-
-/* Headers - No emojis */
-.main-header { 
-    font-size: 2.2rem; 
-    color: #000; 
-    text-align: center; 
-    margin-bottom: 0.3rem; 
-    font-weight: 800; 
-    background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%); 
-    -webkit-background-clip: text; 
-    -webkit-text-fill-color: transparent; 
+.brand-subtitle {
+    font-family: 'Inter', sans-serif;
+    font-size: 0.85rem;
+    color: #888;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 1.5rem;
 }
-.sub-header { 
-    font-size: 1.6rem; 
-    color: #2c3e50; 
-    margin-bottom: 1rem; 
-    font-weight: 700; 
-    border-bottom: 3px solid #d4af37; 
-    padding-bottom: 0.3rem; 
+/* Headers */
+.sub-header {
+    font-family: 'Cinzel', serif !important;
+    font-size: 1.6rem;
+    color: #2c3e50;
+    margin-bottom: 1.5rem;
+    font-weight: 700;
+    border-bottom: 3px solid #d4af37;
+    padding-bottom: 0.5rem;
 }
-
-/* Left Navigation Sidebar */
-section[data-testid="stSidebar"] > div { 
-    background: linear-gradient(135deg, #2c3e50 0%, #1a252f 100%) !important; 
+/* Sidebar styling */
+section[data-testid="stSidebar"] > div {
+    background: linear-gradient(135deg, #2c3e50 0%, #1a252f 100%) !important;
     border-right: 4px solid #d4af37;
     padding-top: 1rem !important;
-    width: 100%;
 }
-
-/* Navigation buttons - Yellow background with black text */
+/* Nav buttons */
 .stSidebar .stButton > button {
     background: #d4af37 !important;
     color: #000000 !important;
     border: none !important;
     border-radius: 6px;
     font-weight: 600 !important;
-    font-size: 0.9rem !important;
-    padding: 6px 10px !important;
-    margin: 1px 0 !important;
-    text-align: left;
+    font-size: 0.95rem !important;
+    padding: 10px 14px !important;
+    margin: 2px 0 !important;
     text-transform: uppercase;
     letter-spacing: 0.5px;
     transition: all 0.2s ease;
     width: 100%;
-    border-bottom: 2px solid transparent !important;
 }
-
 .stSidebar .stButton > button:hover {
     background: #c4a030 !important;
     transform: translateX(3px);
-    border-bottom: 2px solid #000000 !important;
 }
-
 .stSidebar .stButton > button[kind="primary"] {
     background: #d4af37 !important;
     color: #000000 !important;
     font-weight: 700 !important;
     border: 2px solid #ffffff !important;
 }
-
-/* Chat History in Left Sidebar - ABOVE System Status */
-.chat-history-section {
-    margin-top: 10px;
-    padding-top: 8px;
-    border-top: 2px solid rgba(212,175,55,0.3);
-}
-
+/* Chat history sidebar items */
 .chat-history-header {
     color: #d4af37;
-    font-size: 0.85rem;
+    font-family: 'Cinzel', serif;
+    font-size: 0.95rem;
     font-weight: 700;
-    margin-bottom: 8px;
+    margin: 15px 0 10px 0;
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
-
-/* System Status - Clean, no background */
-.system-status-container {
-    margin-top: 10px;
-    padding-top: 8px;
-    border-top: 2px solid rgba(212,175,55,0.3);
+/* Metrics */
+[data-testid="stMetricValue"] {
+    font-size: 2rem !important;
+    font-weight: 700 !important;
+    color: #2c3e50 !important;
 }
-
-.system-status-container p {
-    color: #d4af37;
-    margin: 3px 0;
-    font-size: 0.75rem;
+[data-testid="stMetricLabel"] {
+    font-weight: 600 !important;
+    font-size: 1rem !important;
+    color: #d4af37 !important;
 }
-
-.system-status-container span {
+/* Chat messages */
+.chat-message {
+    padding: 18px;
+    margin: 12px 0;
+    border-radius: 12px;
+    max-width: 100%;
+    animation: fadeIn 0.3s ease;
+}
+.user-message {
+    background: linear-gradient(135deg, #4a6491 0%, #2c3e50 100%);
     color: white;
+    margin-right: 15%;
+    border-bottom-right-radius: 4px;
 }
-
-/* Metrics - Black text for labels */
-[data-testid="stMetricValue"] { 
-    font-size: 1.8rem !important; 
-    font-weight: 700 !important; 
-    color: #2c3e50 !important; 
+.assistant-message {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    color: #333;
+    border: 1px solid #ddd;
+    margin-left: 15%;
+    border-bottom-left-radius: 4px;
 }
-[data-testid="stMetricLabel"] { 
-    font-weight: 600 !important; 
-    font-size: 0.9rem !important; 
-    color: #000000 !important; 
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
 }
-
-/* Answer display - NO MORE typing animation needed */
-.answer-text { 
-    font-size: 1rem; 
-    line-height: 1.5; 
-    color: #2c3e50; 
-    margin: 5px 0; 
-    padding: 0; 
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+/* Source badges */
+.source-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-right: 6px;
 }
-
-/* Chat message styling - REDUCED SPACING */
-.chat-message { 
-    padding: 8px 12px; 
-    margin: 5px 0; 
-    border-radius: 12px; 
-    max-width: 80%; 
-    animation: fadeIn 0.3s ease; 
+.badge-document { background: #4a6491; color: white; }
+.badge-web { background: #28a745; color: white; }
+/* How to use */
+.how-to-use {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border-radius: 12px;
+    padding: 25px;
+    margin: 20px 0;
+    border-left: 6px solid #d4af37;
 }
-.user-message { 
-    background: #f0f0f0; 
-    color: #333; 
-    margin-left: auto; 
-    margin-right: 0; 
-    border-radius: 18px 18px 4px 18px; 
+/* Chat input fixed at bottom */
+.chat-input-area {
+    position: sticky;
+    bottom: 0;
+    background: white;
+    padding: 15px 0;
+    border-top: 1px solid #eee;
+    z-index: 100;
 }
-.assistant-message { 
-    background: white; 
-    color: #333; 
-    margin-right: auto; 
-    margin-left: 0; 
-    border-radius: 18px 18px 18px 4px; 
-    border: 1px solid #eaeaea; 
+/* Close nav button */
+.close-nav-btn {
+    position: fixed;
+    top: 10px;
+    left: 10px;
+    z-index: 999;
 }
-
-/* Remove extra spacing between messages */
-div[data-testid="stVerticalBlock"] > div {
-    padding-top: 0 !important;
-    padding-bottom: 0 !important;
-}
-
-.stMarkdown {
-    margin-bottom: 0 !important;
-}
-
-hr {
-    margin: 10px 0 !important;
-}
-
-/* Action buttons - Copy only */
-.action-buttons { 
-    display: flex; 
-    gap: 10px; 
-    margin-top: 5px; 
-    margin-bottom: 5px; 
-}
-
-/* Chat container - REDUCED SPACING */
-.chat-container {
-    margin-bottom: 80px;
-    min-height: 400px;
-    padding: 0;
-}
-
-/* Document buttons */
-.doc-button, .stButton > button {
+/* Main content buttons */
+.stButton > button {
     background: #d4af37 !important;
     color: #000000 !important;
     border: none !important;
     border-radius: 6px;
     font-weight: 600 !important;
-    font-size: 0.85rem !important;
-    padding: 6px 16px !important;
-    transition: all 0.3s ease !important;
 }
-
-.doc-button:hover, .stButton > button:hover {
+.stButton > button:hover {
     background: #c4a030 !important;
-    transform: translateY(-2px);
 }
-
-/* How to use section - REDUCED SPACING */
-.how-to-use {
-    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-    border-radius: 12px;
-    padding: 15px 20px;
-    margin: 10px 0;
-    border-left: 6px solid #d4af37;
-}
-
-.how-to-use h3 {
-    color: #2c3e50;
-    margin-bottom: 10px;
-    font-weight: 700;
-    font-size: 1.2rem;
-}
-
-.how-to-use p {
-    color: #333;
-    margin-bottom: 8px;
-    line-height: 1.5;
-    font-size: 0.95rem;
-}
-
-.how-to-use li {
-    color: #333;
-    margin-bottom: 5px;
-    font-size: 0.95rem;
-}
-
-/* Coming soon badge */
-.coming-soon {
-    background: #f0f0f0;
-    color: #666;
-    padding: 15px;
-    border-radius: 8px;
-    text-align: center;
-    font-style: italic;
-    border: 1px dashed #999;
-    font-size: 0.95rem;
-}
-
-/* Scrollable chat history */
-.chat-history-scroll {
-    max-height: 200px;
-    overflow-y: auto;
-    padding-right: 3px;
-}
-
-.chat-history-scroll::-webkit-scrollbar {
-    width: 4px;
-}
-
-.chat-history-scroll::-webkit-scrollbar-track {
-    background: rgba(255,255,255,0.05);
-    border-radius: 10px;
-}
-
-.chat-history-scroll::-webkit-scrollbar-thumb {
+/* Fullscreen map button */
+.fullscreen-map-btn {
     background: #d4af37;
-    border-radius: 10px;
+    color: #000;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 16px;
+    font-weight: 600;
+    cursor: pointer;
 }
 </style>
 """, unsafe_allow_html=True)
-
 # ========== THREAD-SAFE DATABASE ==========
 class ThreadSafeDatabase:
     def __init__(self, db_path):
         self.db_path = db_path
         self.local = threading.local()
-    
     def get_connection(self):
         if not hasattr(self.local, 'conn'):
             self.local.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
             self.local.conn.row_factory = sqlite3.Row
         return self.local.conn
-    
     def execute(self, query, params=None):
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute(query, params or ())
         return cursor
-
 # ========== WEB SEARCH MODULE ==========
 class WebSearchModule:
     def __init__(self):
         self.openai_client = None
-        try:
-            if 'OPENAI_API_KEY' in st.secrets:
-                self.openai_client = openai.OpenAI(api_key=st.secrets['OPENAI_API_KEY'])
-            elif 'OPENAI_API_KEY' in os.environ:
-                self.openai_client = openai.OpenAI(api_key=os.environ['OPENAI_API_KEY'])
-        except:
-            self.openai_client = None
-    
+        if HAS_OPENAI:
+            try:
+                api_key = None
+                if hasattr(st, 'secrets') and 'OPENAI_API_KEY' in st.secrets:
+                    api_key = st.secrets['OPENAI_API_KEY']
+                elif 'OPENAI_API_KEY' in os.environ:
+                    api_key = os.environ['OPENAI_API_KEY']
+                if api_key:
+                    self.openai_client = openai.OpenAI(api_key=api_key)
+            except Exception:
+                self.openai_client = None
     def search_google(self, query: str, limit: int = 3) -> List[Dict]:
+        if not HAS_GOOGLE or not HAS_BS4:
+            return []
         try:
             results = []
             for url in list(google_search(query, num_results=limit, lang='en'))[:limit]:
@@ -390,134 +312,59 @@ class WebSearchModule:
                         meta = soup.find('meta', attrs={'name': 'description'})
                         snippet = meta['content'][:300] + "..." if meta and meta.get('content') else f"Content about {query}"
                     results.append({'title': title, 'snippet': snippet, 'url': url, 'source': 'web'})
-                except:
-                    results.append({'title': f"Web Result", 'snippet': f"Web page about {query}", 'url': url, 'source': 'web'})
+                except Exception:
+                    results.append({'title': "Web Result", 'snippet': f"Web page about {query}", 'url': url, 'source': 'web'})
             return results
-        except Exception as e:
-            print(f"Search error: {e}")
+        except Exception:
             return []
-
-# ========== SAVED SEARCHES SYSTEM ==========
-class SavedSearchesSystem:
-    @staticmethod
-    def save_search(question, answer, sources, doc_results, web_results):
-        entry = {
-            'id': len(st.session_state.saved_searches) + 1,
-            'question': question, 'answer': answer, 'sources': sources,
-            'document_results_count': len(doc_results), 'web_results_count': len(web_results),
-            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            'time': datetime.now().strftime("%H:%M"),
-            'document_results': doc_results[:3], 'web_results': web_results[:2]
-        }
-        st.session_state.saved_searches.append(entry)
-        return entry
-    
-    @staticmethod
-    def delete_search(search_id):
-        st.session_state.saved_searches = [s for s in st.session_state.saved_searches if s['id'] != search_id]
-
-# ========== FEEDBACK SYSTEM ==========
-class FeedbackSystem:
-    @staticmethod
-    def send_feedback(name: str, email: str, message: str, feedback_type: str):
-        feedback = {
-            'timestamp': datetime.now().isoformat(),
-            'name': name,
-            'email': email,
-            'message': message,
-            'type': feedback_type
-        }
-        
-        if 'feedback_history' not in st.session_state:
-            st.session_state.feedback_history = []
-        st.session_state.feedback_history.append(feedback)
-        
-        print(f"FEEDBACK: {feedback}")
-        return True
-    
-    @staticmethod
-    def render_feedback_page():
-        st.markdown('<h2 class="sub-header">SEND FEEDBACK</h2>', unsafe_allow_html=True)
-        
-        st.markdown("""
-        <div style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); padding: 30px; border-radius: 12px; margin: 20px 0;">
-            <h3 style="color: #2c3e50; margin-bottom: 20px;">Help us improve 1421 Foundation AI</h3>
-            <p style="color: #666; margin-bottom: 30px;">Your feedback helps us make the system better for everyone.</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            name = st.text_input("Your Name", placeholder="Optional")
-        with col2:
-            email = st.text_input("Email Address", placeholder="Required")
-        
-        feedback_type = st.selectbox("Feedback Type", 
-                                    ["Bug Report", "Feature Request", "Suggestion", "Question", "Other"])
-        
-        message = st.text_area("Your Message", placeholder="Please describe your issue, suggestion, or question in detail...", 
-                              height=150)
-        
-        col1, col2 = st.columns([1, 1])
-        with col1:
-            if st.button("SUBMIT FEEDBACK", type="primary", use_container_width=True):
-                if not email:
-                    st.error("Email is required")
-                elif not message:
-                    st.error("Message is required")
-                else:
-                    if FeedbackSystem.send_feedback(name or "Anonymous", email, message, feedback_type):
-                        st.success("Thank you for your feedback! We will review it shortly.")
-                        st.session_state.feedback_submitted = True
-                        time.sleep(2)
-                        st.session_state.current_page = "dashboard"
-                        st.rerun()
-
 # ========== RESEARCH SYSTEM ==========
 class ResearchSystem:
     def __init__(self):
-        self.base_dir = Path(__file__).parent.parent
+        self.base_dir = Path(__file__).parent.parent if Path(__file__).parent.name != '' else Path(__file__).parent
         self.db_path = self.base_dir / "data" / "knowledge_base.db"
         self.db = None
         self.web_searcher = WebSearchModule()
         self._initialize()
-    
     def _initialize(self):
         try:
             if not self.db_path.exists():
-                return False
+                # Try alternative paths
+                alt_paths = [
+                    Path("data/knowledge_base.db"),
+                    Path("./data/knowledge_base.db"),
+                    Path(__file__).parent / "data" / "knowledge_base.db",
+                ]
+                for p in alt_paths:
+                    if p.exists():
+                        self.db_path = p
+                        break
+                else:
+                    return False
             self.db = ThreadSafeDatabase(str(self.db_path))
             self.db.execute("SELECT 1")
             return True
         except Exception as e:
             print(f"Init error: {e}")
             return False
-    
     def get_database_stats(self):
         if not self.db:
-            return None
+            return {'total_documents': 0, 'geocoded_locations': 25}
         try:
             total = self.db.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
-            saved = len(st.session_state.saved_searches)
-            return {'total_documents': total, 'saved_searches': saved, 'geocoded_locations': 25}
-        except:
-            return {'total_documents': 0, 'saved_searches': 0, 'geocoded_locations': 0}
-    
+            return {'total_documents': total, 'geocoded_locations': 25}
+        except Exception:
+            return {'total_documents': 0, 'geocoded_locations': 0}
     def get_all_documents(self, limit=None):
         if not self.db:
             return []
         try:
             q = "SELECT * FROM documents ORDER BY id"
             if limit:
-                q += " LIMIT ?"
-                rows = self.db.execute(q, (limit,) if limit else ()).fetchall()
-            else:
-                rows = self.db.execute(q).fetchall()
+                q += f" LIMIT {limit}"
+            rows = self.db.execute(q).fetchall()
             return [dict(r) for r in rows]
-        except Exception as e:
-            print(f"Error: {e}")
+        except Exception:
             return []
-    
     def search_documents(self, query: str, limit: int = 10) -> List[Dict]:
         if not self.db or not query:
             return []
@@ -526,17 +373,14 @@ class ResearchSystem:
             words = [w for w in clean.split() if len(w) > 3][:3]
             if not words:
                 words = clean.split()[:3]
-            
             conditions = []
             params = []
             for w in words:
                 p = f"%{w}%"
                 conditions.append("(title LIKE ? OR content LIKE ?)")
                 params.extend([p, p])
-            
             q = f"SELECT * FROM documents WHERE {' OR '.join(conditions)} ORDER BY id LIMIT ?"
             params.append(limit * 2)
-            
             docs = []
             seen = set()
             for row in self.db.execute(q, params).fetchall():
@@ -545,7 +389,6 @@ class ResearchSystem:
                     seen.add(d['id'])
                     content = d.get('content', '')
                     d['word_count'] = len(content.split()) if content else 0
-                    
                     lower = content.lower()
                     snippet = ""
                     for w in words:
@@ -562,71 +405,43 @@ class ResearchSystem:
                     if len(docs) >= limit:
                         break
             return docs
-        except Exception as e:
-            print(f"Search error: {e}")
+        except Exception:
             return []
-    
     def get_map_locations(self):
-        """Get geographical locations for map with timeline data"""
         locations = [
-            {'name': 'Beijing', 'lat': 39.9042, 'lon': 116.4074, 'year': 1403, 'event': 'Capital moved to Beijing'},
-            {'name': 'Nanjing', 'lat': 32.0603, 'lon': 118.7969, 'year': 1368, 'event': 'Early Ming capital established'},
-            {'name': 'Calicut', 'lat': 11.2588, 'lon': 75.7804, 'year': 1406, 'event': 'Zheng He fleet first arrived'},
-            {'name': 'Sumatra', 'lat': -0.5897, 'lon': 101.3431, 'year': 1407, 'event': 'Strategic trading post established'},
-            {'name': 'Java', 'lat': -7.6145, 'lon': 110.7123, 'year': 1407, 'event': 'Diplomatic missions conducted'},
-            {'name': 'Malacca', 'lat': 2.1896, 'lon': 102.2501, 'year': 1409, 'event': 'Strategic port established'},
-            {'name': 'Sri Lanka', 'lat': 7.8731, 'lon': 80.7718, 'year': 1409, 'event': 'Trilingual inscription erected'},
-            {'name': 'Hormuz', 'lat': 27.1561, 'lon': 56.2815, 'year': 1414, 'event': 'Persian Gulf trade route opened'},
-            {'name': 'Mombasa', 'lat': -4.0435, 'lon': 39.6682, 'year': 1418, 'event': 'East African trade commenced'},
-            {'name': 'Zanzibar', 'lat': -6.1659, 'lon': 39.2026, 'year': 1419, 'event': 'Trade agreements established'},
-            {'name': 'Aden', 'lat': 12.7855, 'lon': 45.0187, 'year': 1417, 'event': 'Arabian Peninsula contact made'},
-            {'name': 'Mogadishu', 'lat': 2.0469, 'lon': 45.3182, 'year': 1418, 'event': 'Somali coast exploration'},
-            {'name': 'Champa', 'lat': 10.8231, 'lon': 106.6297, 'year': 1405, 'event': 'Southeast Asian ally'},
-            {'name': 'Siam', 'lat': 13.7367, 'lon': 100.5231, 'year': 1408, 'event': 'Diplomatic relations established'}
+            {'name': 'Nanjing', 'lat': 32.06, 'lon': 118.80, 'year': 1368, 'event': 'Early Ming capital established'},
+            {'name': 'Beijing', 'lat': 39.90, 'lon': 116.41, 'year': 1403, 'event': 'Capital moved to Beijing'},
+            {'name': 'Champa', 'lat': 10.82, 'lon': 106.63, 'year': 1405, 'event': 'Southeast Asian ally'},
+            {'name': 'Calicut', 'lat': 11.26, 'lon': 75.78, 'year': 1406, 'event': 'Zheng He fleet first arrived'},
+            {'name': 'Sumatra', 'lat': -0.59, 'lon': 101.34, 'year': 1407, 'event': 'Strategic trading post established'},
+            {'name': 'Java', 'lat': -7.61, 'lon': 110.71, 'year': 1407, 'event': 'Diplomatic missions conducted'},
+            {'name': 'Siam', 'lat': 13.74, 'lon': 100.52, 'year': 1408, 'event': 'Diplomatic relations established'},
+            {'name': 'Malacca', 'lat': 2.19, 'lon': 102.25, 'year': 1409, 'event': 'Strategic port established'},
+            {'name': 'Sri Lanka', 'lat': 7.87, 'lon': 80.77, 'year': 1409, 'event': 'Trilingual inscription erected'},
+            {'name': 'Hormuz', 'lat': 27.16, 'lon': 56.28, 'year': 1414, 'event': 'Persian Gulf trade route opened'},
+            {'name': 'Aden', 'lat': 12.79, 'lon': 45.02, 'year': 1417, 'event': 'Arabian Peninsula contact made'},
+            {'name': 'Mombasa', 'lat': -4.04, 'lon': 39.67, 'year': 1418, 'event': 'East African trade commenced'},
+            {'name': 'Mogadishu', 'lat': 2.05, 'lon': 45.32, 'year': 1418, 'event': 'Somali coast exploration'},
+            {'name': 'Zanzibar', 'lat': -6.17, 'lon': 39.20, 'year': 1419, 'event': 'Trade agreements established'},
         ]
-        
-        timeline = [{'year': l['year'], 'location': l['name'], 'event': l['event']} for l in locations]
-        timeline.sort(key=lambda x: x['year'])
-        
+        timeline = sorted(
+            [{'year': l['year'], 'location': l['name'], 'event': l['event']} for l in locations],
+            key=lambda x: x['year']
+        )
         return {'locations': locations, 'timeline_events': timeline}
-    
-    def _stream_text(self, text, placeholder):
-        """Stream text word by word to placeholder - DeepSeek style"""
-        words = text.split()
-        displayed = ""
-        for i, word in enumerate(words):
-            displayed += word + " "
-            # Show cursor while typing
-            placeholder.markdown(displayed + "▌")
-            time.sleep(0.04)  # Adjust speed (lower = faster, 0.04 = 25 words/sec)
-        # Remove cursor when done
-        placeholder.markdown(displayed.strip())
-    
-    def generate_intelligent_answer_stream(self, question, doc_results, web_results, mode, placeholder):
-        """Generate streaming answer word-by-word like DeepSeek"""
+    def generate_intelligent_answer(self, question, doc_results, web_results, mode):
         sources = []
-        
         if not doc_results and not web_results:
-            full_text = "I could not find specific information about that in our historical database or on the web. Please try rephrasing your question or using different keywords."
-            self._stream_text(full_text, placeholder)
-            return full_text, []
-        
-        # Determine which sources to use based on mode
+            return "I could not find specific information about that in our historical database or on the web. Please try rephrasing your question.", []
         use_docs = mode in ['Auto (Documents + Web)', 'Documents Only']
         use_web = mode in ['Auto (Documents + Web)', 'Web Only']
-        
         if use_docs and doc_results:
             sources.append('documents')
         if use_web and web_results:
             sources.append('web')
-        
-        # If no sources after filtering, fallback
         if not sources:
-            full_text = "No information available with current search settings. Please try changing your search mode."
-            self._stream_text(full_text, placeholder)
-            return full_text, []
-        
-        # Try OpenAI streaming first
+            return "No information available with current search settings.", []
+        # Try GPT-4o-mini
         if self.web_searcher.openai_client:
             try:
                 doc_context = ""
@@ -635,135 +450,69 @@ class ResearchSystem:
                         title = d.get('title', 'Unknown')
                         content = d.get('snippet', d.get('content', ''))[:500]
                         doc_context += f"Document '{title}': {content}\n\n"
-                
                 web_context = ""
                 if use_web and web_results:
                     for w in web_results[:3]:
                         title = w.get('title', 'Unknown')
                         content = w.get('snippet', '')[:500]
                         web_context += f"Web source '{title}': {content}\n\n"
-                
-                prompt = f"""You are a professional historian specialising in Chinese maritime exploration during the Ming dynasty. 
-Answer the following question in clear, fluent UK English. Do not copy text verbatim from the sources. 
-Instead, synthesise the information into a coherent, well-structured response with proper paragraphs.
-Use British English spelling and conventions.
-
+                prompt = f"""You are a professional historian specialising in Chinese maritime exploration during the Ming dynasty.
+Answer the following question in clear, fluent UK English. Synthesise the information into a coherent, well-structured response.
 Question: {question}
-
 Available information:
 {doc_context}
 {web_context}
-
-Please provide a comprehensive answer that:
+Provide a comprehensive answer that:
 1. Directly addresses the question
 2. Presents key facts and historical context
 3. Uses professional academic tone
-4. Does not include URLs or references in the main text
-5. Is written in proper UK English
+4. Is written in proper UK English
 """
-                
-                # Stream the response word-by-word
-                stream = self.web_searcher.openai_client.chat.completions.create(
+                resp = self.web_searcher.openai_client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
-                        {"role": "system", "content": "You are a professional historian specialising in early Chinese maritime exploration. You write in clear, academic UK English and synthesise information rather than copying it."},
+                        {"role": "system", "content": "You are a professional historian specialising in early Chinese maritime exploration. Write in clear, academic UK English."},
                         {"role": "user", "content": prompt}
                     ],
-                    max_tokens=700,
-                    temperature=0.7,
-                    stream=True
+                    max_tokens=800,
+                    temperature=0.7
                 )
-                
-                full_answer = ""
-                for chunk in stream:
-                    if chunk.choices[0].delta.content:
-                        content = chunk.choices[0].delta.content
-                        full_answer += content
-                        # Show with cursor
-                        placeholder.markdown(full_answer + "▌")
-                        time.sleep(0.02)  # Control streaming speed
-                
-                # Remove cursor when done
-                placeholder.markdown(full_answer)
-                # Remove any URLs just in case
-                full_answer = re.sub(r'https?://\S+', '', full_answer)
-                return full_answer, sources
-                
+                if resp and resp.choices:
+                    answer = resp.choices[0].message.content
+                    answer = re.sub(r'https?://\S+', '', answer)
+                    return answer, sources
             except Exception as e:
-                print(f"OpenAI streaming failed: {e}")
-        
-        # Enhanced fallback with better synthesis
+                print(f"OpenAI error: {e}")
+        # Fallback
         key_points = []
-        
         if use_docs and doc_results:
             for d in doc_results[:3]:
                 content = d.get('snippet', d.get('content', ''))[:200]
-                # Clean and summarise
-                content = re.sub(r'#\S+', '', content)
-                content = re.sub(r'https?://\S+', '', content)
-                content = ' '.join(content.split())
+                content = re.sub(r'https?://\S+', '', content).strip()
                 if len(content) > 50:
                     key_points.append(content)
-        
         if use_web and web_results:
             for w in web_results[:2]:
                 content = w.get('snippet', '')[:200]
-                content = re.sub(r'https?://\S+', '', content)
-                content = ' '.join(content.split())
+                content = re.sub(r'https?://\S+', '', content).strip()
                 if len(content) > 50:
                     key_points.append(content)
-        
-        # Build a coherent response
-        response_parts = []
-        
-        # Introduction
-        intro_templates = [
-            f"Regarding {question.lower().replace('?', '')}, historical evidence suggests several important conclusions.",
-            f"The question of {question.lower().replace('?', '')} can be addressed through examination of available historical records.",
-            f"Historical research into {question.lower().replace('?', '')} reveals a complex picture."
-        ]
-        response_parts.append(random.choice(intro_templates))
-        
-        # Body - synthesise key points
-        if key_points:
-            response_parts.append("\n\n" + key_points[0][:300])
-            if len(key_points) > 1:
-                response_parts.append("\n\nFurthermore, " + key_points[1][0].lower() + key_points[1][1:300] if key_points[1] else "")
-            if len(key_points) > 2:
-                response_parts.append("\n\nAdditional evidence indicates " + key_points[2][0].lower() + key_points[2][1:300] if key_points[2] else "")
-        
-        # Conclusion
-        response_parts.append("\n\nThese findings demonstrate the significance of Chinese maritime exploration during this period, though further research continues to refine our understanding.")
-        
-        full_text = ''.join(response_parts)
-        self._stream_text(full_text, placeholder)
-        return full_text, sources
-    
-    def perform_search(self, question, answer_placeholder=None):
+        parts = [f"Regarding {question.lower().replace('?', '')}, historical evidence suggests the following."]
+        for i, kp in enumerate(key_points[:3]):
+            connector = ["", "\n\nFurthermore, ", "\n\nAdditionally, "][min(i, 2)]
+            parts.append(connector + kp)
+        parts.append("\n\nThese findings demonstrate the significance of Chinese maritime exploration during this period.")
+        return ''.join(parts), sources
+    def perform_search(self, question):
         start = time.time()
         mode = st.session_state.get('search_mode', 'Auto (Documents + Web)')
-        
-        # Search based on mode
-        docs = []
-        web = []
-        
+        docs, web = [], []
         if mode in ['Auto (Documents + Web)', 'Documents Only']:
             docs = self.search_documents(question, 10)
-        
         if mode in ['Auto (Documents + Web)', 'Web Only']:
-            if mode == 'Web Only' or (mode == 'Auto (Documents + Web)' and not docs):
-                time.sleep(0.3)
+            if mode == 'Web Only' or not docs:
                 web = self.web_searcher.search_google(question, 3)
-        
-        # Generate streaming answer
-        if answer_placeholder:
-            answer, sources = self.generate_intelligent_answer_stream(question, docs, web, mode, answer_placeholder)
-        else:
-            # Fallback if no placeholder provided (shouldn't happen)
-            answer = "Error: No answer placeholder provided"
-            sources = []
-        
-        # Track analytics
+        answer, sources = self.generate_intelligent_answer(question, docs, web, mode)
         a = st.session_state.search_analytics
         a['total_searches'] += 1
         today = datetime.now().strftime("%Y-%m-%d")
@@ -771,114 +520,40 @@ Please provide a comprehensive answer that:
         a['response_times'].append(time.time() - start)
         if len(a['response_times']) > 500:
             a['response_times'] = a['response_times'][-500:]
-        
-        # Track source usage
         if len(sources) > 1:
             a['sources_used']['both'] += 1
         elif 'documents' in sources:
             a['sources_used']['documents'] += 1
         elif 'web' in sources:
             a['sources_used']['web'] += 1
-        
         return {
             'question': question, 'answer': answer, 'sources_used': sources,
             'document_results': docs, 'web_results': web,
             'total_results': len(docs) + len(web)
         }
-
-# ========== LEFT SIDEBAR ==========
-def render_left_sidebar():
-    with st.sidebar:
-        st.markdown('<div style="text-align: center; margin-bottom: 0.5rem;"><h2 style="color: #d4af37; font-size: 1.4rem; margin-bottom: 0;">1421 FOUNDATION AI</h2><p style="color: #fff; opacity: 0.8; margin-top: 0; font-size: 0.65rem;">HISTORICAL RESEARCH SYSTEM</p></div>', unsafe_allow_html=True)
-        
-        # Navigation - Yellow background with black text
-        pages = [
-            ("DASHBOARD", "dashboard"),
-            ("CHAT", "chat"),
-            ("RESEARCH DOCUMENTS", "documents"),
-            ("FULL VOYAGE MAP", "map"),
-            ("ANALYTICS", "analytics"),
-            ("SEND FEEDBACK", "feedback"),
-            ("SETTINGS", "settings")
-        ]
-        
-        for label, pid in pages:
-            btn_type = "primary" if st.session_state.current_page == pid else "secondary"
-            if st.button(label, key=f"nav_{pid}", use_container_width=True, type=btn_type):
-                st.session_state.current_page = pid
-                st.rerun()
-        
-        # CHAT HISTORY - ABOVE System Status
-        st.sidebar.markdown('<div class="chat-history-section">', unsafe_allow_html=True)
-        st.sidebar.markdown('<div class="chat-history-header">CHAT HISTORY</div>', unsafe_allow_html=True)
-        
-        # New Chat button
-        if st.sidebar.button("+ NEW CHAT", key="new_chat_btn_sidebar", use_container_width=True):
-            new_id = len(st.session_state.chat_sessions)
-            st.session_state.chat_sessions.append({
-                'id': new_id,
-                'name': f'Chat {new_id + 1}',
-                'history': [],
-                'created': datetime.now().strftime("%Y-%m-%d %H:%M")
-            })
-            st.session_state.current_chat_id = new_id
-            st.rerun()
-        
-        # Chat sessions - scrollable
-        st.sidebar.markdown('<div class="chat-history-scroll">', unsafe_allow_html=True)
-        for session in st.session_state.chat_sessions[-10:][::-1]:
-            chat_key = f"chat_select_sidebar_{session['id']}"
-            if st.sidebar.button(f"{session['name']}", key=chat_key, use_container_width=True):
-                st.session_state.current_chat_id = session['id']
-                st.rerun()
-        
-        st.sidebar.markdown('</div>', unsafe_allow_html=True)
-        st.sidebar.markdown('</div>', unsafe_allow_html=True)
-        
-        # System Status in left sidebar (BELOW Chat History)
-        if 'system_stats' in st.session_state:
-            stats = st.session_state.system_stats
-            st.sidebar.markdown('<div class="system-status-container">', unsafe_allow_html=True)
-            st.sidebar.markdown('<div class="chat-history-header">SYSTEM STATUS</div>', unsafe_allow_html=True)
-            st.sidebar.markdown(f'''
-                <p style="color: #d4af37; margin: 3px 0;"><strong>Documents:</strong> <span style="color: white;">{stats.get("total_documents",0)}</span></p>
-                <p style="color: #d4af37; margin: 3px 0;"><strong>Chats:</strong> <span style="color: white;">{len(st.session_state.chat_sessions)}</span></p>
-                <p style="color: #d4af37; margin: 3px 0;"><strong>Locations:</strong> <span style="color: white;">{stats.get("geocoded_locations",25)}</span></p>
-            ''', unsafe_allow_html=True)
-            st.sidebar.markdown('</div>', unsafe_allow_html=True)
-
-# ========== PAGE FUNCTIONS ==========
+# ========== PAGE: DASHBOARD ==========
 def show_dashboard(system):
-    st.markdown('<h2 class="sub-header">DASHBOARD</h2>', unsafe_allow_html=True)
-    
+    st.markdown('<div class="brand-title">1421 Foundation AI Research System</div>', unsafe_allow_html=True)
+    st.markdown('<div class="brand-subtitle">Historical Maritime Research Platform</div>', unsafe_allow_html=True)
     stats = system.get_database_stats()
-    if stats:
-        cols = st.columns(4)
-        cols[0].metric("Total Documents", stats['total_documents'])
-        cols[1].metric("Saved Searches", stats['saved_searches'])
-        cols[2].metric("Geocoded Locations", stats['geocoded_locations'])
-        cols[3].metric("Database Status", "Active" if system.db else "Inactive")
-    
+    cols = st.columns(4)
+    cols[0].metric("Total Documents", stats['total_documents'])
+    cols[1].metric("Chat Sessions", len(st.session_state.chat_sessions))
+    cols[2].metric("Geocoded Locations", stats['geocoded_locations'])
+    cols[3].metric("Database Status", "Active" if system.db else "Inactive")
     st.divider()
-    
-    # How to Use This System Section
     st.markdown("""
     <div class="how-to-use">
-        <h3>HOW TO USE 1421 FOUNDATION AI</h3>
-        <p>Welcome to the 1421 Foundation AI Historical Research System. This platform helps you explore Chinese maritime history, Zheng He's voyages, and the 1421 theory through both historical documents and web research.</p>
+        <h3 style="font-family: 'Cinzel', serif; color: #2c3e50;">HOW TO USE</h3>
         <ul>
-            <li><strong>CHAT:</strong> Use the Chat section to ask questions. Each chat session is saved automatically in the left sidebar.</li>
-            <li><strong>RESEARCH DOCUMENTS:</strong> Browse and search through our historical document database.</li>
-            <li><strong>VOYAGE MAP:</strong> Visualise voyage routes and explore locations on the interactive world map with fullscreen support.</li>
-            <li><strong>ANALYTICS:</strong> View search statistics and popular topics.</li>
+            <li><strong>Chat:</strong> Use the chat interface to ask questions. Sessions are saved automatically.</li>
+            <li><strong>Documents:</strong> Browse and search the historical document database.</li>
+            <li><strong>Voyage Map:</strong> Visualise routes on an interactive map with timeline.</li>
+            <li><strong>Analytics:</strong> Track your research patterns and statistics.</li>
         </ul>
-        <p style="margin-top: 10px; color: #d4af37; font-weight: 600;">Click on any example question below to start a new chat:</p>
     </div>
     """, unsafe_allow_html=True)
-    
-    st.markdown('<h3 style="color: #2c3e50; margin-top: 10px; font-size: 1.2rem;">EXAMPLE QUESTIONS</h3>', unsafe_allow_html=True)
-    
-    # Example questions
+    st.markdown(f'<h3 style="font-family: \'Cinzel\', serif; color: #2c3e50; margin-top: 20px;">Example Questions</h3>', unsafe_allow_html=True)
     examples = [
         "What was the significance of Zheng He's voyages?",
         "Is there evidence of Chinese ships reaching America before Columbus?",
@@ -886,223 +561,384 @@ def show_dashboard(system):
         "What were the main purposes of the Chinese treasure fleets?",
         "How did Chinese navigation compare to European methods?"
     ]
-    
     cols = st.columns(2)
     for i, q in enumerate(examples):
         with cols[i % 2]:
             if st.button(q, key=f"ex_{i}", use_container_width=True):
-                # Create a new chat session
                 new_id = len(st.session_state.chat_sessions)
                 st.session_state.chat_sessions.append({
-                    'id': new_id,
-                    'name': f'Chat {new_id + 1}',
-                    'history': [],
+                    'id': new_id, 'name': 'New Chat', 'history': [],
                     'created': datetime.now().strftime("%Y-%m-%d %H:%M")
                 })
                 st.session_state.current_chat_id = new_id
                 st.session_state.current_question = q
                 st.session_state.auto_search = True
-                st.session_state.current_page = "chat"
+                st.session_state.current_page = 'chat'
                 st.rerun()
-
+# ========== PAGE: CHAT ==========
 def show_chat_page(system):
-    """Dedicated Chat page with DeepSeek-style streaming"""
-    
-    # Get current chat history
     current_chat_id = st.session_state.current_chat_id
     current_session = next((s for s in st.session_state.chat_sessions if s['id'] == current_chat_id), None)
-    
-    if current_session:
-        chat_history = current_session['history']
-        chat_name = current_session['name']
-    else:
-        chat_history = []
-        chat_name = "New Chat"
-    
-    st.markdown(f'<h2 class="sub-header">CHAT: {chat_name}</h2>', unsafe_allow_html=True)
-    
-    # Chat container
-    st.markdown('<div class="chat-container">', unsafe_allow_html=True)
-    
-    # Chat history for current session
-    if chat_history:
-        for idx, chat in enumerate(chat_history):
-            st.markdown(f'<div class="chat-message user-message"><strong>You:</strong><br>{chat["question"]}</div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="chat-message assistant-message"><strong>1421 Foundation AI:</strong><br><div class="answer-text">{chat["answer"]}</div></div>', unsafe_allow_html=True)
-            st.markdown('<hr style="margin: 8px 0;">', unsafe_allow_html=True)
-    else:
-        # Welcome message
-        st.markdown("""
-        <div style="text-align: center; padding: 30px 20px; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); border-radius: 12px; margin: 10px 0;">
-            <h3 style="color: #2c3e50; margin-bottom: 10px;">Welcome to 1421 Foundation AI Chat</h3>
-            <p style="color: #666; font-size: 1rem;">Ask any question about Chinese exploration, Zheng He's voyages, or the 1421 theory.</p>
-            <p style="color: #d4af37; margin-top: 10px;">Type your question below to begin...</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Input area
-    question = st.text_area(
-        "Your Question",
-        value=st.session_state.current_question,
-        key="chat_question",
-        height=80,
-        placeholder="Message 1421 Foundation AI..."
-    )
-    
-    col1, col2 = st.columns([4, 1])
-    with col2:
-        ask = st.button("SEARCH", type="primary", key="chat_research_btn", use_container_width=True)
-    
-    if (ask or st.session_state.auto_search) and question:
-        st.session_state.auto_search = False
-        
-        # Show user message immediately
-        st.markdown(f'<div class="chat-message user-message"><strong>You:</strong><br>{question}</div>', unsafe_allow_html=True)
-        
-        # Create placeholder for streaming answer
-        assistant_container = st.empty()
-        assistant_container.markdown('<div class="chat-message assistant-message"><strong>1421 Foundation AI:</strong><br><div class="answer-text">Searching...</div></div>', unsafe_allow_html=True)
-        
-        # Create placeholder for the actual streaming text
-        answer_placeholder = st.empty()
-        
-        # Perform search with streaming
-        with st.spinner("Researching historical records and searching the web..."):
-            result = system.perform_search(question, answer_placeholder)
-            
-            # Add to current chat session
-            for session in st.session_state.chat_sessions:
-                if session['id'] == st.session_state.current_chat_id:
-                    session['history'].append(result)
-                    if len(session['history']) == 1:
-                        session['name'] = question[:20] + ('...' if len(question) > 20 else '')
-                    break
-            
-            st.session_state.current_question = ""
-            time.sleep(0.5)
+    if not current_session:
+        current_session = st.session_state.chat_sessions[0]
+        st.session_state.current_chat_id = current_session['id']
+    chat_history = current_session['history']
+    # Two-column layout: chat + history panel
+    chat_col, history_col = st.columns([3, 1])
+    with history_col:
+        st.markdown(f'<div class="chat-history-header">Chat History</div>', unsafe_allow_html=True)
+        if st.button("+ New Chat", key="new_chat_main", use_container_width=True):
+            new_id = len(st.session_state.chat_sessions)
+            st.session_state.chat_sessions.append({
+                'id': new_id, 'name': 'New Chat', 'history': [],
+                'created': datetime.now().strftime("%Y-%m-%d %H:%M")
+            })
+            st.session_state.current_chat_id = new_id
             st.rerun()
-
+        st.markdown("---")
+        for session in reversed(st.session_state.chat_sessions[-20:]):
+            is_active = session['id'] == current_chat_id
+            prefix = "▶ " if is_active else ""
+            label = f"{prefix}{session['name']}"
+            c1, c2 = st.columns([4, 1])
+            with c1:
+                if st.button(label, key=f"chat_sel_{session['id']}", use_container_width=True):
+                    st.session_state.current_chat_id = session['id']
+                    st.rerun()
+            with c2:
+                if len(st.session_state.chat_sessions) > 1:
+                    if st.button("✕", key=f"chat_del_{session['id']}"):
+                        st.session_state.chat_sessions = [s for s in st.session_state.chat_sessions if s['id'] != session['id']]
+                        if st.session_state.current_chat_id == session['id']:
+                            st.session_state.current_chat_id = st.session_state.chat_sessions[-1]['id']
+                        st.rerun()
+    with chat_col:
+        st.markdown(f'<div class="sub-header">{current_session["name"]}</div>', unsafe_allow_html=True)
+        # Chat messages in a scrollable container
+        chat_container = st.container(height=500)
+        with chat_container:
+            if not chat_history:
+                st.markdown("""
+                <div style="text-align: center; padding: 40px; color: #888;">
+                    <h3 style="font-family: 'Cinzel', serif; color: #2c3e50;">Welcome</h3>
+                    <p>Ask any question about Chinese exploration, Zheng He's voyages, or the 1421 theory.</p>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                for chat in chat_history:
+                    st.markdown(f'<div class="chat-message user-message"><strong>You:</strong><br>{chat["question"]}</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="chat-message assistant-message"><strong>1421 AI:</strong><br>{chat["answer"]}</div>', unsafe_allow_html=True)
+                    badges = ""
+                    if 'documents' in chat.get('sources_used', []):
+                        badges += '<span class="source-badge badge-document">Documents</span>'
+                    if 'web' in chat.get('sources_used', []):
+                        badges += '<span class="source-badge badge-web">Web</span>'
+                    if badges:
+                        st.markdown(badges, unsafe_allow_html=True)
+                    with st.expander("Sources", expanded=False):
+                        for res in chat.get('document_results', [])[:3]:
+                            st.markdown(f"**{res.get('title', 'Unknown')}**")
+                            if res.get('snippet'):
+                                st.info(res['snippet'][:200])
+                        for res in chat.get('web_results', [])[:2]:
+                            st.markdown(f"**{res.get('title', 'Unknown')}**")
+                            if res.get('url'):
+                                st.markdown(f"[View]({res['url']})")
+        # Input at bottom - always visible (sticky via container)
+        st.markdown("---")
+        input_col, btn_col = st.columns([5, 1])
+        with input_col:
+            question = st.text_input(
+                "Ask a question",
+                value=st.session_state.current_question,
+                key="chat_q",
+                label_visibility="collapsed",
+                placeholder="Ask about Chinese exploration, Zheng He, or the 1421 theory..."
+            )
+        with btn_col:
+            ask = st.button("Research", type="primary", key="chat_ask", use_container_width=True)
+        if (ask or st.session_state.auto_search) and question:
+            st.session_state.auto_search = False
+            with st.spinner("Researching..."):
+                result = system.perform_search(question)
+                for session in st.session_state.chat_sessions:
+                    if session['id'] == st.session_state.current_chat_id:
+                        session['history'].append(result)
+                        if len(session['history']) == 1:
+                            session['name'] = question[:30] + ('...' if len(question) > 30 else '')
+                        break
+                st.session_state.current_question = ""
+                st.rerun()
+# ========== PAGE: DOCUMENTS ==========
 def show_documents_page(system):
-    st.markdown('<h2 class="sub-header">RESEARCH DOCUMENTS</h2>', unsafe_allow_html=True)
-    
-    # Document controls - search and limit on same line
-    col1, col2 = st.columns([3, 1])
-    
-    with col1:
-        search = st.text_input("", placeholder="Search documents by title, author, or keywords...", 
-                              label_visibility="collapsed", key="doc_search")
-    
-    with col2:
-        limit_opts = {"25": 25, "50": 50, "100": 100, "All": None}
-        limit = limit_opts[st.selectbox("Show", ["All", "25", "50", "100"], index=0, label_visibility="collapsed")]
-    
-    # Action buttons
-    c1, c2 = st.columns(2)
+    st.markdown('<div class="sub-header">Research Documents</div>', unsafe_allow_html=True)
+    search = st.text_input("", placeholder="Search documents by title, author, or keywords...",
+                           label_visibility="collapsed", key="doc_search")
+    c1, c2, c3 = st.columns([1, 2, 2])
     with c1:
-        search_btn = st.button("SEARCH DOCUMENTS", key="search_docs_btn", use_container_width=True)
+        limit_map = {"All": None, "25": 25, "50": 50, "100": 100}
+        limit = limit_map[st.selectbox("Show", list(limit_map.keys()), index=0, label_visibility="collapsed")]
     with c2:
-        show_btn = st.button("SHOW DOCUMENTS", key="show_docs_btn", use_container_width=True)
-    
+        search_btn = st.button("SEARCH", key="search_docs", use_container_width=True)
+    with c3:
+        show_btn = st.button("SHOW ALL", key="show_docs", use_container_width=True)
     docs = []
     if search_btn and search:
         docs = system.search_documents(search, limit or 1000)
         if docs:
-            st.success(f"Found {len(docs)} documents matching '{search}'")
+            st.success(f"Found {len(docs)} documents")
     elif show_btn:
         docs = system.get_all_documents(limit)
         if docs:
             st.success(f"Loaded {len(docs)} documents")
     else:
-        st.info("Enter a search query or click 'SHOW DOCUMENTS' to load all documents from the database.")
-    
+        st.info("Enter a search query or click 'SHOW ALL'.")
     if docs:
         df = pd.DataFrame([{
-            'ID': d.get('id', ''), 
-            'Title': d.get('title', 'Untitled')[:50],
-            'Author': d.get('author', 'Unknown')[:25], 
+            'ID': d.get('id', ''),
+            'Title': d.get('title', 'Untitled')[:60],
+            'Author': d.get('author', 'Unknown')[:30],
             'Type': d.get('source_type', 'Unknown'),
             'Words': d.get('word_count', 0),
-            'URL': d.get('url', '')[:35] + '...' if len(d.get('url', '')) > 35 else d.get('url', '')
         } for d in docs])
-        
-        st.dataframe(df, use_container_width=True, height=450, hide_index=True)
-
+        st.dataframe(df, use_container_width=True, height=500, hide_index=True)
+        csv = df.to_csv(index=False).encode()
+        st.download_button("DOWNLOAD CSV", csv, f"documents_{datetime.now():%Y%m%d}.csv", "text/csv", use_container_width=True)
+# ========== PAGE: MAP ==========
+def show_map_page(system):
+    st.markdown('<div class="sub-header">Voyage Map</div>', unsafe_allow_html=True)
+    map_data = system.get_map_locations()
+    locations = map_data['locations']
+    timeline = map_data['timeline_events']
+    # Controls
+    c1, c2, c3, c4 = st.columns([3, 1, 1, 1])
+    with c1:
+        year = st.slider("Year", 1368, 1421, st.session_state.current_year, key="map_slider")
+        st.session_state.current_year = year
+    with c2:
+        if st.button("▶ Play", key="play_map", use_container_width=True):
+            st.session_state.animation_playing = True
+    with c3:
+        if st.button("⏸ Pause", key="pause_map", use_container_width=True):
+            st.session_state.animation_playing = False
+    with c4:
+        if st.button("↺ Reset", key="reset_map", use_container_width=True):
+            st.session_state.current_year = 1368
+            st.session_state.animation_playing = False
+            st.rerun()
+    if st.session_state.animation_playing:
+        if st.session_state.current_year < 1421:
+            st.session_state.current_year += 1
+            time.sleep(0.8)
+            st.rerun()
+        else:
+            st.session_state.animation_playing = False
+    filtered = [l for l in locations if l['year'] <= st.session_state.current_year]
+    # Fullscreen toggle
+    use_fullscreen = st.checkbox("Full Screen Map", value=False, key="fullscreen_map")
+    map_height = 800 if use_fullscreen else 500
+    if HAS_FOLIUM:
+        # Real interactive map with folium
+        m = folium.Map(location=[15, 80], zoom_start=3, tiles='CartoDB positron')
+        # Route line
+        if len(filtered) > 1:
+            sorted_locs = sorted(filtered, key=lambda x: x['year'])
+            route_coords = [[l['lat'], l['lon']] for l in sorted_locs]
+            folium.PolyLine(route_coords, color='#d4af37', weight=3, opacity=0.8, dash_array='10').add_to(m)
+        # Markers
+        for loc in filtered:
+            folium.CircleMarker(
+                location=[loc['lat'], loc['lon']],
+                radius=8,
+                color='#d4af37',
+                fill=True,
+                fill_color='#d4af37',
+                fill_opacity=0.8,
+                popup=folium.Popup(f"<b>{loc['name']}</b><br>{loc['year']}<br>{loc['event']}", max_width=250),
+                tooltip=loc['name']
+            ).add_to(m)
+        st_folium(m, width=None, height=map_height, use_container_width=True)
+    else:
+        # Plotly geo fallback - proper world map
+        fig = go.Figure()
+        if filtered:
+            sorted_f = sorted(filtered, key=lambda x: x['year'])
+            lats = [l['lat'] for l in sorted_f]
+            lons = [l['lon'] for l in sorted_f]
+            names = [l['name'] for l in sorted_f]
+            years = [l['year'] for l in sorted_f]
+            events = [l['event'] for l in sorted_f]
+            # Route
+            if len(sorted_f) > 1:
+                fig.add_trace(go.Scattergeo(
+                    lon=lons, lat=lats, mode='lines',
+                    line=dict(width=2.5, color='#d4af37', dash='dash'),
+                    name='Route', hoverinfo='none'
+                ))
+            # Markers
+            fig.add_trace(go.Scattergeo(
+                lon=lons, lat=lats, mode='markers+text',
+                marker=dict(size=10, color=years, colorscale='YlOrBr',
+                            colorbar=dict(title="Year"), line=dict(width=1, color='white')),
+                text=names, textposition="top center", name='Locations',
+                customdata=events,
+                hovertemplate='%{text}<br>Year: %{marker.color}<br>%{customdata}<extra></extra>'
+            ))
+        fig.update_layout(
+            geo=dict(
+                showland=True, landcolor='rgb(243,243,243)',
+                coastlinecolor='rgb(180,180,180)', showcountries=True,
+                countrycolor='rgb(200,200,200)', showocean=True,
+                oceancolor='rgb(220,235,250)', projection_type='natural earth',
+                center=dict(lat=15, lon=80),
+                lataxis=dict(range=[-20, 50]), lonaxis=dict(range=[30, 140])
+            ),
+            height=map_height, margin=dict(l=0, r=0, t=10, b=0), showlegend=False
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    # Timeline
+    st.divider()
+    st.markdown(f'<h3 style="font-family: \'Cinzel\', serif;">Timeline to {st.session_state.current_year}</h3>', unsafe_allow_html=True)
+    filtered_events = [e for e in timeline if e['year'] <= st.session_state.current_year]
+    for ev in filtered_events:
+        st.markdown(f"**{ev['year']}** — **{ev['location']}**: {ev['event']}")
+# ========== PAGE: ANALYTICS ==========
 def show_analytics_page(system):
-    st.markdown('<h2 class="sub-header">ANALYTICS DASHBOARD</h2>', unsafe_allow_html=True)
-    
+    st.markdown('<div class="sub-header">Analytics Dashboard</div>', unsafe_allow_html=True)
     a = st.session_state.search_analytics
     stats = system.get_database_stats()
-    
-    if stats:
-        cols = st.columns(4)
-        cols[0].metric("Total Searches", a['total_searches'])
-        cols[1].metric("Avg Response Time", f"{sum(a['response_times'])/max(1,len(a['response_times'])):.2f}s")
-        cols[2].metric("Active Days", len(a['searches_by_day']))
-        cols[3].metric("Saved Searches", stats.get('saved_searches', 0))
-        
-        if a['sources_used']:
-            st.subheader("Source Usage")
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Document Searches", a['sources_used']['documents'])
-            c2.metric("Web Searches", a['sources_used']['web'])
-            c3.metric("Combined Searches", a['sources_used']['both'])
-    else:
-        st.info("No analytics data available yet. Start searching to generate analytics.")
-
+    cols = st.columns(4)
+    cols[0].metric("Total Searches", a['total_searches'])
+    avg_time = sum(a['response_times']) / max(1, len(a['response_times']))
+    cols[1].metric("Avg Response Time", f"{avg_time:.2f}s")
+    cols[2].metric("Active Days", len(a['searches_by_day']))
+    cols[3].metric("Chat Sessions", len(st.session_state.chat_sessions))
+    if a['sources_used']:
+        st.subheader("Source Usage")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Document Searches", a['sources_used']['documents'])
+        c2.metric("Web Searches", a['sources_used']['web'])
+        c3.metric("Combined Searches", a['sources_used']['both'])
+    if a['searches_by_day']:
+        st.subheader("Searches by Day")
+        df = pd.DataFrame(list(a['searches_by_day'].items()), columns=['Date', 'Count'])
+        fig = px.bar(df, x='Date', y='Count', color_discrete_sequence=['#d4af37'])
+        fig.update_layout(height=300)
+        st.plotly_chart(fig, use_container_width=True)
+# ========== PAGE: FEEDBACK ==========
+def show_feedback_page():
+    st.markdown('<div class="sub-header">Send Feedback</div>', unsafe_allow_html=True)
+    c1, c2 = st.columns(2)
+    with c1:
+        name = st.text_input("Your Name", placeholder="Optional")
+    with c2:
+        email = st.text_input("Email Address", placeholder="Required")
+    feedback_type = st.selectbox("Feedback Type", ["Bug Report", "Feature Request", "Suggestion", "Question", "Other"])
+    message = st.text_area("Your Message", placeholder="Describe your issue or suggestion...", height=150)
+    if st.button("SUBMIT FEEDBACK", type="primary", use_container_width=True):
+        if not email:
+            st.error("Email is required")
+        elif not message:
+            st.error("Message is required")
+        else:
+            if 'feedback_history' not in st.session_state:
+                st.session_state.feedback_history = []
+            st.session_state.feedback_history.append({
+                'timestamp': datetime.now().isoformat(), 'name': name or "Anonymous",
+                'email': email, 'message': message, 'type': feedback_type
+            })
+            st.success("Thank you for your feedback!")
+# ========== PAGE: SETTINGS ==========
 def show_settings_page(system):
-    st.markdown('<h2 class="sub-header">SYSTEM SETTINGS</h2>', unsafe_allow_html=True)
-    st.info("Settings page coming soon...")
-
-def show_map_page(system):
-    st.markdown('<h2 class="sub-header">FULL VOYAGE MAP</h2>', unsafe_allow_html=True)
-    st.info("Interactive voyage map coming soon...")
-
+    st.markdown('<div class="sub-header">System Settings</div>', unsafe_allow_html=True)
+    c1, c2 = st.columns(2)
+    with c1:
+        st.subheader("Database")
+        stats = system.get_database_stats()
+        st.write(f"**Documents:** {stats['total_documents']}")
+        st.write(f"**Locations:** {stats['geocoded_locations']}")
+    with c2:
+        st.subheader("System Status")
+        st.write(f"**Database:** {'Active' if system.db else 'Inactive'}")
+        st.write(f"**Web Search:** {'Active' if HAS_GOOGLE else 'Inactive'}")
+        openai_status = 'Active' if (system.web_searcher.openai_client) else 'Inactive'
+        st.write(f"**GPT-4o-mini:** {openai_status}")
+    st.divider()
+    st.subheader("Search Mode")
+    mode = st.radio("Select search mode:", ["Auto (Documents + Web)", "Documents Only", "Web Only"],
+                    index=0, horizontal=True)
+    st.session_state.search_mode = mode
+    st.divider()
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("CLEAR CHAT HISTORY", use_container_width=True):
+            st.session_state.chat_sessions = [{'id': 0, 'name': 'New Chat', 'history': [],
+                                                'created': datetime.now().strftime("%Y-%m-%d %H:%M")}]
+            st.session_state.current_chat_id = 0
+            st.success("Chat history cleared!")
+            st.rerun()
+    with c2:
+        if st.button("RESET ANALYTICS", use_container_width=True):
+            st.session_state.search_analytics = {
+                'total_searches': 0, 'searches_by_day': {}, 'searches_by_hour': {},
+                'questions_asked': [], 'response_times': [], 'popular_topics': {},
+                'user_sessions': [], 'sources_used': {'documents': 0, 'web': 0, 'both': 0}
+            }
+            st.success("Analytics reset!")
+            st.rerun()
+# ========== NAVIGATION ==========
+def render_sidebar():
+    with st.sidebar:
+        st.markdown('<div class="brand-title" style="font-size:1.4rem;">1421 Foundation AI</div>', unsafe_allow_html=True)
+        st.markdown('<div class="brand-subtitle" style="font-size:0.65rem;">Research System</div>', unsafe_allow_html=True)
+        pages = [
+            ("DASHBOARD", "dashboard"),
+            ("CHAT", "chat"),
+            ("DOCUMENTS", "documents"),
+            ("VOYAGE MAP", "map"),
+            ("ANALYTICS", "analytics"),
+            ("FEEDBACK", "feedback"),
+            ("SETTINGS", "settings"),
+        ]
+        for label, pid in pages:
+            btn_type = "primary" if st.session_state.current_page == pid else "secondary"
+            if st.button(label, key=f"nav_{pid}", use_container_width=True, type=btn_type):
+                st.session_state.current_page = pid
+                st.rerun()
+        # Close navigation button
+        st.markdown("---")
+        if st.button("✕ CLOSE NAV", key="close_nav", use_container_width=True):
+            st.session_state.show_nav = False
+            st.rerun()
 # ========== MAIN ==========
-def main():
-    st.markdown('''
-    <div style="text-align: center; padding: 0.3rem 0 0.3rem 0;">
-        <h1 class="main-header">1421 FOUNDATION AI - HISTORICAL RESEARCH SYSTEM</h1>
-    </div>
-    ''', unsafe_allow_html=True)
-    
-    system = init_system()
-    if not system or not system.db:
-        st.error("""
-        ## SYSTEM INITIALIZATION FAILED
-        
-        **Troubleshooting Steps:**
-        1. Make sure `knowledge_base.db` is in the `data/` folder
-        2. Check the file is properly uploaded to GitHub
-        3. Verify database is not corrupted
-        """)
-        st.stop()
-    
-    st.session_state.system_stats = system.get_database_stats()
-    
-    # Render left sidebar
-    render_left_sidebar()
-    
-    # Main content area
-    if st.session_state.current_page == "dashboard":
-        show_dashboard(system)
-    elif st.session_state.current_page == "chat":
-        show_chat_page(system)
-    elif st.session_state.current_page == "documents":
-        show_documents_page(system)
-    elif st.session_state.current_page == "map":
-        show_map_page(system)
-    elif st.session_state.current_page == "analytics":
-        show_analytics_page(system)
-    elif st.session_state.current_page == "settings":
-        show_settings_page(system)
-    elif st.session_state.current_page == "feedback":
-        FeedbackSystem.render_feedback_page()
-
 @st.cache_resource
 def init_system():
     return ResearchSystem()
-
+def main():
+    system = init_system()
+    # Show/hide nav toggle
+    if not st.session_state.show_nav:
+        # Show a small button to reopen nav
+        if st.button("☰ Menu", key="open_nav"):
+            st.session_state.show_nav = True
+            st.rerun()
+    else:
+        render_sidebar()
+    # Route pages
+    page = st.session_state.current_page
+    if page == "dashboard":
+        show_dashboard(system)
+    elif page == "chat":
+        show_chat_page(system)
+    elif page == "documents":
+        show_documents_page(system)
+    elif page == "map":
+        show_map_page(system)
+    elif page == "analytics":
+        show_analytics_page(system)
+    elif page == "feedback":
+        show_feedback_page()
+    elif page == "settings":
+        show_settings_page(system)
 if __name__ == "__main__":
     main()
