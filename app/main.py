@@ -2,6 +2,10 @@
 1421 Foundation AI Research System
 Complete Streamlit Application - Single File
 Uses GPT-4o-mini, SQLite, and vector database support
+
+UPDATED: 
+- Chat sources now show URLs for web results
+- Map play/pause buttons now work correctly
 """
 
 import streamlit as st
@@ -559,6 +563,7 @@ class ResearchSystem:
                     if not snippet and content:
                         snippet = content[:300] + "..."
                     d['snippet'] = snippet
+                    d['url'] = None  # Documents don't have URLs
                     docs.append(d)
                     if len(docs) >= limit:
                         break
@@ -766,7 +771,8 @@ def show_dashboard(system):
                 st.rerun()
 
 
-# ========== PAGE: CHAT ==========
+# ========== PAGE: CHAT (LINES 820-970) ==========
+# THIS SECTION HANDLES THE CHAT INTERFACE AND DISPLAYS SOURCES WITH URLs
 def show_chat_page(system):
     current_chat_id = st.session_state.current_chat_id
     current_session = next((s for s in st.session_state.chat_sessions if s['id'] == current_chat_id), None)
@@ -845,62 +851,65 @@ def show_chat_page(system):
                     if badges:
                         st.markdown(badges, unsafe_allow_html=True)
 
-                    # Sources expander
-                    with st.expander("Sources", expanded=False):
-                        doc_results = chat.get('document_results', [])
-                        web_results = chat.get('web_results', [])
-                        
-                        if doc_results:
-                            st.markdown("**📄 Document Sources:**")
-                            for res in doc_results[:3]:
-                                st.markdown(f"**{res.get('title', 'Unknown')}**")
-                                if res.get('snippet'):
-                                    st.info(res['snippet'][:200])
-                        
-                        if web_results:
-                            st.markdown("**🌐 Web Sources:**")
-                            for res in web_results[:2]:
-                                st.markdown(f"**{res.get('title', 'Unknown')}**")
-                                if res.get('url'):
-                                    st.markdown(f"[View source]({res['url']})")
+                    # UPDATED: Display sources with URLs for web results
+                    doc_results = chat.get('document_results', [])
+                    web_results = chat.get('web_results', [])
 
-        # Input area
+                    if doc_results or web_results:
+                        with st.expander("📄 View All Sources", expanded=False):
+                            if doc_results:
+                                st.markdown("### 📚 Historical Documents")
+                                for i, res in enumerate(doc_results[:5], 1):
+                                    st.markdown(f"**{i}. {res.get('title', 'Unknown')}**")
+                                    snippet = res.get('snippet', '')
+                                    if snippet:
+                                        st.markdown(f"> {snippet[:300]}...")
+                                    st.markdown("")
+                            
+                            if web_results:
+                                st.markdown("### 🌐 Web Sources")
+                                for i, res in enumerate(web_results[:5], 1):
+                                    title = res.get('title', 'Unknown')
+                                    url = res.get('url', '')
+                                    snippet = res.get('snippet', '')
+                                    
+                                    st.markdown(f"**{i}. {title}**")
+                                    # Display URL as clickable link
+                                    if url:
+                                        st.markdown(f"🔗 **URL:** [{url}]({url})")
+                                    if snippet:
+                                        st.markdown(f"> {snippet[:300]}...")
+                                    st.markdown("")
+
+        # Question input
         st.divider()
+        question_input = st.text_input("Ask a question", key="chat_input", placeholder="Ask about Chinese exploration, Zheng He, or the 1421 theory...")
         
-        # Check if we should auto-search from example question
+        col1, col2 = st.columns([5, 1])
+        with col2:
+            ask_btn = st.button("ASK", type="primary", use_container_width=True)
+        
+        # Handle auto-search from example questions
         if st.session_state.auto_search and st.session_state.current_question:
-            question_to_search = st.session_state.current_question
-            st.session_state.auto_search = False
-            st.session_state.current_question = ""
-            
             with st.spinner("Researching..."):
-                result = system.perform_search(question_to_search)
+                result = system.perform_search(st.session_state.current_question)
                 
                 # Update the current chat session
                 for session in st.session_state.chat_sessions:
                     if session['id'] == st.session_state.current_chat_id:
                         session['history'].append(result)
                         # Update chat name with the question
-                        words = question_to_search.strip().split()
+                        words = st.session_state.current_question.strip().split()
                         summary = ' '.join(words[:6]) + ('...' if len(words) > 6 else '')
                         session['name'] = summary
                         break
-            
-            st.rerun()
+                
+                st.session_state.current_question = ""
+                st.session_state.auto_search = False
+                st.rerun()
         
-        # Normal input handling
-        cols = st.columns([5, 1])
-        with cols[0]:
-            question_input = st.text_input(
-                "Ask a question", 
-                placeholder="Ask about Chinese exploration, Zheng He, or the 1421 theory...",
-                label_visibility="collapsed",
-                key="chat_input"
-            )
-        with cols[1]:
-            ask_button = st.button("Research", key="ask_btn", type="primary", use_container_width=True)
-        
-        if ask_button and question_input:
+        # Handle manual search
+        if ask_btn and question_input:
             with st.spinner("Researching..."):
                 result = system.perform_search(question_input)
                 
@@ -908,14 +917,13 @@ def show_chat_page(system):
                 for session in st.session_state.chat_sessions:
                     if session['id'] == st.session_state.current_chat_id:
                         session['history'].append(result)
-                        # Update chat name with first question if it's "New Chat"
-                        if session['name'] == 'New Chat':
-                            words = question_input.strip().split()
-                            summary = ' '.join(words[:6]) + ('...' if len(words) > 6 else '')
-                            session['name'] = summary
+                        # Update chat name with the question
+                        words = question_input.strip().split()
+                        summary = ' '.join(words[:6]) + ('...' if len(words) > 6 else '')
+                        session['name'] = summary
                         break
-            
-            st.rerun()
+                
+                st.rerun()
 
 
 # ========== PAGE: DOCUMENTS ==========
@@ -959,7 +967,8 @@ def show_documents_page(system):
         st.download_button("DOWNLOAD CSV", csv, f"documents_{datetime.now():%Y%m%d}.csv", "text/csv", use_container_width=True)
 
 
-# ========== PAGE: MAP ==========
+# ========== PAGE: MAP (LINES 1080-1200) ==========
+# THIS SECTION HANDLES THE INTERACTIVE VOYAGE MAP WITH WORKING PLAY/PAUSE
 def show_map_page(system):
     st.markdown('<div class="sub-header">Voyage Map</div>', unsafe_allow_html=True)
 
@@ -967,43 +976,54 @@ def show_map_page(system):
     locations = map_data['locations']
     timeline = map_data['timeline_events']
 
-    # Single play/pause toggle button with reset
-    st.markdown('<div class="map-controls">', unsafe_allow_html=True)
-    col1, col2 = st.columns([1, 1])
+    # UPDATED: Control buttons with proper play/pause toggle
+    col1, col2, col3 = st.columns(3)
+    
     with col1:
-        # Toggle between play and pause
-        if st.session_state.animation_playing:
-            if st.button("⏸ PAUSE", key="pause_map", use_container_width=True):
-                st.session_state.animation_playing = False
-                st.rerun()
-        else:
-            if st.button("▶ PLAY", key="play_map", use_container_width=True):
-                st.session_state.animation_playing = True
-                st.rerun()
+        # Single toggle button that changes text based on state
+        if st.button("▶ PLAY" if not st.session_state.animation_playing else "⏸ PAUSE", 
+                     key="toggle_animation", 
+                     use_container_width=True,
+                     type="primary"):
+            st.session_state.animation_playing = not st.session_state.animation_playing
+            st.rerun()
+    
     with col2:
         if st.button("↺ RESET", key="reset_map", use_container_width=True):
             st.session_state.current_year = 1368
             st.session_state.animation_playing = False
             st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col3:
+        speed = st.selectbox("Speed", ["Slow", "Medium", "Fast"], index=1, key="anim_speed")
+        speed_map = {"Slow": 1.0, "Medium": 0.5, "Fast": 0.2}
 
-    # Year slider
+    # Year slider or year display
     st.markdown('<div class="map-slider-container">', unsafe_allow_html=True)
-    year = st.slider("Year", 1368, 1421, st.session_state.current_year, key="map_slider")
-    st.session_state.current_year = year
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    # Animation logic
+    
+    # UPDATED: Conditional display based on animation state
     if st.session_state.animation_playing:
+        # Show current year as text during animation
+        st.markdown(f"<h3 style='text-align: center; color: #d4af37;'>Year: {st.session_state.current_year}</h3>", 
+                   unsafe_allow_html=True)
+        
+        # Auto-increment year
         if st.session_state.current_year < 1421:
+            time.sleep(speed_map.get(speed, 0.5))
             st.session_state.current_year += 1
-            time.sleep(0.8)
             st.rerun()
         else:
-            # Stop at the end
+            # Stop animation when reaching the end
             st.session_state.animation_playing = False
             st.rerun()
+    else:
+        # Show interactive slider when paused
+        year = st.slider("Year", 1368, 1421, st.session_state.current_year, key="map_slider")
+        st.session_state.current_year = year
+    
+    st.markdown('</div>', unsafe_allow_html=True)
 
+    # Filter locations by current year
     filtered = [l for l in locations if l['year'] <= st.session_state.current_year]
 
     if HAS_FOLIUM:
