@@ -847,44 +847,60 @@ def show_chat_page(system):
 
                     # Sources expander
                     with st.expander("Sources", expanded=False):
-                        for res in chat.get('document_results', [])[:3]:
-                            st.markdown(f"**{res.get('title', 'Unknown')}**")
-                            if res.get('snippet'):
-                                st.info(res['snippet'][:200])
-                        for res in chat.get('web_results', [])[:2]:
-                            st.markdown(f"**{res.get('title', 'Unknown')}**")
-                            if res.get('url'):
-                                st.markdown(f"[View]({res['url']})")
+                        doc_results = chat.get('document_results', [])
+                        web_results = chat.get('web_results', [])
+                        
+                        if doc_results:
+                            st.markdown("**📄 Document Sources:**")
+                            for res in doc_results[:3]:
+                                st.markdown(f"**{res.get('title', 'Unknown')}**")
+                                if res.get('snippet'):
+                                    st.info(res['snippet'][:200])
+                        
+                        if web_results:
+                            st.markdown("**🌐 Web Sources:**")
+                            for res in web_results[:2]:
+                                st.markdown(f"**{res.get('title', 'Unknown')}**")
+                                if res.get('url'):
+                                    st.markdown(f"[View source]({res['url']})")
 
-        # Question input
+        # Input area
         st.divider()
-        question_input = st.text_input("Ask a question", key="chat_input", placeholder="Ask about Chinese exploration, Zheng He, or the 1421 theory...")
         
-        col1, col2 = st.columns([5, 1])
-        with col2:
-            ask_btn = st.button("ASK", type="primary", use_container_width=True)
-        
-        # Handle auto-search from example questions
+        # Check if we should auto-search from example question
         if st.session_state.auto_search and st.session_state.current_question:
+            question_to_search = st.session_state.current_question
+            st.session_state.auto_search = False
+            st.session_state.current_question = ""
+            
             with st.spinner("Researching..."):
-                result = system.perform_search(st.session_state.current_question)
+                result = system.perform_search(question_to_search)
                 
                 # Update the current chat session
                 for session in st.session_state.chat_sessions:
                     if session['id'] == st.session_state.current_chat_id:
                         session['history'].append(result)
                         # Update chat name with the question
-                        words = st.session_state.current_question.strip().split()
+                        words = question_to_search.strip().split()
                         summary = ' '.join(words[:6]) + ('...' if len(words) > 6 else '')
                         session['name'] = summary
                         break
-                
-                st.session_state.current_question = ""
-                st.session_state.auto_search = False
-                st.rerun()
+            
+            st.rerun()
         
-        # Handle manual search
-        if ask_btn and question_input:
+        # Normal input handling
+        cols = st.columns([5, 1])
+        with cols[0]:
+            question_input = st.text_input(
+                "Ask a question", 
+                placeholder="Ask about Chinese exploration, Zheng He, or the 1421 theory...",
+                label_visibility="collapsed",
+                key="chat_input"
+            )
+        with cols[1]:
+            ask_button = st.button("Research", key="ask_btn", type="primary", use_container_width=True)
+        
+        if ask_button and question_input:
             with st.spinner("Researching..."):
                 result = system.perform_search(question_input)
                 
@@ -892,13 +908,14 @@ def show_chat_page(system):
                 for session in st.session_state.chat_sessions:
                     if session['id'] == st.session_state.current_chat_id:
                         session['history'].append(result)
-                        # Update chat name with the question
-                        words = question_input.strip().split()
-                        summary = ' '.join(words[:6]) + ('...' if len(words) > 6 else '')
-                        session['name'] = summary
+                        # Update chat name with first question if it's "New Chat"
+                        if session['name'] == 'New Chat':
+                            words = question_input.strip().split()
+                            summary = ' '.join(words[:6]) + ('...' if len(words) > 6 else '')
+                            session['name'] = summary
                         break
-                
-                st.rerun()
+            
+            st.rerun()
 
 
 # ========== PAGE: DOCUMENTS ==========
@@ -950,10 +967,11 @@ def show_map_page(system):
     locations = map_data['locations']
     timeline = map_data['timeline_events']
 
-    # Single play/pause toggle button
+    # Single play/pause toggle button with reset
     st.markdown('<div class="map-controls">', unsafe_allow_html=True)
     col1, col2 = st.columns([1, 1])
     with col1:
+        # Toggle between play and pause
         if st.session_state.animation_playing:
             if st.button("⏸ PAUSE", key="pause_map", use_container_width=True):
                 st.session_state.animation_playing = False
@@ -971,18 +989,18 @@ def show_map_page(system):
 
     # Year slider
     st.markdown('<div class="map-slider-container">', unsafe_allow_html=True)
-    year = st.slider("Year", 1368, 1421, st.session_state.current_year, key="map_slider", disabled=st.session_state.animation_playing)
-    if not st.session_state.animation_playing:
-        st.session_state.current_year = year
+    year = st.slider("Year", 1368, 1421, st.session_state.current_year, key="map_slider")
+    st.session_state.current_year = year
     st.markdown('</div>', unsafe_allow_html=True)
 
     # Animation logic
     if st.session_state.animation_playing:
         if st.session_state.current_year < 1421:
             st.session_state.current_year += 1
-            time.sleep(0.5)
+            time.sleep(0.8)
             st.rerun()
         else:
+            # Stop at the end
             st.session_state.animation_playing = False
             st.rerun()
 
