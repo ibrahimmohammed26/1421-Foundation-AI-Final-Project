@@ -77,9 +77,6 @@ DEFAULT_STATE = {
     'chat_sessions': [],
     'current_chat_id': 0,
     'show_nav': True,
-    'logged_in': False,
-    'username': '',
-    'user_id': None,
 }
 
 for key, value in DEFAULT_STATE.items():
@@ -342,63 +339,6 @@ section[data-testid="stSidebar"] > div {
     border-left: 6px solid #d4af37;
 }
 
-/* FIXED: DeepSeek-style sticky input at bottom */
-.sticky-input-container {
-    position: fixed;
-    bottom: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: min(800px, 90%);
-    background: white;
-    padding: 10px 10px 10px 20px;
-    border: 1px solid #e0e0e0;
-    border-radius: 40px;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-    z-index: 1000;
-    display: flex;
-    align-items: center;
-    backdrop-filter: blur(10px);
-    background: rgba(255,255,255,0.98);
-    margin-left: 150px;
-}
-
-.sticky-input-container input {
-    border: none;
-    background: transparent;
-    padding: 12px 0;
-    font-size: 1rem;
-    outline: none;
-    flex-grow: 1;
-    color: #333;
-}
-
-.sticky-input-container input::placeholder {
-    color: #999;
-    font-size: 0.95rem;
-}
-
-.sticky-input-container button {
-    background: #d4af37;
-    color: #000000;
-    border: none;
-    border-radius: 30px;
-    padding: 10px 24px;
-    font-weight: 600;
-    margin-left: 10px;
-    white-space: nowrap;
-    cursor: pointer;
-    transition: all 0.2s ease;
-}
-
-.sticky-input-container button:hover {
-    background: #c4a030;
-}
-
-/* Hide the original input */
-.hidden-input {
-    display: none;
-}
-
 /* Main content buttons */
 .stButton > button {
     background: #d4af37 !important;
@@ -457,24 +397,6 @@ section[data-testid="stSidebar"] > div {
     margin-right: 15px;
 }
 
-/* Login form styling */
-.login-container {
-    max-width: 400px;
-    margin: 50px auto;
-    padding: 30px;
-    background: white;
-    border-radius: 12px;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-    border-left: 6px solid #d4af37;
-}
-
-.login-title {
-    font-family: 'Cinzel', serif;
-    color: #2c3e50;
-    text-align: center;
-    margin-bottom: 30px;
-}
-
 /* System status */
 .system-status {
     color: #d4af37;
@@ -493,7 +415,6 @@ class ThreadSafeDatabase:
 
     def get_connection(self):
         if not hasattr(self.local, 'conn'):
-            # FIXED: Added timeout and better error handling
             self.local.conn = sqlite3.connect(str(self.db_path), check_same_thread=False, timeout=10)
             self.local.conn.row_factory = sqlite3.Row
         return self.local.conn
@@ -789,200 +710,10 @@ Provide a comprehensive answer that:
         }
 
 
-# ========== USER AUTHENTICATION SYSTEM ==========
-class UserAuthSystem:
-    """Handles user registration, login, and session management"""
-    
-    def __init__(self):
-        # FIXED: Create data directory if it doesn't exist
-        data_dir = Path(__file__).parent / "data"
-        data_dir.mkdir(exist_ok=True)
-        self.db_path = data_dir / "users.db"
-        self._init_users_table()
-    
-    def _init_users_table(self):
-        """Create users table if it doesn't exist"""
-        try:
-            # FIXED: Added timeout and better error handling
-            conn = sqlite3.connect(str(self.db_path), timeout=10)
-            cursor = conn.cursor()
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS users (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    username TEXT UNIQUE NOT NULL,
-                    email TEXT UNIQUE NOT NULL,
-                    password_hash TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    last_login TEXT,
-                    is_active INTEGER DEFAULT 1
-                )
-            ''')
-            conn.commit()
-            conn.close()
-        except Exception as e:
-            print(f"Error creating users table: {e}")
-    
-    def _hash_password(self, password: str) -> str:
-        """Hash a password using SHA-256 with salt"""
-        salt = "1421_foundation_salt"  # In production, use environment variable
-        return hashlib.sha256(f"{password}{salt}".encode()).hexdigest()
-    
-    def register_user(self, username: str, email: str, password: str) -> Tuple[bool, str]:
-        """Register a new user"""
-        try:
-            conn = sqlite3.connect(str(self.db_path), timeout=10)
-            cursor = conn.cursor()
-            
-            # Check if username exists
-            cursor.execute("SELECT id FROM users WHERE username = ?", (username,))
-            if cursor.fetchone():
-                conn.close()
-                return False, "Username already exists"
-            
-            # Check if email exists
-            cursor.execute("SELECT id FROM users WHERE email = ?", (email,))
-            if cursor.fetchone():
-                conn.close()
-                return False, "Email already registered"
-            
-            # Create new user
-            password_hash = self._hash_password(password)
-            created_at = datetime.now().isoformat()
-            
-            cursor.execute('''
-                INSERT INTO users (username, email, password_hash, created_at)
-                VALUES (?, ?, ?, ?)
-            ''', (username, email, password_hash, created_at))
-            
-            conn.commit()
-            user_id = cursor.lastrowid
-            conn.close()
-            
-            return True, f"User registered successfully"
-        except Exception as e:
-            return False, f"Registration error: {str(e)}"
-    
-    def login_user(self, username: str, password: str) -> Tuple[bool, str, dict]:
-        """Login a user"""
-        try:
-            conn = sqlite3.connect(str(self.db_path), timeout=10)
-            cursor = conn.cursor()
-            
-            password_hash = self._hash_password(password)
-            
-            cursor.execute('''
-                SELECT id, username, email, created_at FROM users 
-                WHERE username = ? AND password_hash = ? AND is_active = 1
-            ''', (username, password_hash))
-            
-            user = cursor.fetchone()
-            
-            if user:
-                # Update last login
-                cursor.execute('''
-                    UPDATE users SET last_login = ? WHERE id = ?
-                ''', (datetime.now().isoformat(), user[0]))
-                conn.commit()
-                
-                user_data = {
-                    'id': user[0],
-                    'username': user[1],
-                    'email': user[2],
-                    'created_at': user[3]
-                }
-                conn.close()
-                return True, "Login successful", user_data
-            else:
-                conn.close()
-                return False, "Invalid username or password", {}
-        except Exception as e:
-            return False, f"Login error: {str(e)}", {}
-
-
-# ========== LOGIN PAGE ==========
-def show_login_page():
-    """Display login/registration page"""
-    
-    st.markdown('<div class="brand-title">1421 Foundation AI</div>', unsafe_allow_html=True)
-    st.markdown('<div class="brand-subtitle">Historical Maritime Research Platform</div>', unsafe_allow_html=True)
-    
-    # Initialize auth system
-    auth = UserAuthSystem()
-    
-    # Create tabs for login and registration
-    tab1, tab2 = st.tabs(["LOGIN", "REGISTER"])
-    
-    with tab1:
-        with st.form("login_form"):
-            st.markdown('<div class="login-container">', unsafe_allow_html=True)
-            st.markdown('<h3 class="login-title">Login to Your Account</h3>', unsafe_allow_html=True)
-            
-            username = st.text_input("Username", placeholder="Enter your username")
-            password = st.text_input("Password", type="password", placeholder="Enter your password")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                submitted = st.form_submit_button("LOGIN", use_container_width=True)
-            
-            if submitted:
-                if username and password:
-                    success, message, user_data = auth.login_user(username, password)
-                    if success:
-                        st.session_state.logged_in = True
-                        st.session_state.username = user_data['username']
-                        st.session_state.user_id = user_data['id']
-                        st.success(f"Welcome back, {username}!")
-                        st.session_state.current_page = 'dashboard'
-                        st.rerun()
-                    else:
-                        st.error(message)
-                else:
-                    st.warning("Please enter both username and password")
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-    
-    with tab2:
-        with st.form("register_form"):
-            st.markdown('<div class="login-container">', unsafe_allow_html=True)
-            st.markdown('<h3 class="login-title">Create New Account</h3>', unsafe_allow_html=True)
-            
-            new_username = st.text_input("Username", placeholder="Choose a username")
-            new_email = st.text_input("Email", placeholder="Enter your email")
-            new_password = st.text_input("Password", type="password", placeholder="Choose a password")
-            confirm_password = st.text_input("Confirm Password", type="password", placeholder="Confirm your password")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                submitted = st.form_submit_button("REGISTER", use_container_width=True)
-            
-            if submitted:
-                if not new_username or not new_email or not new_password:
-                    st.warning("All fields are required")
-                elif new_password != confirm_password:
-                    st.error("Passwords do not match")
-                elif len(new_password) < 6:
-                    st.error("Password must be at least 6 characters")
-                else:
-                    success, message = auth.register_user(new_username, new_email, new_password)
-                    if success:
-                        st.success("Registration successful! Please login.")
-                        # Switch to login tab
-                        st.session_state.login_tab = 0
-                        st.rerun()
-                    else:
-                        st.error(message)
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-
-
 # ========== PAGE: DASHBOARD ==========
 def show_dashboard(system):
     st.markdown('<div class="brand-title">1421 Foundation AI Research System</div>', unsafe_allow_html=True)
-    st.markdown('<div class="brand-subtitle">Historical Maritime Research Platform</div>', unsafe_allow_html=True)
-
-    # Show welcome message with username
-    if st.session_state.logged_in:
-        st.markdown(f"### Welcome back, {st.session_state.username}! 👋")
+    st.markdown('<div class="brand-subtitle">Historical Research Platform</div>', unsafe_allow_html=True)
 
     stats = system.get_database_stats()
     cols = st.columns(4)
@@ -1090,13 +821,6 @@ def show_chat_page(system):
     with chat_col:
         st.markdown(f'<div class="sub-header">{current_session["name"]}</div>', unsafe_allow_html=True)
 
-        # FIXED: Check for auto-search from example questions
-        if st.session_state.auto_search and st.session_state.current_question:
-            question = st.session_state.current_question
-            st.session_state.auto_search = False
-        else:
-            question = ""
-
         # Chat messages container
         chat_container = st.container(height=450)
         with chat_container:
@@ -1132,19 +856,15 @@ def show_chat_page(system):
                             if res.get('url'):
                                 st.markdown(f"[View]({res['url']})")
 
-        # FIXED: Sticky input bar
-        st.markdown("""
-        <div class="sticky-input-container">
-            <input type="text" id="sticky-question" placeholder="Ask about Chinese exploration, Zheng He, or the 1421 theory...">
-            <button id="sticky-research" onclick="document.getElementById('sticky_research_btn').click();">Research</button>
-        </div>
-        """, unsafe_allow_html=True)
+        # Question input
+        st.divider()
+        question_input = st.text_input("Ask a question", key="chat_input", placeholder="Ask about Chinese exploration, Zheng He, or the 1421 theory...")
         
-        # Hidden input and button
-        question_input = st.text_input("Hidden", key="sticky_q", label_visibility="collapsed", placeholder="")
-        ask = st.button("Research", key="sticky_research_btn", type="primary")
+        col1, col2 = st.columns([5, 1])
+        with col2:
+            ask_btn = st.button("ASK", type="primary", use_container_width=True)
         
-        # FIXED: Handle auto-search from example
+        # Handle auto-search from example questions
         if st.session_state.auto_search and st.session_state.current_question:
             with st.spinner("Researching..."):
                 result = system.perform_search(st.session_state.current_question)
@@ -1164,7 +884,7 @@ def show_chat_page(system):
                 st.rerun()
         
         # Handle manual search
-        if ask and question_input:
+        if ask_btn and question_input:
             with st.spinner("Researching..."):
                 result = system.perform_search(question_input)
                 
@@ -1178,7 +898,6 @@ def show_chat_page(system):
                         session['name'] = summary
                         break
                 
-                st.session_state.current_question = ""
                 st.rerun()
 
 
@@ -1231,7 +950,7 @@ def show_map_page(system):
     locations = map_data['locations']
     timeline = map_data['timeline_events']
 
-    # FIXED: Single play/pause toggle button
+    # Single play/pause toggle button
     st.markdown('<div class="map-controls">', unsafe_allow_html=True)
     col1, col2 = st.columns([1, 1])
     with col1:
@@ -1252,18 +971,20 @@ def show_map_page(system):
 
     # Year slider
     st.markdown('<div class="map-slider-container">', unsafe_allow_html=True)
-    year = st.slider("Year", 1368, 1421, st.session_state.current_year, key="map_slider")
-    st.session_state.current_year = year
+    year = st.slider("Year", 1368, 1421, st.session_state.current_year, key="map_slider", disabled=st.session_state.animation_playing)
+    if not st.session_state.animation_playing:
+        st.session_state.current_year = year
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # FIXED: Animation logic
+    # Animation logic
     if st.session_state.animation_playing:
         if st.session_state.current_year < 1421:
             st.session_state.current_year += 1
-            time.sleep(0.8)
+            time.sleep(0.5)
             st.rerun()
         else:
             st.session_state.animation_playing = False
+            st.rerun()
 
     filtered = [l for l in locations if l['year'] <= st.session_state.current_year]
 
@@ -1432,22 +1153,6 @@ def show_settings_page(system):
     st.session_state.search_mode = mode
 
     st.divider()
-    st.subheader("Account")
-    if st.session_state.logged_in:
-        st.write(f"Logged in as: **{st.session_state.username}**")
-        if st.button("LOGOUT", use_container_width=True):
-            st.session_state.logged_in = False
-            st.session_state.username = ''
-            st.session_state.user_id = None
-            st.session_state.current_page = 'dashboard'
-            st.rerun()
-    else:
-        st.info("Not logged in")
-        if st.button("GO TO LOGIN", use_container_width=True):
-            st.session_state.current_page = 'login'
-            st.rerun()
-
-    st.divider()
     c1, c2 = st.columns(2)
     with c1:
         if st.button("CLEAR CHAT HISTORY", use_container_width=True):
@@ -1476,10 +1181,6 @@ def render_sidebar():
         st.markdown('<p style="color: #888; font-size:0.7rem;">Research System</p>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # Show user info if logged in
-        if st.session_state.logged_in:
-            st.markdown(f"<p style='color: #d4af37; text-align:center;'>Welcome, {st.session_state.username}</p>", unsafe_allow_html=True)
-
         pages = [
             ("🏠  DASHBOARD", "dashboard"),
             ("💬  CHAT", "chat"),
@@ -1487,14 +1188,8 @@ def render_sidebar():
             ("🗺️  VOYAGE MAP", "map"),
             ("📊  ANALYTICS", "analytics"),
             ("✉️  FEEDBACK", "feedback"),
+            ("⚙️  SETTINGS", "settings"),
         ]
-        
-        # Add login/logout button above settings
-        if not st.session_state.logged_in:
-            pages.append(("🔐  LOGIN", "login"))
-        
-        # Settings always at the bottom
-        pages.append(("⚙️  SETTINGS", "settings"))
 
         for label, pid in pages:
             btn_type = "primary" if st.session_state.current_page == pid else "secondary"
@@ -1512,31 +1207,25 @@ def init_system():
 def main():
     system = init_system()
 
-    # Check if we need to show login page (but don't force redirect)
-    if not st.session_state.logged_in and st.session_state.current_page == 'login':
-        show_login_page()
-    else:
-        # Left sidebar navigation
-        render_sidebar()
+    # Left sidebar navigation
+    render_sidebar()
 
-        # Route pages
-        page = st.session_state.current_page
-        if page == "login":
-            show_login_page()
-        elif page == "dashboard":
-            show_dashboard(system)
-        elif page == "chat":
-            show_chat_page(system)
-        elif page == "documents":
-            show_documents_page(system)
-        elif page == "map":
-            show_map_page(system)
-        elif page == "analytics":
-            show_analytics_page(system)
-        elif page == "feedback":
-            show_feedback_page()
-        elif page == "settings":
-            show_settings_page(system)
+    # Route pages
+    page = st.session_state.current_page
+    if page == "dashboard":
+        show_dashboard(system)
+    elif page == "chat":
+        show_chat_page(system)
+    elif page == "documents":
+        show_documents_page(system)
+    elif page == "map":
+        show_map_page(system)
+    elif page == "analytics":
+        show_analytics_page(system)
+    elif page == "feedback":
+        show_feedback_page()
+    elif page == "settings":
+        show_settings_page(system)
 
 
 if __name__ == "__main__":
