@@ -609,76 +609,98 @@ class ResearchSystem:
         if not sources:
             return "No information available with current search settings.", []
 
+        # Prepare context from documents and web
+        doc_context = ""
+        if use_docs and doc_results:
+            for i, d in enumerate(doc_results[:5], 1):
+                title = d.get('title', 'Unknown')
+                content = d.get('snippet', d.get('content', ''))[:600]
+                doc_context += f"[Document {i}] Title: '{title}'\nContent: {content}\n\n"
+
+        web_context = ""
+        if use_web and web_results:
+            for i, w in enumerate(web_results[:3], 1):
+                title = w.get('title', 'Unknown')
+                url = w.get('url', '')
+                content = w.get('snippet', '')[:600]
+                web_context += f"[Web Source {i}] Title: '{title}'\nURL: {url}\nContent: {content}\n\n"
+
         # Try GPT-4o-mini
         if self.web_searcher.openai_client:
             try:
-                doc_context = ""
-                if use_docs and doc_results:
-                    for d in doc_results[:3]:
-                        title = d.get('title', 'Unknown')
-                        content = d.get('snippet', d.get('content', ''))[:500]
-                        doc_context += f"Document '{title}': {content}\n\n"
-
-                web_context = ""
-                if use_web and web_results:
-                    for w in web_results[:3]:
-                        title = w.get('title', 'Unknown')
-                        content = w.get('snippet', '')[:500]
-                        web_context += f"Web source '{title}': {content}\n\n"
-
-                prompt = f"""You are a professional historian specialising in Chinese maritime exploration during the Ming dynasty.
-Answer the following question in clear, fluent UK English. Synthesise the information into a coherent, well-structured response.
+                prompt = f"""You are a professional historian specialising in Chinese maritime exploration during the Ming dynasty (1368-1644), particularly the voyages of Admiral Zheng He and the controversial 1421 hypothesis.
 
 Question: {question}
 
-Available information:
+Available Sources:
 {doc_context}
 {web_context}
 
-Provide a comprehensive answer that:
-1. Directly addresses the question
-2. Presents key facts and historical context
-3. Uses professional academic tone
-4. Is written in proper UK English
-"""
+Instructions:
+1. Provide a comprehensive, well-structured answer that directly addresses the question
+2. Synthesize information from multiple sources into a coherent narrative
+3. Write in clear, fluent, professional UK English
+4. Use proper historical terminology and context
+5. Be objective and balanced in presenting information
+6. Structure your response with clear paragraphs (not bullet points)
+7. Make the answer informative and engaging
+
+Write your answer now:"""
+
                 resp = self.web_searcher.openai_client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
-                        {"role": "system", "content": "You are a professional historian specialising in early Chinese maritime exploration. Write in clear, academic UK English."},
+                        {"role": "system", "content": "You are a professional historian specialising in early Chinese maritime exploration, particularly Zheng He's treasure voyages and Ming Dynasty naval history. Write in clear, engaging, academic UK English. Provide comprehensive, well-structured answers that synthesize information from multiple sources."},
                         {"role": "user", "content": prompt}
                     ],
-                    max_tokens=800,
+                    max_tokens=1000,
                     temperature=0.7
                 )
-                if resp and resp.choices:
-                    answer = resp.choices[0].message.content
+                
+                if resp and resp.choices and resp.choices[0].message.content:
+                    answer = resp.choices[0].message.content.strip()
+                    # Remove any URLs that might have been included
                     answer = re.sub(r'https?://\S+', '', answer)
                     return answer, sources
+                else:
+                    print("OpenAI returned empty response")
+                    
             except Exception as e:
-                print(f"OpenAI error: {e}")
+                print(f"OpenAI API error: {e}")
+                st.warning(f"⚠️ AI service temporarily unavailable. Using basic synthesis. Error: {str(e)}")
 
-        # Fallback
-        key_points = []
+        # Enhanced Fallback - create a better structured response
+        answer_parts = []
+        
+        # Opening
+        answer_parts.append(f"Based on the available historical sources, here is what we know about {question.lower().replace('?', '')}:\n\n")
+        
+        # Add document insights
         if use_docs and doc_results:
-            for d in doc_results[:3]:
-                content = d.get('snippet', d.get('content', ''))[:200]
+            answer_parts.append("**Historical Records:**\n")
+            for i, d in enumerate(doc_results[:3], 1):
+                content = d.get('snippet', d.get('content', ''))[:300]
                 content = re.sub(r'https?://\S+', '', content).strip()
                 if len(content) > 50:
-                    key_points.append(content)
+                    # Clean up the content
+                    content = ' '.join(content.split())
+                    answer_parts.append(f"{content}\n\n")
+        
+        # Add web insights
         if use_web and web_results:
-            for w in web_results[:2]:
-                content = w.get('snippet', '')[:200]
+            answer_parts.append("**Additional Information:**\n")
+            for i, w in enumerate(web_results[:2], 1):
+                content = w.get('snippet', '')[:300]
                 content = re.sub(r'https?://\S+', '', content).strip()
                 if len(content) > 50:
-                    key_points.append(content)
-
-        parts = [f"Regarding {question.lower().replace('?', '')}, historical evidence suggests the following."]
-        for i, kp in enumerate(key_points[:3]):
-            connector = ["", "\n\nFurthermore, ", "\n\nAdditionally, "][min(i, 2)]
-            parts.append(connector + kp)
-        parts.append("\n\nThese findings demonstrate the significance of Chinese maritime exploration during this period.")
-
-        return ''.join(parts), sources
+                    # Clean up the content
+                    content = ' '.join(content.split())
+                    answer_parts.append(f"{content}\n\n")
+        
+        # Closing
+        answer_parts.append("These findings reflect the significance of Chinese maritime exploration during the Ming Dynasty period.")
+        
+        return ''.join(answer_parts), sources
 
     def perform_search(self, question):
         start = time.time()
@@ -860,7 +882,15 @@ def show_chat_page(system):
                             if doc_results:
                                 st.markdown("### 📚 Historical Documents")
                                 for i, res in enumerate(doc_results[:5], 1):
-                                    st.markdown(f"**{i}. {res.get('title', 'Unknown')}**")
+                                    title = res.get('title', 'Unknown')
+                                    url = res.get('url', None)
+                                    
+                                    # Display title with URL if available
+                                    if url:
+                                        st.markdown(f"**{i}. {title}** - 🔗 [View Source]({url})")
+                                    else:
+                                        st.markdown(f"**{i}. {title}**")
+                                    
                                     snippet = res.get('snippet', '')
                                     if snippet:
                                         st.markdown(f"> {snippet[:300]}...")
@@ -873,10 +903,12 @@ def show_chat_page(system):
                                     url = res.get('url', '')
                                     snippet = res.get('snippet', '')
                                     
-                                    st.markdown(f"**{i}. {title}**")
-                                    # Display URL as clickable link
+                                    # Display title with URL inline
                                     if url:
-                                        st.markdown(f"🔗 **URL:** [{url}]({url})")
+                                        st.markdown(f"**{i}. {title}** - 🔗 [{url}]({url})")
+                                    else:
+                                        st.markdown(f"**{i}. {title}**")
+                                    
                                     if snippet:
                                         st.markdown(f"> {snippet[:300]}...")
                                     st.markdown("")
@@ -1181,8 +1213,11 @@ def show_settings_page(system):
         st.subheader("System Status")
         st.write(f"**Database:** {'Active' if system.db else 'Inactive'}")
         st.write(f"**Web Search:** {'Active' if HAS_GOOGLE else 'Inactive'}")
-        openai_status = 'Active' if (system.web_searcher.openai_client) else 'Inactive'
+        openai_status = 'Active ✅' if (system.web_searcher.openai_client) else 'Inactive ❌'
         st.write(f"**GPT-4o-mini:** {openai_status}")
+        
+        if not system.web_searcher.openai_client:
+            st.warning("⚠️ OpenAI API not configured. Add OPENAI_API_KEY to Streamlit secrets or environment variables for AI-powered answers.")
 
     st.divider()
     st.subheader("Search Mode")
