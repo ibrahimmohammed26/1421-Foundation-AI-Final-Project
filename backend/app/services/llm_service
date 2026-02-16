@@ -1,0 +1,173 @@
+import os
+from typing import List, Dict, Any, Tuple
+from langchain_openai import ChatOpenAI
+from langchain.chains import RetrievalQA
+from langchain.prompts import PromptTemplate
+from langchain.memory import ConversationBufferMemory
+from langchain_community.vectorstores import PGVector
+from langchain_community.embeddings import OpenAIEmbeddings
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from sqlalchemy.orm import Session
+
+from ..models import Document
+from .web_search import WebSearchService
+from ..config import settings
+
+class LLMService:
+    # In llm_service.py, update the __init__ method:
+
+    def __init__(self):
+        self.openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    
+     # Use FAISS service instead of SQLite
+        from app.services.vector_service import FAISSService
+        self.vector_service = FAISSService()
+    
+        self.web_searcher = WebSearchService()
+    
+    def _initialize(self):
+        """Initialize OpenAI and vector store"""
+        if settings.OPENAI_API_KEY:
+            self.llm = ChatOpenAI(
+                model="gpt-4o-mini",
+                temperature=0.7,
+                api_key=settings.OPENAI_API_KEY
+            )
+            self.embeddings = OpenAIEmbeddings(
+                model="text-embedding-3-small",
+                api_key=settings.OPENAI_API_KEY
+            )
+            
+            # Initialize PGVector connection
+            self.vector_store = PGVector(
+                collection_name="documents",
+                connection_string=settings.DATABASE_URL,
+                embedding_function=self.embeddings
+            )
+    
+    def index_documents(self, db: Session):
+        """Index all documents into vector store"""
+        documents = db.query(Document).all()
+        texts = []
+        metadatas = []
+        
+        for doc in documents:
+            # Split long documents
+            splitter = RecursiveCharacterTextSplitter(
+                chunk_size=1000,
+                chunk_overlap=200
+            )
+            chunks = splitter.split_text(doc.content)
+            
+            for chunk in chunks:
+                texts.append(chunk)
+                metadatas.append({
+                    "doc_id": doc.id,
+                    "title": doc.title,
+                    "author": doc.author
+                })
+        
+        # Add to vector store
+        if texts and self.vector_store:
+            self.vector_store.add_texts(texts, metadatas)
+        
+        return len(texts)
+    
+    def search_documents(self, query: str, limit: int = 10) -> List[Dict]:
+        """Vector similarity search"""
+        if not self.vector_store:
+            return []
+        
+        results = self.vector_store.similarity_search_with_score(query, k=limit)
+        
+        docs = []
+        for doc, score in results:
+            docs.append({
+                "content": doc.page_content,
+                "title": doc.metadata.get("title", "Unknown"),
+                "doc_id": doc.metadata.get("doc_id"),
+                "relevance_score": float(score),
+                "source": "document"
+            })
+        
+        return docs
+    
+    async def generate_answer(
+        self, 
+        question: str, 
+        mode: str = "auto",
+        session_id: str = None
+    ) -> Dict[str, Any]:
+        """Generate answer using RAG + optional web search"""
+        
+        doc_results = []
+        web_results = []
+        sources_used = []
+        
+        # Search documents
+        if mode in ["auto", "documents"]:
+            doc_results = self.search_documents(question, limit=5)
+            if doc_results:
+                sources_used.append("documents")
+        
+        # Search web
+        if mode in ["auto", "web"] and (mode == "web" or not doc_results):
+            web_results = self.web_searcher.search_google(question, limit=3)
+            if web_results:
+                sources_used.append("web")
+        
+        # Prepare context
+        context = ""
+        
+        if doc_results:
+            context += "HISTORICAL DOCUMENTS:\n"
+            for i, doc in enumerate(doc_results[:3], 1):
+                context += f"[{i}] {doc['title']}: {doc['content']}\n\n"
+        
+        if web_results:
+            context += "WEB SOURCES:\n"
+            for i, web in enumerate(web_results[:3], 1):
+                context += f"[{i}] {web['title']}: {web['snippet']}\n"
+                context += f"URL: {web['url']}\n\n"
+        
+        # Generate answer with LangChain
+        if self.llm and context:
+            prompt = PromptTemplate(
+                template="""You are a professional historian specialising in Chinese maritime exploration during the Ming dynasty (1368-1644), particularly the voyages of Admiral Zheng He.
+
+Question: {question}
+
+Available Sources:
+{context}
+
+Instructions:
+1. Provide a comprehensive, well-structured answer that directly addresses the question
+2. Synthesize information from multiple sources into a coherent narrative
+3. Write in clear, fluent, professional UK English
+4. Use proper historical terminology and context
+5. Be objective and balanced
+6. Structure your response with clear paragraphs
+
+Answer:""",
+                input_variables=["question", "context"]
+            )
+            
+            chain = prompt | self.llm
+            response = await chain.ainvoke({
+                "question": question,
+                "context": context
+            })
+            
+            answer = response.content
+        else:
+            # Fallback response
+            answer = "Based on the available historical sources, I couldn't find specific information about that. Please try rephrasing your question or check back later as more documents are added to the database."
+        
+        return {
+            "question": question,
+            "answer": answer,
+            "sources_used": sources_used,
+            "document_results": doc_results,
+            "web_results": web_results,
+            "total_results": len(doc_results) + len(web_results)
+        }
