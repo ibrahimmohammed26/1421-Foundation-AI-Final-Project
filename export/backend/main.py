@@ -6,6 +6,7 @@ Stack: FastAPI + LangChain + PostgreSQL/PostGIS
 import os
 from datetime import datetime
 from typing import Optional
+from contextlib import asynccontextmanager
 
 # FastAPI
 from fastapi import FastAPI, HTTPException
