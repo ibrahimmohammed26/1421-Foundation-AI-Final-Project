@@ -6,23 +6,13 @@ Stack: FastAPI + LangChain + PostgreSQL/PostGIS
 import os
 from datetime import datetime
 from typing import Optional
-from contextlib import asynccontextmanager
 
-# FastAPI
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-
-# Pydantic
 from pydantic import BaseModel
-
-# LangChain OpenAI
 from langchain_openai import ChatOpenAI
-
-# LangChain Core Messages
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langchain_core.prompts import ChatPromptTemplate
-
-# PostgreSQL
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
