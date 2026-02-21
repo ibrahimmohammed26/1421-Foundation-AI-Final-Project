@@ -6,7 +6,7 @@ import {
   Database,
   RefreshCw,
   Check,
-  AlertCircle
+  ExternalLink
 } from "lucide-react";
 
 export default function Settings() {
@@ -25,7 +25,6 @@ export default function Settings() {
   const handleReindexDocuments = async () => {
     setReindexing(true);
     try {
-      // Call backend to trigger reindexing
       const response = await fetch('http://localhost:8000/api/documents/reindex', { 
         method: 'POST' 
       });
@@ -127,7 +126,7 @@ export default function Settings() {
             </div>
           </div>
 
-          {/* About Section */}
+          {/* About Section with 1421 Foundation Link */}
           <div className="bg-navy rounded-xl border border-gray-800 p-6">
             <h3 className="text-lg font-display font-bold text-gold mb-4">About</h3>
             <div className="space-y-3">
@@ -137,6 +136,15 @@ export default function Settings() {
               <p className="text-sm text-gray-400">
                 A platform for exploring Chinese maritime history using vector databases and AI.
               </p>
+              <a
+                href="https://1421foundation.org"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 text-gold hover:text-gold/80 transition-colors text-sm"
+              >
+                Visit 1421 Foundation Website
+                <ExternalLink className="h-4 w-4" />
+              </a>
               <div className="pt-3 text-xs text-gray-500">
                 © 2026 1421 Foundation. All rights reserved.
               </div>

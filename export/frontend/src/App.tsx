@@ -1,4 +1,3 @@
-import { useState, useEffect } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { 
   MessageSquare, 
@@ -9,7 +8,6 @@ import {
   Settings,
   FileText 
 } from "lucide-react";
-import DocumentCheckPopup from "./DocumentCheckPopup";
 
 const NAV = [
   { to: "/", label: "Dashboard", icon: Home },
@@ -22,33 +20,6 @@ const NAV = [
 ];
 
 export default function App() {
-  const [showDocumentCheck, setShowDocumentCheck] = useState(false);
-
-  useEffect(() => {
-    // Check if this is first visit
-    const hasChecked = localStorage.getItem('documentCheckCompleted');
-    if (!hasChecked) {
-      setShowDocumentCheck(true);
-    }
-  }, []);
-
-  const handleReindex = async () => {
-    try {
-      const response = await fetch('http://localhost:8000/api/documents/reindex', {
-        method: 'POST'
-      });
-      return await response.json();
-    } catch (error) {
-      console.error('Reindex error:', error);
-      throw error;
-    }
-  };
-
-  const handleCloseCheck = () => {
-    localStorage.setItem('documentCheckCompleted', 'true');
-    setShowDocumentCheck(false);
-  };
-
   return (
     <div className="flex h-screen bg-navy-dark">
       {/* Sidebar */}
@@ -92,14 +63,6 @@ export default function App() {
       <main className="flex-1 overflow-hidden bg-navy-dark">
         <Outlet />
       </main>
-
-      {/* Document Check Popup */}
-      {showDocumentCheck && (
-        <DocumentCheckPopup
-          onClose={handleCloseCheck}
-          onReindex={handleReindex}
-        />
-      )}
     </div>
   );
 }
