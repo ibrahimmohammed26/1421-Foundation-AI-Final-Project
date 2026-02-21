@@ -21,6 +21,152 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 import faiss
 import numpy as np
+# Add this near the top with other imports
+import pickle
+import sqlite3
+from pathlib import Path
+import faiss
+import numpy as np
+from langchain_openai import OpenAIEmbeddings
+
+# Add these global variables after your other global variables
+_vector_index = None
+_vector_metadata = None
+_knowledge_base_conn = None
+
+def load_vector_database():
+    """Load FAISS index and metadata from your existing files."""
+    global _vector_index, _vector_metadata
+    
+    if _vector_index is not None and _vector_metadata is not None:
+        return _vector_index, _vector_metadata
+    
+    # Path to your existing vector database files
+    index_path = Path("data/vector_databases/main_index/faiss_index.bin")
+    metadata_path = Path("data/vector_databases/main_index/faiss_metadata.pkl")
+    
+    if not index_path.exists() or not metadata_path.exists():
+        print("⚠️ Vector database files not found")
+        return None, None
+    
+    try:
+        _vector_index = faiss.read_index(str(index_path))
+        with open(metadata_path, 'rb') as f:
+            _vector_metadata = pickle.load(f)
+        print(f"✅ Loaded FAISS index with {_vector_index.ntotal} vectors")
+        return _vector_index, _vector_metadata
+    except Exception as e:
+        print(f"❌ Error loading vector database: {e}")
+        return None, None
+
+def get_knowledge_base():
+    """Connect to your existing SQLite knowledge base."""
+    global _knowledge_base_conn
+    
+    if _knowledge_base_conn is not None:
+        return _knowledge_base_conn
+    
+    db_path = Path("data/knowledge_base.db")
+    if not db_path.exists():
+        print("⚠️ knowledge_base.db not found")
+        return None
+    
+    try:
+        _knowledge_base_conn = sqlite3.connect(str(db_path))
+        _knowledge_base_conn.row_factory = sqlite3.Row
+        print("✅ Connected to knowledge_base.db")
+        return _knowledge_base_conn
+    except Exception as e:
+        print(f"❌ Error connecting to knowledge base: {e}")
+        return None
+
+def search_documents(query: str, top_k: int = 5):
+    """Search for relevant documents using vector similarity."""
+    index, metadata = load_vector_database()
+    conn = get_knowledge_base()
+    
+    if not index or not metadata or not conn:
+        return []
+    
+    try:
+        # Get query embedding
+        embeddings = OpenAIEmbeddings(
+            model="text-embedding-3-small",
+            api_key=os.getenv("OPENAI_API_KEY")
+        )
+        query_embedding = embeddings.embed_query(query)
+        query_vector = np.array([query_embedding]).astype('float32')
+        
+        # Search in FAISS
+        distances, indices = index.search(query_vector, min(top_k, index.ntotal))
+        
+        # Get document details from SQLite
+        results = []
+        cursor = conn.cursor()
+        
+        for i, idx in enumerate(indices[0]):
+            if idx >= 0 and str(idx) in metadata:
+                doc_id = metadata[str(idx)].get('id', str(idx))
+                cursor.execute("""
+                    SELECT id, title, author, year, type, description, tags, 
+                           content_preview, source_file, page_number
+                    FROM documents WHERE id = ?
+                """, (doc_id,))
+                row = cursor.fetchone()
+                if row:
+                    results.append({
+                        'id': row['id'],
+                        'title': row['title'],
+                        'author': row['author'],
+                        'year': row['year'],
+                        'type': row['type'],
+                        'description': row['description'],
+                        'tags': row['tags'].split(',') if row['tags'] else [],
+                        'content_preview': row['content_preview'],
+                        'source_file': row['source_file'],
+                        'page_number': row['page_number'],
+                        'similarity_score': float(distances[0][i])
+                    })
+        
+        conn.close()
+        return results
+        
+    except Exception as e:
+        print(f"❌ Error searching documents: {e}")
+        return []
+
+def get_all_documents(limit: int = 100, offset: int = 0):
+    """Get all documents for the Documents page."""
+    conn = get_knowledge_base()
+    if not conn:
+        return []
+    
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, title, author, year, type, description, tags, 
+               content_preview, source_file, page_number
+        FROM documents
+        ORDER BY year DESC
+        LIMIT ? OFFSET ?
+    """, (limit, offset))
+    
+    results = []
+    for row in cursor.fetchall():
+        results.append({
+            'id': row['id'],
+            'title': row['title'],
+            'author': row['author'],
+            'year': row['year'],
+            'type': row['type'],
+            'description': row['description'],
+            'tags': row['tags'].split(',') if row['tags'] else [],
+            'content_preview': row['content_preview'],
+            'source_file': row['source_file'],
+            'page_number': row['page_number']
+        })
+    
+    conn.close()
+    return results
 
 app = FastAPI(title="1421 Foundation API", version="1.0.0")
 
@@ -57,7 +203,7 @@ presenting contested theories. Structure responses with clear paragraphs."""
 def get_llm():
     return ChatOpenAI(
         model="gpt-4o-mini",
-        api_key=os.getenv("OPENAI_API_KEY"),
+        api_key=os.getenv("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"),
         streaming=True,
         temperature=0.7
     )
@@ -66,7 +212,7 @@ def get_llm():
 def get_embeddings():
     return OpenAIEmbeddings(
         model="text-embedding-3-small",
-        api_key=os.getenv("OPENAI_API_KEY")
+        api_key=os.getenv("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"),
     )
 
 
@@ -310,6 +456,50 @@ def get_locations(max_year: int = 1421):
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
+    """Chat with AI using documents for context."""
+    llm = get_llm()
+    
+    # Get the last user message
+    last_user_msg = next((msg["content"] for msg in reversed(req.messages) if msg["role"] == "user"), "")
+    
+    # Search for relevant documents
+    relevant_docs = []
+    if last_user_msg:
+        relevant_docs = search_documents(last_user_msg, top_k=3)
+    
+    # Build context from documents
+    context = ""
+    if relevant_docs:
+        context = "Here are some relevant documents from our knowledge base:\n\n"
+        for i, doc in enumerate(relevant_docs, 1):
+            context += f"[Document {i}] {doc['title']}"
+            if doc['author'] != "Unknown":
+                context += f" by {doc['author']}"
+            if doc['year']:
+                context += f" ({doc['year']})"
+            context += f"\n{doc['content_preview']}\n\n"
+    
+    # Enhance system prompt with document context
+    enhanced_prompt = SYSTEM_PROMPT + "\n\n"
+    if context:
+        enhanced_prompt += context + "\n"
+    enhanced_prompt += "Use the provided documents when relevant to give accurate, well-cited answers."
+
+    langchain_messages = [SystemMessage(content=enhanced_prompt)]
+    for msg in req.messages:
+        if msg["role"] == "user":
+            langchain_messages.append(HumanMessage(content=msg["content"]))
+        elif msg["role"] == "assistant":
+            langchain_messages.append(AIMessage(content=msg["content"]))
+
+    try:
+        response = llm.invoke(langchain_messages)
+        return ChatResponse(
+            content=response.content,
+            session_id=req.session_id or datetime.now().isoformat(),
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     """Chat with the 1421 historian AI using hybrid search (documents + web)."""
     llm = get_llm()
     
@@ -458,6 +648,61 @@ def get_stats():
 
 
 # ── Document Routes ──────────────────────────────────────────────────
+# Add these new endpoints after your existing ones
+
+@app.get("/api/documents")
+async def get_documents(limit: int = 50, offset: int = 0):
+    """Get all documents for the Documents page."""
+    documents = get_all_documents(limit, offset)
+    return {
+        "documents": documents,
+        "total": len(documents),
+        "limit": limit,
+        "offset": offset
+    }
+
+@app.get("/api/documents/{doc_id}")
+async def get_document(doc_id: str):
+    """Get a specific document by ID."""
+    conn = get_knowledge_base()
+    if not conn:
+        raise HTTPException(status_code=503, detail="Database not available")
+    
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, title, author, year, type, description, tags, 
+               content_preview, source_file, page_number
+        FROM documents WHERE id = ?
+    """, (doc_id,))
+    
+    row = cursor.fetchone()
+    conn.close()
+    
+    if not row:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    return {
+        'id': row['id'],
+        'title': row['title'],
+        'author': row['author'],
+        'year': row['year'],
+        'type': row['type'],
+        'description': row['description'],
+        'tags': row['tags'].split(',') if row['tags'] else [],
+        'content_preview': row['content_preview'],
+        'source_file': row['source_file'],
+        'page_number': row['page_number']
+    }
+
+@app.get("/api/documents/search")
+async def search_documents_endpoint(q: str, limit: int = 10):
+    """Search documents by query."""
+    results = search_documents(q, limit)
+    return {
+        "results": results,
+        "query": q,
+        "count": len(results)
+    }
 
 @app.post("/api/documents/search", response_model=DocumentSearchResponse)
 async def search_documents_endpoint(request: DocumentSearchRequest):

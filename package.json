@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "@langchain/core": "^1.1.27",
+    "@langchain/textsplitters": "^1.0.1"
+  }
+}

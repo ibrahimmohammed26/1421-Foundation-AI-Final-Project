@@ -1,9 +1,77 @@
-
+# Environment variables
+.env
+.env.local
+.env.development
+.env.production
 backend/.env
 frontend/.env
-backend/__pycache__
-frontend/node_modules
+
+# Virtual environments
+venv/
+venv312/
+.venv/
+env/
+ENV/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# Vector databases
+data/vector_databases/
+!data/vector_databases/main_index/README.md
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+frontend/.cache/
+
+# Backend
+backend/__pycache__/
+
+# Node
+node_modules/
+dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+
+# OS
 .DS_Store
-node_modules
-dist
-.env
+Thumbs.db
+desktop.ini
+._*
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# Uploads
+uploads/
+media/
+temp/

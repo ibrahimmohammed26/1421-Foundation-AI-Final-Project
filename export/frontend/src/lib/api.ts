@@ -51,6 +51,40 @@ export interface DocumentSearchResponse {
   query: string;
 }
 
+// Add to your existing api.ts
+
+export interface Document {
+  id: string;
+  title: string;
+  author: string;
+  year: number;
+  type: string;
+  description: string;
+  tags: string[];
+  content_preview: string;
+  source_file: string;
+  page_number?: number;
+  similarity_score?: number;
+}
+
+export async function getAllDocuments(limit: number = 50, offset: number = 0) {
+  const res = await fetch(`${API}/api/documents?limit=${limit}&offset=${offset}`);
+  if (!res.ok) throw new Error('Failed to fetch documents');
+  return res.json();
+}
+
+export async function getDocument(id: string) {
+  const res = await fetch(`${API}/api/documents/${id}`);
+  if (!res.ok) throw new Error('Failed to fetch document');
+  return res.json();
+}
+
+export async function searchDocuments(query: string, limit: number = 10) {
+  const res = await fetch(`${API}/api/documents/search?q=${encodeURIComponent(query)}&limit=${limit}`);
+  if (!res.ok) throw new Error('Failed to search documents');
+  return res.json();
+}
+
 export async function fetchLocations(maxYear: number = 1421): Promise<Location[]> {
   const res = await fetch(`${API}/api/locations?max_year=${maxYear}`);
   if (!res.ok) throw new Error('Failed to fetch locations');
@@ -160,36 +194,7 @@ export async function submitFeedback(data: {
   return res.json();
 }
 
-// Document search functions
-export async function searchDocuments(
-  query: string,
-  options?: {
-    top_k?: number;
-    filter_type?: string;
-    filter_year?: number;
-    filter_author?: string;
-    semantic_search?: boolean;
-  }
-): Promise<DocumentSearchResponse> {
-  const res = await fetch(`${API}/api/documents/search`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      query,
-      top_k: options?.top_k || 10,
-      filter_type: options?.filter_type,
-      filter_year: options?.filter_year,
-      filter_author: options?.filter_author,
-      semantic_search: options?.semantic_search ?? true
-    }),
-  });
-  
-  if (!res.ok) {
-    throw new Error('Failed to search documents');
-  }
-  
-  return res.json();
-}
+
 
 export async function getDocumentTypes(): Promise<string[]> {
   const res = await fetch(`${API}/api/documents/types`);
@@ -210,10 +215,4 @@ export async function getDocumentAuthors(): Promise<string[]> {
   if (!res.ok) throw new Error('Failed to fetch document authors');
   const data = await res.json();
   return data.authors;
-}
-
-export async function getDocument(id: string): Promise<Document> {
-  const res = await fetch(`${API}/api/documents/${id}`);
-  if (!res.ok) throw new Error('Failed to fetch document');
-  return res.json();
 }

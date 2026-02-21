@@ -45,7 +45,7 @@ export default function Dashboard() {
     {
       icon: MessageSquare,
       title: "Chat with AI Historian",
-      description: "Ask questions about Zheng He's voyages, Ming dynasty history, or the 1421 hypothesis. The AI searches both its training data and our document database.",
+      description: "Ask questions about Zheng He's voyages, Ming dynasty history, or the 1421 Foundation research. The AI searches both its training data and our document database.",
       example: "Try: 'What was the significance of Zheng He's voyages?'"
     },
     {
@@ -81,65 +81,65 @@ export default function Dashboard() {
   ];
 
   return (
-    <div className="flex flex-col h-full bg-white">
-      <div className="border-b border-gray-200 px-6 py-4 bg-white">
+    <div className="flex flex-col h-full bg-navy-dark">
+      <div className="border-b border-gray-800 px-6 py-4 bg-navy">
         <h1 className="text-xl font-display font-bold text-gold">Dashboard</h1>
-        <p className="text-xs text-gray-600 mt-0.5">
+        <p className="text-xs text-gray-400 mt-0.5">
           Welcome to the 1421 Foundation Research System
         </p>
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 px-6 py-4 bg-white">
-        <div className="bg-gray-50 rounded-xl border border-gray-200 p-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 px-6 py-4 bg-navy-dark">
+        <div className="bg-navy rounded-xl border border-gray-800 p-4">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs text-gray-600">AI Conversations</span>
+            <span className="text-xs text-gray-400">AI Conversations</span>
             <MessageSquare className="h-4 w-4 text-gold" />
           </div>
-          <p className="text-2xl font-display font-bold text-navy-dark">0</p>
+          <p className="text-2xl font-display font-bold text-gold">0</p>
           <p className="text-xs text-gray-500 mt-1">Start a new chat</p>
         </div>
-        <div className="bg-gray-50 rounded-xl border border-gray-200 p-4">
+        <div className="bg-navy rounded-xl border border-gray-800 p-4">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs text-gray-600">Voyage Locations</span>
+            <span className="text-xs text-gray-400">Voyage Locations</span>
             <Map className="h-4 w-4 text-gold" />
           </div>
-          <p className="text-2xl font-display font-bold text-navy-dark">{stats.locations_count}</p>
+          <p className="text-2xl font-display font-bold text-gold">{stats.locations_count}</p>
           <p className="text-xs text-gray-500 mt-1">Across 3 continents</p>
         </div>
-        <div className="bg-gray-50 rounded-xl border border-gray-200 p-4">
+        <div className="bg-navy rounded-xl border border-gray-800 p-4">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs text-gray-600">Documents</span>
+            <span className="text-xs text-gray-400">Documents</span>
             <FileText className="h-4 w-4 text-gold" />
           </div>
-          <p className="text-2xl font-display font-bold text-navy-dark">{stats.documents_count}</p>
+          <p className="text-2xl font-display font-bold text-gold">{stats.documents_count}</p>
           <p className="text-xs text-gray-500 mt-1">In vector database</p>
         </div>
-        <div className="bg-gray-50 rounded-xl border border-gray-200 p-4">
+        <div className="bg-navy rounded-xl border border-gray-800 p-4">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs text-gray-600">Feedback</span>
+            <span className="text-xs text-gray-400">Feedback</span>
             <Send className="h-4 w-4 text-gold" />
           </div>
-          <p className="text-2xl font-display font-bold text-navy-dark">{stats.feedback_count}</p>
+          <p className="text-2xl font-display font-bold text-gold">{stats.feedback_count}</p>
           <p className="text-xs text-gray-500 mt-1">User submissions</p>
         </div>
       </div>
 
       {/* Welcome Card */}
       <div className="px-6 py-2">
-        <div className="bg-gray-50 rounded-xl border border-gray-200 p-6">
+        <div className="bg-navy rounded-xl border border-gray-800 p-6">
           <div className="flex items-start gap-4">
             <div className="w-12 h-12 rounded-xl bg-gold/20 flex items-center justify-center flex-shrink-0">
               <BookOpen className="h-6 w-6 text-gold" />
             </div>
             <div>
-              <h2 className="text-lg font-display font-bold text-navy-dark mb-2">
+              <h2 className="text-lg font-display font-bold text-gold mb-2">
                 Welcome to the 1421 Foundation
               </h2>
-              <p className="text-gray-700 text-sm leading-relaxed">
+              <p className="text-gray-300 text-sm leading-relaxed">
                 This research platform combines a vector database of historical documents with AI to provide 
                 accurate information about Chinese maritime exploration during the Ming dynasty (1368–1644), 
-                particularly the voyages of Admiral Zheng He and the controversial 1421 hypothesis.
+                particularly the voyages of Admiral Zheng He and the 1421 Foundation.
               </p>
             </div>
           </div>
@@ -147,26 +147,26 @@ export default function Dashboard() {
       </div>
 
       {/* How to Use Guide */}
-      <div className="flex-1 overflow-y-auto px-6 py-4 bg-white">
-        <h2 className="text-lg font-display font-bold text-navy-dark mb-4 flex items-center gap-2">
-          <Compass className="h-5 w-5 text-gold" />
+      <div className="flex-1 overflow-y-auto px-6 py-4 bg-navy-dark">
+        <h2 className="text-lg font-display font-bold text-gold mb-4 flex items-center gap-2">
+          <Compass className="h-5 w-5" />
           How to Use Guide
         </h2>
         <div className="space-y-4">
           {steps.map((step, index) => {
             const Icon = step.icon;
             return (
-              <div key={index} className="flex gap-4 bg-gray-50 rounded-xl p-4 border border-gray-200">
+              <div key={index} className="flex gap-4 bg-navy rounded-xl p-4 border border-gray-800">
                 <div className="relative">
                   <div className="w-10 h-10 rounded-full bg-gold/20 flex items-center justify-center flex-shrink-0">
                     <Icon className="h-5 w-5 text-gold" />
                   </div>
                 </div>
                 <div className="flex-1">
-                  <h3 className="text-md font-semibold text-navy-dark mb-1">
+                  <h3 className="text-md font-semibold text-gray-200 mb-1">
                     Step {index + 1}: {step.title}
                   </h3>
-                  <p className="text-sm text-gray-600 mb-2">{step.description}</p>
+                  <p className="text-sm text-gray-400 mb-2">{step.description}</p>
                   <p className="text-xs text-gold italic">{step.example}</p>
                 </div>
               </div>
