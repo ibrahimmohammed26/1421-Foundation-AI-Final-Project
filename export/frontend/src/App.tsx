@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { 
   MessageSquare, 
@@ -8,23 +9,51 @@ import {
   Settings,
   FileText 
 } from "lucide-react";
+import DocumentCheckPopup from "./DocumentCheckPopup";
 
 const NAV = [
   { to: "/", label: "Dashboard", icon: Home },
   { to: "/chat", label: "Chat", icon: MessageSquare },
-  { to: "/documents", label: "Documents", icon: FileText },
   { to: "/map", label: "Voyage Map", icon: Map },
   { to: "/analytics", label: "Analytics", icon: BarChart3 },
+  { to: "/documents", label: "Documents", icon: FileText },
   { to: "/feedback", label: "Feedback", icon: Send },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 
 export default function App() {
+  const [showDocumentCheck, setShowDocumentCheck] = useState(false);
+
+  useEffect(() => {
+    // Check if this is first visit
+    const hasChecked = localStorage.getItem('documentCheckCompleted');
+    if (!hasChecked) {
+      setShowDocumentCheck(true);
+    }
+  }, []);
+
+  const handleReindex = async () => {
+    try {
+      const response = await fetch('http://localhost:8000/api/documents/reindex', {
+        method: 'POST'
+      });
+      return await response.json();
+    } catch (error) {
+      console.error('Reindex error:', error);
+      throw error;
+    }
+  };
+
+  const handleCloseCheck = () => {
+    localStorage.setItem('documentCheckCompleted', 'true');
+    setShowDocumentCheck(false);
+  };
+
   return (
     <div className="flex h-screen bg-navy-dark">
       {/* Sidebar */}
-      <aside className="w-64 bg-navy border-r border-gray-700 flex flex-col">
-        <div className="p-5 border-b border-gray-700">
+      <aside className="w-64 bg-navy border-r border-gray-800 flex flex-col">
+        <div className="p-5 border-b border-gray-800">
           <h1 className="text-xl font-display font-bold text-gold">1421</h1>
           <p className="text-xs text-gray-400 mt-1">Foundation Research</p>
         </div>
@@ -46,14 +75,14 @@ export default function App() {
             </NavLink>
           ))}
         </nav>
-        <div className="p-4 border-t border-gray-700">
+        <div className="p-4 border-t border-gray-800">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-full bg-gold/20 flex items-center justify-center">
               <span className="text-sm font-bold text-gold">U</span>
             </div>
             <div>
-              <p className="text-sm font-medium text-gray-200">User Name</p>
-              <p className="text-xs text-gray-400">Researcher</p>
+              <p className="text-sm font-medium text-gray-200">Researcher</p>
+              <p className="text-xs text-gray-400">1421 Foundation</p>
             </div>
           </div>
         </div>
@@ -63,6 +92,14 @@ export default function App() {
       <main className="flex-1 overflow-hidden bg-navy-dark">
         <Outlet />
       </main>
+
+      {/* Document Check Popup */}
+      {showDocumentCheck && (
+        <DocumentCheckPopup
+          onClose={handleCloseCheck}
+          onReindex={handleReindex}
+        />
+      )}
     </div>
   );
 }

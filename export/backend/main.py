@@ -648,6 +648,27 @@ async def chat_stream(req: ChatRequest):
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
+@app.post("/api/documents/reindex")
+async def reindex_documents():
+    """Trigger document reindexing."""
+    try:
+        import subprocess
+        import sys
+        
+        # Run the indexing script
+        script_path = Path(__file__).parent / "scripts" / "index_documents_simple.py"
+        result = subprocess.run(
+            [sys.executable, str(script_path), "--reset"],
+            capture_output=True,
+            text=True
+        )
+        
+        if result.returncode == 0:
+            return {"status": "success", "message": "Reindexing completed"}
+        else:
+            return {"status": "error", "message": result.stderr}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/feedback")
 def submit_feedback(req: FeedbackRequest):
