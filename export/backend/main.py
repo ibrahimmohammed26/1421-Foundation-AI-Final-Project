@@ -15,7 +15,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from langchain_openai import ChatOpenAI
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -59,6 +59,14 @@ def get_llm():
         model="gpt-4o-mini",
         api_key=os.getenv("OPENAI_API_KEY"),
         streaming=True,
+        temperature=0.7
+    )
+
+
+def get_embeddings():
+    return OpenAIEmbeddings(
+        model="text-embedding-3-small",
+        api_key=os.getenv("OPENAI_API_KEY")
     )
 
 
@@ -66,11 +74,13 @@ def get_llm():
 class ChatRequest(BaseModel):
     messages: list[dict]  # [{role: "user"|"assistant", content: str}]
     session_id: Optional[str] = None
+    use_documents: bool = True  # New flag to enable/disable document search
 
 
 class ChatResponse(BaseModel):
     content: str
     session_id: str
+    sources: Optional[List[dict]] = None  # Add sources for citations
 
 
 class FeedbackRequest(BaseModel):
@@ -92,16 +102,17 @@ class Location(BaseModel):
 class Document(BaseModel):
     id: str
     title: str
-    author: str
-    year: int
-    type: str  # "book", "article", "manuscript", "thesis", "paper"
-    description: str
-    tags: List[str]
-    content_preview: str
-    source_file: str
+    author: str = "Unknown"
+    year: int = 0
+    type: str = "document"
+    description: str = ""
+    tags: List[str] = []
+    content_preview: str = ""
+    source_file: str = ""
     page_number: Optional[int] = None
     file_size: Optional[int] = None
     language: str = "en"
+    similarity_score: Optional[float] = None
 
 
 class DocumentSearchRequest(BaseModel):
@@ -145,12 +156,19 @@ VOYAGE_LOCATIONS = [
 ]
 
 
-# ── Document Search Functions ────────────────────────────────────────
+# ── Hybrid Search Functions ─────────────────────────────────────────
 
 # Global variables to cache the vector index and metadata
 _vector_index = None
 _vector_metadata = None
 _knowledge_base_conn = None
+_embeddings = None
+
+def get_embeddings_model():
+    global _embeddings
+    if _embeddings is None:
+        _embeddings = get_embeddings()
+    return _embeddings
 
 def load_vector_database():
     """Load FAISS index and metadata into memory."""
@@ -163,12 +181,14 @@ def load_vector_database():
     metadata_path = Path("data/vector_databases/main_index/faiss_metadata.pkl")
     
     if not index_path.exists() or not metadata_path.exists():
+        print("⚠️ Vector database not found")
         return None, None
     
     try:
         _vector_index = faiss.read_index(str(index_path))
         with open(metadata_path, 'rb') as f:
             _vector_metadata = pickle.load(f)
+        print(f"✓ Loaded FAISS index with {_vector_index.ntotal} vectors")
         return _vector_index, _vector_metadata
     except Exception as e:
         print(f"Error loading vector database: {e}")
@@ -183,100 +203,96 @@ def get_knowledge_base():
     
     db_path = Path("data/knowledge_base.db")
     if not db_path.exists():
+        print("⚠️ Knowledge base not found")
         return None
     
     try:
         _knowledge_base_conn = sqlite3.connect(str(db_path))
         _knowledge_base_conn.row_factory = sqlite3.Row
+        print("✓ Connected to knowledge base")
         return _knowledge_base_conn
     except Exception as e:
         print(f"Error connecting to knowledge base: {e}")
         return None
 
-def search_documents_semantic(query: str, top_k: int = 10):
-    """Search documents using semantic similarity."""
-    # This is a placeholder - in production you'd need an embedding model
-    # For now, we'll return documents from SQLite with text matching
+def search_documents_semantic(query: str, top_k: int = 5) -> List[Document]:
+    """Search documents using semantic similarity with FAISS."""
+    index, metadata = load_vector_database()
     conn = get_knowledge_base()
-    if not conn:
+    
+    if not index or not metadata or not conn:
         return []
     
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT id, title, author, year, type, description, tags, 
-               content_preview, source_file, page_number, file_size, language
-        FROM documents 
-        WHERE title LIKE ? OR description LIKE ? OR author LIKE ?
-        LIMIT ?
-    """, (f'%{query}%', f'%{query}%', f'%{query}%', top_k))
-    
-    results = []
-    for row in cursor.fetchall():
-        results.append(Document(
-            id=row['id'],
-            title=row['title'],
-            author=row['author'],
-            year=row['year'],
-            type=row['type'],
-            description=row['description'],
-            tags=row['tags'].split(',') if row['tags'] else [],
-            content_preview=row['content_preview'],
-            source_file=row['source_file'],
-            page_number=row['page_number'],
-            file_size=row['file_size'],
-            language=row['language']
-        ))
-    
-    return results
+    try:
+        # Get query embedding
+        embeddings = get_embeddings_model()
+        query_embedding = embeddings.embed_query(query)
+        query_vector = np.array([query_embedding]).astype('float32')
+        
+        # Search in FAISS
+        distances, indices = index.search(query_vector, min(top_k, index.ntotal))
+        
+        # Get metadata for results
+        results = []
+        cursor = conn.cursor()
+        
+        for i, idx in enumerate(indices[0]):
+            if idx >= 0 and str(idx) in metadata:
+                doc_id = metadata[str(idx)].get('id', str(idx))
+                cursor.execute("""
+                    SELECT id, title, author, year, type, description, tags, 
+                           content_preview, source_file, page_number, file_size, language
+                    FROM documents WHERE id = ?
+                """, (doc_id,))
+                row = cursor.fetchone()
+                if row:
+                    doc = Document(
+                        id=row['id'],
+                        title=row['title'],
+                        author=row['author'] or "Unknown",
+                        year=row['year'] or 0,
+                        type=row['type'] or "document",
+                        description=row['description'] or "",
+                        tags=row['tags'].split(',') if row['tags'] else [],
+                        content_preview=row['content_preview'] or "",
+                        source_file=row['source_file'] or "",
+                        page_number=row['page_number'],
+                        file_size=row['file_size'],
+                        language=row['language'] or "en",
+                        similarity_score=float(distances[0][i])
+                    )
+                    results.append(doc)
+        
+        conn.close()
+        return results
+        
+    except Exception as e:
+        print(f"Error in semantic search: {e}")
+        return []
 
-def search_documents_metadata(
-    filter_type: Optional[str] = None,
-    filter_year: Optional[int] = None,
-    filter_author: Optional[str] = None,
-    limit: int = 100
-):
-    """Search documents by metadata filters."""
-    conn = get_knowledge_base()
-    if not conn:
-        return []
+def get_relevant_context(query: str, top_k: int = 3) -> tuple[str, List[Document]]:
+    """Get relevant document context for RAG."""
+    docs = search_documents_semantic(query, top_k)
     
-    cursor = conn.cursor()
-    query = "SELECT id, title, author, year, type, description, tags, content_preview, source_file, page_number, file_size, language FROM documents WHERE 1=1"
-    params = []
+    if not docs:
+        return "", []
     
-    if filter_type:
-        query += " AND type = ?"
-        params.append(filter_type)
-    if filter_year:
-        query += " AND year = ?"
-        params.append(filter_year)
-    if filter_author:
-        query += " AND author LIKE ?"
-        params.append(f'%{filter_author}%')
+    context = "Relevant documents from the knowledge base:\n\n"
+    for i, doc in enumerate(docs, 1):
+        context += f"[Document {i}] {doc.title}"
+        if doc.year and doc.year > 0:
+            context += f" ({doc.year})"
+        if doc.author and doc.author != "Unknown":
+            context += f" by {doc.author}"
+        context += f"\n"
+        context += f"Type: {doc.type}\n"
+        if doc.content_preview:
+            context += f"Content: {doc.content_preview}\n"
+        if doc.tags:
+            context += f"Tags: {', '.join(doc.tags)}\n"
+        context += "\n"
     
-    query += " ORDER BY year DESC LIMIT ?"
-    params.append(limit)
-    
-    cursor.execute(query, params)
-    
-    results = []
-    for row in cursor.fetchall():
-        results.append(Document(
-            id=row['id'],
-            title=row['title'],
-            author=row['author'],
-            year=row['year'],
-            type=row['type'],
-            description=row['description'],
-            tags=row['tags'].split(',') if row['tags'] else [],
-            content_preview=row['content_preview'],
-            source_file=row['source_file'],
-            page_number=row['page_number'],
-            file_size=row['file_size'],
-            language=row['language']
-        ))
-    
-    return results
+    return context, docs
 
 
 # ── Routes ───────────────────────────────────────────────────────────
@@ -294,10 +310,32 @@ def get_locations(max_year: int = 1421):
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
-    """Chat with the 1421 historian AI."""
+    """Chat with the 1421 historian AI using hybrid search (documents + web)."""
     llm = get_llm()
-
-    langchain_messages = [SystemMessage(content=SYSTEM_PROMPT)]
+    
+    # Get the last user message
+    last_user_msg = next((msg["content"] for msg in reversed(req.messages) if msg["role"] == "user"), "")
+    
+    # Get document context if enabled
+    context = ""
+    sources = []
+    if req.use_documents and last_user_msg:
+        context, sources = get_relevant_context(last_user_msg, top_k=5)
+    
+    # Build enhanced system prompt with document context
+    enhanced_prompt = SYSTEM_PROMPT + "\n\n"
+    if context:
+        enhanced_prompt += context
+    else:
+        enhanced_prompt += "(No specific documents found - using general knowledge only)\n\n"
+    
+    enhanced_prompt += """When answering, follow these guidelines:
+1. If you used specific documents, cite them by [Document X] references
+2. Combine information from multiple sources when relevant
+3. If the documents don't contain relevant information, rely on your training data
+4. Be clear about what comes from documents vs general knowledge"""
+    
+    langchain_messages = [SystemMessage(content=enhanced_prompt)]
     for msg in req.messages:
         if msg["role"] == "user":
             langchain_messages.append(HumanMessage(content=msg["content"]))
@@ -306,9 +344,22 @@ async def chat(req: ChatRequest):
 
     try:
         response = llm.invoke(langchain_messages)
+        
+        # Convert sources to dict for JSON response
+        sources_dict = []
+        for doc in sources:
+            sources_dict.append({
+                "title": doc.title,
+                "author": doc.author,
+                "year": doc.year,
+                "type": doc.type,
+                "similarity": doc.similarity_score
+            })
+        
         return ChatResponse(
             content=response.content,
             session_id=req.session_id or datetime.now().isoformat(),
+            sources=sources_dict if sources_dict else None
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -316,10 +367,25 @@ async def chat(req: ChatRequest):
 
 @app.post("/api/chat/stream")
 async def chat_stream(req: ChatRequest):
-    """Stream chat responses using LangChain."""
+    """Stream chat responses using LangChain with hybrid search."""
     llm = get_llm()
+    
+    # Get the last user message
+    last_user_msg = next((msg["content"] for msg in reversed(req.messages) if msg["role"] == "user"), "")
+    
+    # Get document context if enabled
+    context = ""
+    if req.use_documents and last_user_msg:
+        context, _ = get_relevant_context(last_user_msg, top_k=3)
+    
+    # Build enhanced system prompt
+    enhanced_prompt = SYSTEM_PROMPT + "\n\n"
+    if context:
+        enhanced_prompt += context
+    else:
+        enhanced_prompt += "(No specific documents found - using general knowledge only)\n\n"
 
-    langchain_messages = [SystemMessage(content=SYSTEM_PROMPT)]
+    langchain_messages = [SystemMessage(content=enhanced_prompt)]
     for msg in req.messages:
         if msg["role"] == "user":
             langchain_messages.append(HumanMessage(content=msg["content"]))
@@ -351,7 +417,8 @@ def submit_feedback(req: FeedbackRequest):
         )
         conn.commit()
         conn.close()
-    except Exception:
+    except Exception as e:
+        print(f"Feedback DB error: {e}")
         pass  # DB optional — still return success
     return {"status": "ok", "message": "Feedback received"}
 
@@ -360,6 +427,7 @@ def submit_feedback(req: FeedbackRequest):
 def get_stats():
     """Return basic system stats."""
     try:
+        # Get feedback count from PostgreSQL
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
         cur.execute("SELECT count(*) as count FROM feedback")
@@ -380,7 +448,8 @@ def get_stats():
             "locations_count": len(VOYAGE_LOCATIONS),
             "documents_count": doc_count
         }
-    except Exception:
+    except Exception as e:
+        print(f"Stats error: {e}")
         return {
             "feedback_count": 0, 
             "locations_count": len(VOYAGE_LOCATIONS),
@@ -395,38 +464,50 @@ async def search_documents_endpoint(request: DocumentSearchRequest):
     """Search documents using semantic search or metadata filters."""
     start_time = time.time()
     
-    # Load vector database (cached)
-    index, metadata = load_vector_database()
-    conn = get_knowledge_base()
-    
-    if not conn:
-        raise HTTPException(status_code=503, detail="Knowledge base not available")
-    
     try:
         if request.semantic_search and request.query:
-            # Semantic search
+            # Semantic search using FAISS
             documents = search_documents_semantic(request.query, request.top_k)
         else:
-            # Metadata filtering
-            documents = search_documents_metadata(
-                filter_type=request.filter_type,
-                filter_year=request.filter_year,
-                filter_author=request.filter_author,
-                limit=request.top_k
-            )
-        
-        # Apply additional filters if needed
-        if request.filter_type or request.filter_year or request.filter_author:
-            filtered = []
-            for doc in documents:
-                if request.filter_type and doc.type != request.filter_type:
-                    continue
-                if request.filter_year and doc.year != request.filter_year:
-                    continue
-                if request.filter_author and request.filter_author.lower() not in doc.author.lower():
-                    continue
-                filtered.append(doc)
-            documents = filtered[:request.top_k]
+            # Metadata filtering (fallback)
+            documents = []
+            conn = get_knowledge_base()
+            if conn:
+                cursor = conn.cursor()
+                query = "SELECT id, title, author, year, type, description, tags, content_preview, source_file, page_number, file_size, language FROM documents WHERE 1=1"
+                params = []
+                
+                if request.filter_type:
+                    query += " AND type = ?"
+                    params.append(request.filter_type)
+                if request.filter_year:
+                    query += " AND year = ?"
+                    params.append(request.filter_year)
+                if request.filter_author:
+                    query += " AND author LIKE ?"
+                    params.append(f'%{request.filter_author}%')
+                
+                query += " ORDER BY year DESC LIMIT ?"
+                params.append(request.top_k)
+                
+                cursor.execute(query, params)
+                
+                for row in cursor.fetchall():
+                    documents.append(Document(
+                        id=row['id'],
+                        title=row['title'],
+                        author=row['author'] or "Unknown",
+                        year=row['year'] or 0,
+                        type=row['type'] or "document",
+                        description=row['description'] or "",
+                        tags=row['tags'].split(',') if row['tags'] else [],
+                        content_preview=row['content_preview'] or "",
+                        source_file=row['source_file'] or "",
+                        page_number=row['page_number'],
+                        file_size=row['file_size'],
+                        language=row['language'] or "en"
+                    ))
+                conn.close()
         
         end_time = time.time()
         search_time_ms = (end_time - start_time) * 1000
@@ -452,8 +533,7 @@ async def get_document(document_id: str):
     cursor = conn.cursor()
     cursor.execute("""
         SELECT id, title, author, year, type, description, tags, 
-               content_preview, source_file, page_number, file_size, language,
-               full_content
+               content_preview, source_file, page_number, file_size, language
         FROM documents 
         WHERE id = ?
     """, (document_id,))
@@ -465,47 +545,45 @@ async def get_document(document_id: str):
     document = Document(
         id=row['id'],
         title=row['title'],
-        author=row['author'],
-        year=row['year'],
-        type=row['type'],
-        description=row['description'],
+        author=row['author'] or "Unknown",
+        year=row['year'] or 0,
+        type=row['type'] or "document",
+        description=row['description'] or "",
         tags=row['tags'].split(',') if row['tags'] else [],
-        content_preview=row['content_preview'],
-        source_file=row['source_file'],
+        content_preview=row['content_preview'] or "",
+        source_file=row['source_file'] or "",
         page_number=row['page_number'],
         file_size=row['file_size'],
-        language=row['language']
+        language=row['language'] or "en"
     )
     
-    # Find related documents (same author or similar tags)
+    # Find related documents (same author)
     cursor.execute("""
-        SELECT id, title, author, year, type, description, tags, 
-               content_preview, source_file, page_number
+        SELECT id, title, author, year, type
         FROM documents 
-        WHERE (author = ? OR id != ?)
-        AND id != ?
+        WHERE author = ? AND id != ?
         ORDER BY year DESC
         LIMIT 5
-    """, (row['author'], document_id, document_id))
+    """, (row['author'], document_id))
     
     related = []
     for r in cursor.fetchall():
         related.append(Document(
             id=r['id'],
             title=r['title'],
-            author=r['author'],
-            year=r['year'],
-            type=r['type'],
-            description=r['description'],
-            tags=r['tags'].split(',') if r['tags'] else [],
-            content_preview=r['content_preview'],
-            source_file=r['source_file'],
-            page_number=r['page_number']
+            author=r['author'] or "Unknown",
+            year=r['year'] or 0,
+            type=r['type'] or "document",
+            description="",
+            tags=[],
+            content_preview="",
+            source_file=""
         ))
+    
+    conn.close()
     
     return DocumentDetailResponse(
         document=document,
-        full_content=row['full_content'] if 'full_content' in row.keys() else None,
         related_documents=related
     )
 
@@ -518,8 +596,9 @@ async def get_document_types():
         return {"types": []}
     
     cursor = conn.cursor()
-    cursor.execute("SELECT DISTINCT type FROM documents ORDER BY type")
+    cursor.execute("SELECT DISTINCT type FROM documents WHERE type IS NOT NULL ORDER BY type")
     types = [row['type'] for row in cursor.fetchall()]
+    conn.close()
     return {"types": types}
 
 
@@ -531,8 +610,9 @@ async def get_document_years():
         return {"years": []}
     
     cursor = conn.cursor()
-    cursor.execute("SELECT DISTINCT year FROM documents ORDER BY year DESC")
+    cursor.execute("SELECT DISTINCT year FROM documents WHERE year > 0 ORDER BY year DESC")
     years = [row['year'] for row in cursor.fetchall()]
+    conn.close()
     return {"years": years}
 
 
@@ -544,53 +624,17 @@ async def get_document_authors():
         return {"authors": []}
     
     cursor = conn.cursor()
-    cursor.execute("SELECT DISTINCT author FROM documents ORDER BY author")
+    cursor.execute("SELECT DISTINCT author FROM documents WHERE author IS NOT NULL AND author != 'Unknown' ORDER BY author")
     authors = [row['author'] for row in cursor.fetchall()]
+    conn.close()
     return {"authors": authors}
-
-
-@app.get("/api/documents/stats")
-async def get_document_stats():
-    """Get statistics about the document collection."""
-    conn = get_knowledge_base()
-    if not conn:
-        return {
-            "total_documents": 0,
-            "by_type": {},
-            "by_year": {},
-            "total_authors": 0
-        }
-    
-    cursor = conn.cursor()
-    
-    # Total count
-    cursor.execute("SELECT COUNT(*) as count FROM documents")
-    total = cursor.fetchone()['count']
-    
-    # Count by type
-    cursor.execute("SELECT type, COUNT(*) as count FROM documents GROUP BY type")
-    by_type = {row['type']: row['count'] for row in cursor.fetchall()}
-    
-    # Count by year
-    cursor.execute("SELECT year, COUNT(*) as count FROM documents GROUP BY year ORDER BY year DESC")
-    by_year = {row['year']: row['count'] for row in cursor.fetchall()}
-    
-    # Unique authors
-    cursor.execute("SELECT COUNT(DISTINCT author) as count FROM documents")
-    authors = cursor.fetchone()['count']
-    
-    return {
-        "total_documents": total,
-        "by_type": by_type,
-        "by_year": by_year,
-        "total_authors": authors
-    }
 
 
 # ── DB Init ──────────────────────────────────────────────────────────
 @app.on_event("startup")
 def init_db():
     """Create tables if they don't exist."""
+    # Initialize PostgreSQL
     try:
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
@@ -613,11 +657,10 @@ def init_db():
         """)
         conn.commit()
         conn.close()
-        
-        # Try to load vector database on startup
-        load_vector_database()
-        get_knowledge_base()
-        print("✓ Vector database and knowledge base loaded")
-        
+        print("✓ PostgreSQL tables initialized")
     except Exception as e:
-        print(f"DB init skipped: {e}")
+        print(f"PostgreSQL init skipped: {e}")
+    
+    # Initialize vector database and knowledge base
+    load_vector_database()
+    get_knowledge_base()
