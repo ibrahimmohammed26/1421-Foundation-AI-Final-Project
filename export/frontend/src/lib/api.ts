@@ -1,4 +1,6 @@
-const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
+/// <reference types="vite/client" />
+
+const API = (import.meta.env.VITE_API_URL as string) || "http://localhost:8000";
 
 export async function fetchLocations(maxYear: number) {
   const res = await fetch(`${API}/api/locations?max_year=${maxYear}`);
@@ -57,5 +59,10 @@ export async function submitFeedback(data: {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
+  return res.json();
+}
+export async function fetchStats() {
+  const res = await fetch(`${API}/api/stats`);
+  if (!res.ok) throw new Error('Failed to fetch stats');
   return res.json();
 }

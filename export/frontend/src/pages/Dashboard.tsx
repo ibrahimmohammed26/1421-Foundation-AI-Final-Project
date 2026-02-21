@@ -1,15 +1,35 @@
 import { useState, useEffect } from "react";
-import { api } from "@/lib/api";
+import { fetchLocations } from "@/lib/api";  // Import your existing function
 
 export default function Dashboard() {
   const [stats, setStats] = useState({ feedback_count: 0, locations_count: 0 });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.getStats().then(data => {
-      setStats(data);
-      setLoading(false);
-    });
+    // Since you don't have a getStats endpoint in your API file yet,
+    // we'll use fetchLocations to get count and you'll need to add a stats endpoint
+    const fetchStats = async () => {
+      try {
+        // Get locations count
+        const locations = await fetchLocations(1421);
+        
+        // For feedback count, you'll need to either:
+        // Option 1: Add a getStats function to your API file
+        // Option 2: Create a separate fetch for stats
+        
+        // For now, let's use what we have:
+        setStats({
+          locations_count: locations.length,
+          feedback_count: 0 // You'll need to implement this
+        });
+        setLoading(false);
+      } catch (error) {
+        console.error('Error fetching stats:', error);
+        setLoading(false);
+      }
+    };
+
+    fetchStats();
   }, []);
 
   return (
