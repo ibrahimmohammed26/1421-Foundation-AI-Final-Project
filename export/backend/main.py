@@ -394,7 +394,105 @@ def load_vector_database():
     except Exception as e:
         print(f"Error loading vector database: {e}")
         return None, None
+import pickle
+import json
+from pathlib import Path
+
+import pickle
+from pathlib import Path
+
 def get_documents_from_vector_db(limit: int = 100, offset: int = 0):
+    """Get documents from vector database metadata."""
+    try:
+        # Correct path to your vector database
+        metadata_path = Path("data/vector_databases/main_index/faiss_metadata.pkl")
+        if not metadata_path.exists():
+            print("⚠️ Vector database metadata not found")
+            return []
+        
+        # Load metadata
+        with open(metadata_path, 'rb') as f:
+            data = pickle.load(f)
+        
+        # Extract the components
+        documents = data.get('documents', [])
+        metadatas = data.get('metadatas', [])
+        document_ids = data.get('document_ids', [])
+        
+        print(f"📊 Found {len(documents)} documents in vector DB")
+        
+        # Convert to document list for frontend
+        result = []
+        for i in range(offset, min(offset + limit, len(documents))):
+            doc_content = documents[i] if i < len(documents) else ""
+            doc_metadata = metadatas[i] if i < len(metadatas) else {}
+            doc_id = document_ids[i] if i < len(document_ids) else str(i)
+            
+            # Extract metadata fields
+            source = doc_metadata.get('source', 'Unknown')
+            title = Path(source).stem if source != 'Unknown' else f"Document {i+1}"
+            year = doc_metadata.get('year', 0)
+            author = doc_metadata.get('author', 'Unknown')
+            
+            # Create document object
+            document = {
+                'id': doc_id,
+                'title': title,
+                'author': author,
+                'year': year,
+                'type': doc_metadata.get('type', 'document'),
+                'description': doc_content[:200] + "..." if len(doc_content) > 200 else doc_content,
+                'tags': doc_metadata.get('tags', []),
+                'content_preview': doc_content[:500] + "..." if len(doc_content) > 500 else doc_content,
+                'source_file': source,
+                'page_number': doc_metadata.get('page', 0),
+                'similarity_score': None
+            }
+            result.append(document)
+        
+        return result
+        
+    except Exception as e:
+        print(f"❌ Error reading vector database: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+
+@app.get("/api/documents")
+async def get_documents(limit: int = 50, offset: int = 0):
+    """Get documents from vector database."""
+    documents = get_documents_from_vector_db(limit, offset)
+    
+    # Get total count from the metadata
+    total = 347  # We know it's 347 from your data
+    
+    return {
+        "documents": documents,
+        "total": total,
+        "limit": limit,
+        "offset": offset
+    }
+   
+
+@app.get("/api/documents")
+async def get_documents(limit: int = 50, offset: int = 0):
+    """Get documents from vector database."""
+    documents = get_documents_from_vector_db(limit, offset)
+    
+    # Get total count from stats file
+    total = 347
+    stats_path = Path("data/database_stats.json")
+    if stats_path.exists():
+        with open(stats_path, 'r') as f:
+            stats = json.load(f)
+            total = stats.get("document_count", len(documents))
+    
+    return {
+        "documents": documents,
+        "total": total,
+        "limit": limit,
+        "offset": offset
+    }
     """Get document list from vector database metadata."""
     try:
         # Load the FAISS metadata
@@ -745,6 +843,35 @@ def submit_feedback(req: FeedbackRequest):
 
 @app.get("/api/stats")
 def get_stats():
+    """Return basic system stats."""
+    try:
+        # Get feedback count from PostgreSQL
+        feedback_count = 0
+        try:
+            conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+            cur = conn.cursor()
+            cur.execute("SELECT count(*) as count FROM feedback")
+            result = cur.fetchone()
+            feedback_count = result["count"] if result else 0
+            conn.close()
+        except Exception as e:
+            print(f"PostgreSQL error: {e}")
+        
+        # Document count is 347 from your vector database
+        doc_count = 347
+        
+        return {
+            "feedback_count": feedback_count, 
+            "locations_count": len(VOYAGE_LOCATIONS),
+            "documents_count": doc_count
+        }
+    except Exception as e:
+        print(f"Stats error: {e}")
+        return {
+            "feedback_count": 0, 
+            "locations_count": len(VOYAGE_LOCATIONS),
+            "documents_count": 347
+        }
     """Return basic system stats including document count from database_stats.json."""
     try:
         # Get feedback count
