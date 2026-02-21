@@ -4,14 +4,11 @@ import {
   Map, 
   FileText, 
   Send,
-  ChevronRight,
   BookOpen,
   Compass,
-  History,
   Database,
   Globe
 } from "lucide-react";
-import { fetchStats } from "@/lib/api";
 
 interface Stats {
   feedback_count: number;
@@ -30,7 +27,8 @@ export default function Dashboard() {
   useEffect(() => {
     const loadStats = async () => {
       try {
-        const data = await fetchStats();
+        const response = await fetch('http://localhost:8000/api/stats');
+        const data = await response.json();
         setStats(data);
       } catch (error) {
         console.error('Error loading stats:', error);
@@ -57,14 +55,14 @@ export default function Dashboard() {
     {
       icon: FileText,
       title: "Browse Research Documents",
-      description: "Access historical documents, academic papers, and books from our vector database. Search semantically or filter by metadata.",
+      description: `Access historical documents, academic papers, and books from our vector database. Currently ${stats.documents_count} documents available.`,
       example: "Search for 'Ming dynasty shipbuilding techniques'"
     },
     {
       icon: Database,
       title: "Vector Database Integration",
       description: "The system uses FAISS vector search to find relevant documents and knowledge base entries for more accurate responses.",
-      example: `${stats.documents_count} documents available in the knowledge base`
+      example: `${stats.documents_count} documents indexed and searchable`
     },
     {
       icon: Globe,
@@ -112,7 +110,9 @@ export default function Dashboard() {
             <span className="text-xs text-gray-400">Documents</span>
             <FileText className="h-4 w-4 text-gold" />
           </div>
-          <p className="text-2xl font-display font-bold text-gold">{stats.documents_count}</p>
+          <p className="text-2xl font-display font-bold text-gold">
+            {loading ? '...' : stats.documents_count}
+          </p>
           <p className="text-xs text-gray-500 mt-1">In vector database</p>
         </div>
         <div className="bg-navy rounded-xl border border-gray-800 p-4">
@@ -164,7 +164,7 @@ export default function Dashboard() {
                 </div>
                 <div className="flex-1">
                   <h3 className="text-md font-semibold text-gray-200 mb-1">
-                    Step {index + 1}: {step.title}
+                    {step.title}
                   </h3>
                   <p className="text-sm text-gray-400 mb-2">{step.description}</p>
                   <p className="text-xs text-gold italic">{step.example}</p>
