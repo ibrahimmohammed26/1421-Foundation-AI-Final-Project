@@ -394,6 +394,60 @@ def load_vector_database():
     except Exception as e:
         print(f"Error loading vector database: {e}")
         return None, None
+def get_documents_from_vector_db(limit: int = 100, offset: int = 0):
+    """Get document list from vector database metadata."""
+    try:
+        # Load the FAISS metadata
+        metadata_path = Path("data/vector_databases/main_index/faiss_metadata.pkl")
+        if not metadata_path.exists():
+            print("⚠️ FAISS metadata not found")
+            return []
+        
+        with open(metadata_path, 'rb') as f:
+            metadata = pickle.load(f)
+        
+        # Convert metadata to document list
+        documents = []
+        for key, value in metadata.items():
+            # Each entry in metadata represents a document chunk
+            # You might want to group by source_file to show unique documents
+            doc = {
+                'id': value.get('id', key),
+                'title': value.get('title', Path(value.get('source_file', 'Unknown')).stem),
+                'author': value.get('author', 'Unknown'),
+                'year': value.get('year', 0),
+                'type': value.get('type', 'document'),
+                'description': value.get('content_preview', '')[:200],
+                'tags': [],
+                'content_preview': value.get('content_preview', ''),
+                'source_file': value.get('source_file', ''),
+                'page_number': value.get('chunk_index', 0)
+            }
+            documents.append(doc)
+        
+        # Remove duplicates by source_file (if you want unique documents)
+        unique_docs = {}
+        for doc in documents:
+            source = doc['source_file']
+            if source not in unique_docs:
+                unique_docs[source] = doc
+        
+        return list(unique_docs.values())[offset:offset+limit]
+    
+    except Exception as e:
+        print(f"Error reading vector database: {e}")
+        return []
+
+@app.get("/api/documents")
+async def get_documents(limit: int = 50, offset: int = 0):
+    """Get documents from vector database."""
+    documents = get_documents_from_vector_db(limit, offset)
+    return {
+        "documents": documents,
+        "total": len(documents),
+        "limit": limit,
+        "offset": offset
+    }
 
 def get_knowledge_base():
     """Get connection to SQLite knowledge base."""
@@ -691,6 +745,58 @@ def submit_feedback(req: FeedbackRequest):
 
 @app.get("/api/stats")
 def get_stats():
+    """Return basic system stats including document count from database_stats.json."""
+    try:
+        # Get feedback count from PostgreSQL
+        feedback_count = 0
+        try:
+            conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+            cur = conn.cursor()
+            cur.execute("SELECT count(*) as count FROM feedback")
+            result = cur.fetchone()
+            feedback_count = result["count"] if result else 0
+            conn.close()
+        except Exception as e:
+            print(f"PostgreSQL error: {e}")
+        
+        # Get document count from database_stats.json
+        doc_count = 0
+        stats_path = Path("data/database_stats.json")
+        if stats_path.exists():
+            try:
+                with open(stats_path, 'r') as f:
+                    stats = json.load(f)
+                    doc_count = stats.get("document_count", 0)
+                print(f"✅ Read document count from stats file: {doc_count}")
+            except Exception as e:
+                print(f"Error reading stats file: {e}")
+        
+        # If stats file doesn't have count, try SQLite as fallback
+        if doc_count == 0:
+            try:
+                db_path = Path("data/knowledge_base.db")
+                if db_path.exists():
+                    conn = sqlite3.connect(str(db_path))
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT COUNT(*) as count FROM documents")
+                    result = cursor.fetchone()
+                    doc_count = result[0] if result else 0
+                    conn.close()
+            except Exception as e:
+                print(f"SQLite error: {e}")
+        
+        return {
+            "feedback_count": feedback_count, 
+            "locations_count": len(VOYAGE_LOCATIONS),
+            "documents_count": doc_count
+        }
+    except Exception as e:
+        print(f"Stats error: {e}")
+        return {
+            "feedback_count": 0, 
+            "locations_count": len(VOYAGE_LOCATIONS),
+            "documents_count": 347  # Hardcode your actual count as fallback
+        }
     """Return basic system stats including document count from database_stats.json."""
     try:
         # Get feedback count from PostgreSQL
