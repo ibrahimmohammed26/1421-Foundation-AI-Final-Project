@@ -1,4 +1,4 @@
-# See individual .gitignore files in backend and frontend
+
 backend/.env
 frontend/.env
 backend/__pycache__

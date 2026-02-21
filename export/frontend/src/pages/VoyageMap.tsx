@@ -1,107 +1,146 @@
-import { useState, useEffect, useRef } from "react";
-import { MapContainer, TileLayer, CircleMarker, Polyline, Popup, Tooltip } from "react-leaflet";
-import { Play, Pause, RotateCcw } from "lucide-react";
-import "leaflet/dist/leaflet.css";
+import { useState, useEffect } from "react";
+import { fetchLocations } from "@/lib/api";
 
-const LOCATIONS = [
-  { name: "Nanjing", lat: 32.06, lon: 118.80, year: 1368, event: "Early Ming capital established" },
-  { name: "Beijing", lat: 39.90, lon: 116.41, year: 1403, event: "Capital moved to Beijing" },
-  { name: "Champa", lat: 10.82, lon: 106.63, year: 1405, event: "Southeast Asian ally" },
-  { name: "Calicut", lat: 11.26, lon: 75.78, year: 1406, event: "Zheng He fleet first arrived" },
-  { name: "Sumatra", lat: -0.59, lon: 101.34, year: 1407, event: "Strategic trading post established" },
-  { name: "Java", lat: -7.61, lon: 110.71, year: 1407, event: "Diplomatic missions conducted" },
-  { name: "Siam", lat: 13.74, lon: 100.52, year: 1408, event: "Diplomatic relations established" },
-  { name: "Malacca", lat: 2.19, lon: 102.25, year: 1409, event: "Strategic port established" },
-  { name: "Sri Lanka", lat: 7.87, lon: 80.77, year: 1409, event: "Trilingual inscription erected" },
-  { name: "Hormuz", lat: 27.16, lon: 56.28, year: 1414, event: "Persian Gulf trade route opened" },
-  { name: "Aden", lat: 12.79, lon: 45.02, year: 1417, event: "Arabian Peninsula contact made" },
-  { name: "Mombasa", lat: -4.04, lon: 39.67, year: 1418, event: "East African trade commenced" },
-  { name: "Mogadishu", lat: 2.05, lon: 45.32, year: 1418, event: "Somali coast exploration" },
-  { name: "Zanzibar", lat: -6.17, lon: 39.20, year: 1419, event: "Trade agreements established" },
-];
+interface Location {
+  name: string;
+  lat: number;
+  lon: number;
+  year: number;
+  event: string;
+}
 
 export default function VoyageMap() {
-  const [currentYear, setCurrentYear] = useState(1368);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const filtered = LOCATIONS.filter((l) => l.year <= currentYear).sort((a, b) => a.year - b.year);
-  const routeCoords: [number, number][] = filtered.map((l) => [l.lat, l.lon]);
+  const [locations, setLocations] = useState<Location[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [mapType, setMapType] = useState<"terrain" | "satellite">("terrain");
+  const [selectedLocation, setSelectedLocation] = useState<Location | null>(null);
 
   useEffect(() => {
-    if (isPlaying) {
-      intervalRef.current = setInterval(() => {
-        setCurrentYear((y) => {
-          if (y >= 1421) { setIsPlaying(false); return 1421; }
-          return y + 1;
-        });
-      }, 500);
-    }
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [isPlaying]);
+    fetchLocations(1421).then(data => {
+      setLocations(data);
+      setLoading(false);
+    });
+  }, []);
 
-  const reset = () => { setIsPlaying(false); setCurrentYear(1368); };
-
+  // This is a placeholder - you'll need to integrate with a real map library
+  // like Leaflet, Google Maps, or Mapbox
   return (
-    <div className="p-6 space-y-5 h-full overflow-y-auto">
-      <div>
-        <h1 className="text-2xl font-display font-bold text-gold">Voyage Map</h1>
-        <p className="text-sm text-gray-400">Explore Zheng He's maritime routes across Asia and Africa</p>
+    <div className="flex flex-col h-full">
+      <div className="border-b border-gray-700 px-6 py-4">
+        <h1 className="text-xl font-display font-bold text-gold">Voyage Map</h1>
+        <p className="text-xs text-gray-400 mt-0.5">
+          Explore Zheng He's treasure fleet routes (1405-1433)
+        </p>
       </div>
 
-      {/* Controls */}
-      <div className="flex flex-wrap items-center gap-4 rounded-xl bg-navy border border-gray-700 p-4">
-        <div className="flex items-center gap-2">
-          <button onClick={() => setIsPlaying(!isPlaying)} className="h-9 w-9 rounded-lg bg-gold flex items-center justify-center text-navy-dark hover:bg-gold-light transition">
-            {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-          </button>
-          <button onClick={reset} className="h-9 w-9 rounded-lg border border-gray-600 flex items-center justify-center text-gray-400 hover:text-gray-200 hover:bg-white/5 transition">
-            <RotateCcw className="h-4 w-4" />
-          </button>
+      {/* Map Controls */}
+      <div className="px-6 py-3 border-b border-gray-700 bg-navy-light">
+        <div className="flex items-center justify-between">
+          <div className="flex gap-2">
+            <button
+              onClick={() => setMapType("terrain")}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                mapType === "terrain"
+                  ? "bg-gold text-navy-dark"
+                  : "bg-navy text-gray-400 hover:text-gray-200"
+              }`}
+            >
+              Terrain
+            </button>
+            <button
+              onClick={() => setMapType("satellite")}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                mapType === "satellite"
+                  ? "bg-gold text-navy-dark"
+                  : "bg-navy text-gray-400 hover:text-gray-200"
+              }`}
+            >
+              Satellite
+            </button>
+          </div>
+          <div className="text-xs text-gray-400">
+            {locations.length} locations across 3 continents
+          </div>
         </div>
-        <input type="range" min={1368} max={1421} value={currentYear} onChange={(e) => setCurrentYear(Number(e.target.value))} className="flex-1 min-w-[200px] accent-[#d4af37]" />
-        <span className="text-lg font-display font-bold text-gold min-w-[4ch]">{currentYear}</span>
       </div>
 
-      {/* Leaflet Map */}
-      <div className="rounded-xl overflow-hidden border border-gray-700" style={{ height: 480 }}>
-        <MapContainer center={[15, 80]} zoom={3} style={{ height: "100%", width: "100%" }} scrollWheelZoom={true}>
-          <TileLayer
-            attribution='&copy; <a href="https://carto.com/">CARTO</a>'
-            url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-          />
-          {routeCoords.length > 1 && (
-            <Polyline positions={routeCoords} pathOptions={{ color: "#d4af37", weight: 3, opacity: 0.8, dashArray: "10 5" }} />
-          )}
-          {filtered.map((loc) => (
-            <CircleMarker key={loc.name} center={[loc.lat, loc.lon]} radius={7} pathOptions={{ color: "#d4af37", fillColor: "#d4af37", fillOpacity: 0.8 }}>
-              <Tooltip>{loc.name}</Tooltip>
-              <Popup>
-                <strong>{loc.name}</strong><br />
-                {loc.year} — {loc.event}
-              </Popup>
-            </CircleMarker>
-          ))}
-        </MapContainer>
-      </div>
-
-      {/* Timeline */}
-      <div>
-        <h2 className="text-lg font-display font-bold mb-3">Timeline</h2>
-        <div className="space-y-2">
-          {filtered.map((loc) => (
-            <div key={loc.name} className="flex items-start gap-4 rounded-xl bg-navy border border-gray-700 p-4">
-              <div className="flex-shrink-0 h-10 w-10 rounded-lg bg-gold flex items-center justify-center">
-                <span className="text-xs font-bold text-navy-dark">{loc.year}</span>
-              </div>
-              <div>
-                <p className="text-sm font-semibold">{loc.name}</p>
-                <p className="text-xs text-gray-400">{loc.event}</p>
+      {/* Map Container - Light background for visibility */}
+      <div className="flex-1 relative bg-gray-100">
+        {loading ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-gray-100">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gold"></div>
+          </div>
+        ) : (
+          <>
+            {/* Placeholder for actual map */}
+            <div className="absolute inset-0 p-6">
+              <div className="bg-white/90 backdrop-blur-sm rounded-xl border border-gray-200 p-6 shadow-lg max-w-md">
+                <h3 className="text-lg font-display font-bold text-navy-dark mb-4">
+                  Voyage Locations
+                </h3>
+                <div className="space-y-3 max-h-96 overflow-y-auto">
+                  {locations.map((loc, idx) => (
+                    <div
+                      key={idx}
+                      onClick={() => setSelectedLocation(loc)}
+                      className={`p-3 rounded-lg cursor-pointer transition-colors ${
+                        selectedLocation?.name === loc.name
+                          ? "bg-gold/20 border border-gold/50"
+                          : "hover:bg-gray-100 border border-transparent"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium text-navy-dark">{loc.name}</span>
+                        <span className="text-xs text-gray-500">{loc.year}</span>
+                      </div>
+                      <p className="text-xs text-gray-600 mt-1">{loc.event}</p>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
-          ))}
-        </div>
+
+            {/* Map Legend */}
+            <div className="absolute bottom-6 right-6 bg-white/90 backdrop-blur-sm rounded-lg border border-gray-200 p-3 shadow-lg">
+              <div className="text-xs font-medium text-navy-dark mb-2">Map Legend</div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-gold"></div>
+                  <span className="text-xs text-gray-600">Voyage Start/End</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-blue-500"></div>
+                  <span className="text-xs text-gray-600">Major Port</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-0.5 h-4 bg-gold"></div>
+                  <span className="text-xs text-gray-600">Trade Route</span>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
       </div>
+
+      {/* Selected Location Info */}
+      {selectedLocation && (
+        <div className="absolute bottom-6 left-6 bg-white rounded-xl border border-gray-200 p-4 shadow-lg max-w-sm">
+          <div className="flex justify-between items-start mb-2">
+            <h3 className="font-display font-bold text-navy-dark">{selectedLocation.name}</h3>
+            <button
+              onClick={() => setSelectedLocation(null)}
+              className="text-gray-400 hover:text-gray-600"
+            >
+              ×
+            </button>
+          </div>
+          <p className="text-sm text-gray-600 mb-1">Year: {selectedLocation.year}</p>
+          <p className="text-sm text-gray-600">{selectedLocation.event}</p>
+          <p className="text-xs text-gray-400 mt-2">
+            Coordinates: {selectedLocation.lat}°N, {selectedLocation.lon}°E
+          </p>
+        </div>
+      )}
     </div>
   );
 }

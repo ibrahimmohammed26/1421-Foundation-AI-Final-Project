@@ -1,22 +1,34 @@
 import { NavLink, Outlet } from "react-router-dom";
-import { MessageSquare, Map, Send } from "lucide-react";
+import { 
+  MessageSquare, 
+  Map, 
+  Send,
+  Home,
+  BarChart3,
+  Settings,
+  FileText 
+} from "lucide-react";
 
 const NAV = [
+  { to: "/", label: "Dashboard", icon: Home },
   { to: "/chat", label: "Chat", icon: MessageSquare },
+  { to: "/documents", label: "Documents", icon: FileText },
   { to: "/map", label: "Voyage Map", icon: Map },
+  { to: "/analytics", label: "Analytics", icon: BarChart3 },
   { to: "/feedback", label: "Feedback", icon: Send },
+  { to: "/settings", label: "Settings", icon: Settings },
 ];
 
 export default function App() {
   return (
-    <div className="flex h-screen">
+    <div className="flex h-screen bg-navy-dark">
       {/* Sidebar */}
-      <aside className="w-56 bg-navy border-r border-gray-700 flex flex-col">
+      <aside className="w-64 bg-navy border-r border-gray-700 flex flex-col">
         <div className="p-5 border-b border-gray-700">
           <h1 className="text-xl font-display font-bold text-gold">1421</h1>
           <p className="text-xs text-gray-400 mt-1">Foundation Research</p>
         </div>
-        <nav className="flex-1 p-3 space-y-1">
+        <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
           {NAV.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
@@ -34,10 +46,21 @@ export default function App() {
             </NavLink>
           ))}
         </nav>
+        <div className="p-4 border-t border-gray-700">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-gold/20 flex items-center justify-center">
+              <span className="text-sm font-bold text-gold">U</span>
+            </div>
+            <div>
+              <p className="text-sm font-medium text-gray-200">User Name</p>
+              <p className="text-xs text-gray-400">Researcher</p>
+            </div>
+          </div>
+        </div>
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-hidden">
+      <main className="flex-1 overflow-hidden bg-navy-dark">
         <Outlet />
       </main>
     </div>
