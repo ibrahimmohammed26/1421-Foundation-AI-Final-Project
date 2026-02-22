@@ -24,6 +24,7 @@ export default function Documents() {
 
   const [totalDocuments, setTotalDocuments] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
+  const [error, setError] = useState<string | null>(null);
 
   // Load filter options once
   useEffect(() => {
@@ -36,10 +37,11 @@ export default function Documents() {
     setIsSearchMode(false);
     try {
       const data = await getAllDocuments(PAGE_SIZE, (page - 1) * PAGE_SIZE);
-      setDocuments(data.documents || []);
-      setTotalDocuments(data.total || 0);
+      setDocuments(data.documents ?? []);
+      setTotalDocuments(data.total ?? 0);
     } catch (err) {
       console.error("Error loading documents:", err);
+      setError("Failed to load documents. Is the backend running?");
     } finally {
       setLoading(false);
     }
@@ -211,6 +213,11 @@ export default function Documents() {
 
       {/* Document list */}
       <div className="flex-1 overflow-y-auto px-6 py-4">
+        {error && (
+          <div className="mb-4 p-4 bg-red-900/20 border border-red-500/30 rounded-lg text-red-400 text-sm">
+            {error}
+          </div>
+        )}
         {loading ? (
           <div className="flex items-center justify-center h-64">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gold" />

@@ -131,8 +131,29 @@ _vector_index = None
 _embeddings_model = None
 
 
+def _clean_text(text: str) -> str:
+    """Strip leading whitespace/newlines and collapse internal whitespace runs."""
+    import re
+    # Remove lines that are just metadata labels (Title: / Author: / Source:)
+    lines = text.split("\n")
+    cleaned = []
+    for line in lines:
+        stripped = line.strip()
+        # Skip blank lines and pure metadata header lines
+        if not stripped:
+            continue
+        if stripped.startswith("Title:") or stripped.startswith("Author:") or stripped.startswith("Source:"):
+            continue
+        cleaned.append(stripped)
+    result = " ".join(cleaned)
+    # Collapse multiple spaces
+    result = re.sub(r"  +", " ", result)
+    return result.strip()
+
+
 def _meta_to_doc(idx: int, text: str, meta: dict, doc_id) -> dict:
     """Convert pickle entry to our standard document dict."""
+    clean  = _clean_text(text)
     title  = meta.get("title", "") or f"Document {idx+1}"
     author = meta.get("author", "Unknown") or "Unknown"
     return {
@@ -141,10 +162,10 @@ def _meta_to_doc(idx: int, text: str, meta: dict, doc_id) -> dict:
         "author":           author,
         "year":             int(meta.get("year", 0) or 0),
         "type":             meta.get("source_type", meta.get("type", "document")) or "document",
-        "description":      text[:200] + ("..." if len(text) > 200 else ""),
+        "description":      clean[:250] + ("..." if len(clean) > 250 else ""),
         "tags":             meta.get("tags", []) or [],
-        "content_preview":  text[:600] + ("..." if len(text) > 600 else ""),
-        "content_full":     text,   # kept for RAG context
+        "content_preview":  clean[:500] + ("..." if len(clean) > 500 else ""),
+        "content_full":     clean,   # cleaned text used for RAG context
         "source_file":      meta.get("source", meta.get("source_type", "")) or "",
         "page_number":      meta.get("page", None),
         "similarity_score": None,
@@ -186,18 +207,20 @@ def load_knowledge_base():
     else:
         print(f"WARNING: FAISS index not found at {index_path}")
 
-    # Init embeddings
-    _embeddings_model = get_embeddings_fn()
-    print("OK: Embeddings model ready")
+    # Embeddings are lazy-loaded on first search (requires OPENAI_API_KEY at query time)
+    print("OK: Knowledge base ready (embeddings load on first query)")
 
 
 # ── Search ────────────────────────────────────────────────────────────
 
 def search_semantic(query: str, top_k: int = 5) -> List[dict]:
     """Vector search using FAISS — returns docs with similarity_score."""
+    global _embeddings_model
     if _vector_index is None or not _docs_store:
         return []
     try:
+        if _embeddings_model is None:
+            _embeddings_model = get_embeddings_fn()
         vec = np.array([_embeddings_model.embed_query(query)], dtype="float32")
         distances, indices = _vector_index.search(vec, min(top_k, _vector_index.ntotal))
         results = []
@@ -275,9 +298,11 @@ def get_locations(max_year: int = 1421):
 @app.get("/api/documents")
 async def get_documents(limit: int = Query(default=50, le=500), offset: int = 0):
     """Return paginated documents from in-memory store."""
+    if not _docs_store:
+        return {"documents": [], "total": 0, "limit": limit, "offset": offset}
     total  = len(_docs_store)
     paged  = _docs_store[offset: offset + limit]
-    # Strip content_full from response (too large)
+    # Strip content_full from response (not needed by frontend, saves bandwidth)
     safe   = [{k: v for k, v in d.items() if k != "content_full"} for d in paged]
     return {"documents": safe, "total": total, "limit": limit, "offset": offset}
 
