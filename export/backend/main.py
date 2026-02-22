@@ -1,6 +1,6 @@
 """
 1421 Foundation Research System - FastAPI Backend
-Stack: FastAPI + LangChain + SQLite + FAISS Vector Search
+Data source: FAISS metadata pickle (SQLite is corrupted, pickle has everything)
 """
 
 import os
@@ -32,14 +32,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Paths - main.py lives at .../export/backend/main.py
-#         data/ lives at   .../data/
+# Paths
 BASE_DIR  = Path(__file__).resolve().parents[2]
 DATA_DIR  = BASE_DIR / "data"
 DB_PATH   = DATA_DIR / "knowledge_base.db"
 FAISS_DIR = DATA_DIR / "vector_databases" / "main_index"
 
-# LLM
+# ── LLM ──────────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """You are a professional historian specialising in Chinese maritime exploration 
 during the Ming dynasty (1368-1644), particularly the voyages of Admiral Zheng He and the 
@@ -59,33 +58,30 @@ def get_llm():
     )
 
 
-def get_embeddings():
+def get_embeddings_fn():
     return OpenAIEmbeddings(
         model="text-embedding-3-small",
         api_key=os.getenv("OPENAI_API_KEY"),
     )
 
 
-# Models
+# ── Models ────────────────────────────────────────────────────────────
 
 class ChatRequest(BaseModel):
     messages: list[dict]
     session_id: Optional[str] = None
     use_documents: bool = True
 
-
 class ChatResponse(BaseModel):
     content: str
     session_id: str
     sources: Optional[List[dict]] = None
-
 
 class FeedbackRequest(BaseModel):
     name: Optional[str] = None
     email: str
     feedback_type: str
     message: str
-
 
 class Document(BaseModel):
     id: str
@@ -101,7 +97,7 @@ class Document(BaseModel):
     similarity_score: Optional[float] = None
 
 
-# Voyage locations
+# ── Voyage locations ──────────────────────────────────────────────────
 
 VOYAGE_LOCATIONS = [
     {"name": "Nanjing",   "lat": 32.06, "lon": 118.80, "year": 1368, "event": "Early Ming capital established"},
@@ -121,206 +117,125 @@ VOYAGE_LOCATIONS = [
 ]
 
 
-# Vector DB cache
+# ── In-memory document store (loaded from pickle) ─────────────────────
+# Structure of faiss_metadata.pkl:
+#   {
+#     "documents":    [str, ...]        # full text of each doc
+#     "metadatas":    [dict, ...]       # {id, title, author, source_type, ...}
+#     "document_ids": [int, ...]        # integer IDs matching metadatas index
+#     "dimension":    int               # embedding dimension
+#   }
 
-_vector_index     = None
-_vector_metadata  = None
+_docs_store: List[dict] = []   # list of unified doc dicts, index == FAISS index
+_vector_index = None
 _embeddings_model = None
 
 
-def get_embeddings_model():
-    global _embeddings_model
-    if _embeddings_model is None:
-        _embeddings_model = get_embeddings()
-    return _embeddings_model
-
-
-def load_vector_database():
-    global _vector_index, _vector_metadata
-    if _vector_index is not None:
-        return _vector_index, _vector_metadata
-
-    index_path    = FAISS_DIR / "faiss_index.bin"
-    metadata_path = FAISS_DIR / "faiss_metadata.pkl"
-
-    if not index_path.exists() or not metadata_path.exists():
-        print(f"WARNING: Vector database files not found in {FAISS_DIR}")
-        return None, None
-
-    try:
-        _vector_index = faiss.read_index(str(index_path))
-        with open(metadata_path, "rb") as f:
-            _vector_metadata = pickle.load(f)
-        print(f"OK: Loaded FAISS index with {_vector_index.ntotal} vectors")
-        if isinstance(_vector_metadata, dict):
-            print(f"   Metadata top-level keys: {list(_vector_metadata.keys())[:8]}")
-        return _vector_index, _vector_metadata
-    except Exception as e:
-        print(f"ERROR loading vector database: {e}")
-        return None, None
-
-
-# SQLite helpers
-
-def open_sqlite():
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def _row_to_doc(row) -> dict:
-    keys            = row.keys()
-    tags_raw        = row["tags"]            if "tags"            in keys else ""
-    content_preview = row["content_preview"] if "content_preview" in keys else ""
-    description     = row["description"]     if "description"     in keys else ""
-    tags = [t.strip() for t in tags_raw.split(",")] if tags_raw else []
-    if not description and content_preview:
-        description = content_preview[:200] + ("..." if len(content_preview) > 200 else "")
+def _meta_to_doc(idx: int, text: str, meta: dict, doc_id) -> dict:
+    """Convert pickle entry to our standard document dict."""
+    title  = meta.get("title", "") or f"Document {idx+1}"
+    author = meta.get("author", "Unknown") or "Unknown"
     return {
-        "id":               str(row["id"]),
-        "title":            row["title"]       or "Untitled",
-        "author":           row["author"]      or "Unknown",
-        "year":             row["year"]        or 0,
-        "type":             row["type"]        or "document",
-        "description":      description,
-        "tags":             tags,
-        "content_preview":  content_preview,
-        "source_file":      row["source_file"] if "source_file" in keys else "",
-        "page_number":      row["page_number"] if "page_number" in keys else None,
+        "id":               str(doc_id),
+        "title":            title,
+        "author":           author,
+        "year":             int(meta.get("year", 0) or 0),
+        "type":             meta.get("source_type", meta.get("type", "document")) or "document",
+        "description":      text[:200] + ("..." if len(text) > 200 else ""),
+        "tags":             meta.get("tags", []) or [],
+        "content_preview":  text[:600] + ("..." if len(text) > 600 else ""),
+        "content_full":     text,   # kept for RAG context
+        "source_file":      meta.get("source", meta.get("source_type", "")) or "",
+        "page_number":      meta.get("page", None),
         "similarity_score": None,
     }
 
 
-def _get_cols() -> list:
-    conn = open_sqlite()
-    available = {r["name"] for r in conn.execute("PRAGMA table_info(documents)").fetchall()}
-    conn.close()
-    return [c for c in ["id","title","author","year","type","description",
-                         "tags","content_preview","source_file","page_number"]
-            if c in available]
+def load_knowledge_base():
+    """Load FAISS index + pickle into memory. Called once at startup."""
+    global _docs_store, _vector_index, _embeddings_model
+
+    meta_path  = FAISS_DIR / "faiss_metadata.pkl"
+    index_path = FAISS_DIR / "faiss_index.bin"
+
+    if not meta_path.exists():
+        print(f"ERROR: {meta_path} not found")
+        return
+
+    # Load pickle
+    with open(meta_path, "rb") as f:
+        data = pickle.load(f)
+
+    documents   = data.get("documents",    [])
+    metadatas   = data.get("metadatas",    [])
+    document_ids = data.get("document_ids", list(range(len(documents))))
+
+    _docs_store = []
+    for i in range(len(documents)):
+        text = documents[i]   if i < len(documents)    else ""
+        meta = metadatas[i]   if i < len(metadatas)    else {}
+        did  = document_ids[i] if i < len(document_ids) else i
+        _docs_store.append(_meta_to_doc(i, text, meta, did))
+
+    print(f"OK: Loaded {len(_docs_store)} documents from pickle")
+
+    # Load FAISS index
+    if index_path.exists():
+        _vector_index = faiss.read_index(str(index_path))
+        print(f"OK: Loaded FAISS index with {_vector_index.ntotal} vectors")
+    else:
+        print(f"WARNING: FAISS index not found at {index_path}")
+
+    # Init embeddings
+    _embeddings_model = get_embeddings_fn()
+    print("OK: Embeddings model ready")
 
 
-def get_documents_from_sqlite(limit: int = 50, offset: int = 0):
-    if not DB_PATH.exists():
-        return [], 0
-    try:
-        conn   = open_sqlite()
-        cursor = conn.cursor()
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='documents'")
-        if not cursor.fetchone():
-            conn.close()
-            return [], 0
-        cols  = _get_cols()
-        total = cursor.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
-        cursor.execute(
-            f"SELECT {', '.join(cols)} FROM documents ORDER BY year DESC LIMIT ? OFFSET ?",
-            (limit, offset),
-        )
-        docs = [_row_to_doc(r) for r in cursor.fetchall()]
-        conn.close()
-        return docs, total
-    except Exception as e:
-        print(f"ERROR get_documents_from_sqlite: {e}")
-        return [], 0
+# ── Search ────────────────────────────────────────────────────────────
 
-
-def search_sqlite(query: str, limit: int = 50) -> List[dict]:
-    if not DB_PATH.exists():
+def search_semantic(query: str, top_k: int = 5) -> List[dict]:
+    """Vector search using FAISS — returns docs with similarity_score."""
+    if _vector_index is None or not _docs_store:
         return []
     try:
-        conn      = open_sqlite()
-        cursor    = conn.cursor()
-        available = {r["name"] for r in cursor.execute("PRAGMA table_info(documents)").fetchall()}
-        cols      = [c for c in ["id","title","author","year","type","description",
-                                  "tags","content_preview","source_file","page_number"]
-                     if c in available]
-        q      = f"%{query}%"
-        conds  = []
-        params = []
-        for col in ["title","author","description","content_preview","tags"]:
-            if col in available:
-                conds.append(f"{col} LIKE ?")
-                params.append(q)
-        where = " OR ".join(conds) if conds else "1=0"
-        cursor.execute(
-            f"SELECT {', '.join(cols)} FROM documents WHERE {where} LIMIT ?",
-            (*params, limit),
-        )
-        results = [_row_to_doc(r) for r in cursor.fetchall()]
-        conn.close()
-        return results
-    except Exception as e:
-        print(f"ERROR search_sqlite: {e}")
-        return []
-
-
-# Semantic search
-
-def _doc_id_from_meta(metadata, faiss_idx: int) -> str:
-    """
-    Handles three common metadata formats:
-      1. dict keyed by str(faiss_idx):  {"0": {"id": "abc"}, ...}
-      2. dict with list values:         {"metadatas": [...], "document_ids": [...]}
-      3. plain list:                    [{"id": "abc"}, ...]
-    """
-    if isinstance(metadata, dict):
-        entry = metadata.get(str(faiss_idx))
-        if isinstance(entry, dict):
-            return str(entry.get("id", faiss_idx))
-        doc_ids = metadata.get("document_ids", [])
-        if doc_ids and faiss_idx < len(doc_ids):
-            return str(doc_ids[faiss_idx])
-        metas = metadata.get("metadatas", [])
-        if metas and faiss_idx < len(metas):
-            m = metas[faiss_idx]
-            return str(m.get("id", faiss_idx)) if isinstance(m, dict) else str(faiss_idx)
-    elif isinstance(metadata, list) and faiss_idx < len(metadata):
-        m = metadata[faiss_idx]
-        return str(m.get("id", faiss_idx)) if isinstance(m, dict) else str(faiss_idx)
-    return str(faiss_idx)
-
-
-def search_documents_semantic(query: str, top_k: int = 5) -> List[dict]:
-    index, metadata = load_vector_database()
-    if index is None or metadata is None:
-        return []
-    try:
-        vec = np.array([get_embeddings_model().embed_query(query)], dtype="float32")
-        distances, indices = index.search(vec, min(top_k, index.ntotal))
-
-        if not DB_PATH.exists():
-            return []
-
-        conn      = open_sqlite()
-        cursor    = conn.cursor()
-        cols      = _get_cols()
-
+        vec = np.array([_embeddings_model.embed_query(query)], dtype="float32")
+        distances, indices = _vector_index.search(vec, min(top_k, _vector_index.ntotal))
         results = []
         for i, idx in enumerate(indices[0]):
-            if idx < 0:
-                continue
-            doc_id = _doc_id_from_meta(metadata, int(idx))
-            row    = cursor.execute(
-                f"SELECT {', '.join(cols)} FROM documents WHERE id = ?", (doc_id,)
-            ).fetchone()
-            if row:
-                doc = _row_to_doc(row)
+            if 0 <= idx < len(_docs_store):
+                doc = dict(_docs_store[idx])          # copy
                 doc["similarity_score"] = float(distances[0][i])
                 results.append(doc)
-
-        conn.close()
-        if not results:
-            print("WARNING: FAISS returned indices but 0 SQLite matches - id format mismatch? Falling back to keyword.")
         return results
     except Exception as e:
         print(f"ERROR semantic search: {e}")
         return []
 
 
+def search_keyword(query: str, limit: int = 50) -> List[dict]:
+    """Keyword search across title, author, content_preview."""
+    if not _docs_store:
+        return []
+    q = query.lower()
+    results = []
+    for doc in _docs_store:
+        score = 0
+        if q in doc["title"].lower():           score += 3
+        if q in doc["author"].lower():          score += 2
+        if q in doc["content_preview"].lower(): score += 1
+        if score > 0:
+            d = dict(doc)
+            d["similarity_score"] = score / 6.0   # normalise 0-1
+            results.append(d)
+    results.sort(key=lambda x: x["similarity_score"], reverse=True)
+    return results[:limit]
+
+
 def get_relevant_context(query: str, top_k: int = 5) -> tuple:
-    docs = search_documents_semantic(query, top_k)
+    """Get RAG context — semantic first, keyword fallback."""
+    docs = search_semantic(query, top_k)
     if not docs:
-        docs = search_sqlite(query, top_k)
+        docs = search_keyword(query, top_k)
     if not docs:
         return "", []
 
@@ -331,22 +246,23 @@ def get_relevant_context(query: str, top_k: int = 5) -> tuple:
             context += f" ({doc['year']})"
         if doc.get("author") and doc["author"] != "Unknown":
             context += f" by {doc['author']}"
-        context += "\n"
-        if doc.get("type"):
-            context += f"Type: {doc['type']}\n"
-        if doc.get("content_preview"):
-            context += f"Content: {doc['content_preview'][:600]}\n"
+        context += f"\nType: {doc['type']}\n"
+        # Use full content for better RAG context
+        full = doc.get("content_full", doc.get("content_preview", ""))
+        if full:
+            context += f"Content: {full[:800]}\n"
         if doc.get("tags"):
             context += f"Tags: {', '.join(doc['tags'])}\n"
         context += "\n"
+
     return context, docs
 
 
-# Routes
+# ── Routes ────────────────────────────────────────────────────────────
 
 @app.get("/")
 def root():
-    return {"status": "ok", "service": "1421 Foundation API"}
+    return {"status": "ok", "service": "1421 Foundation API", "docs_loaded": len(_docs_store)}
 
 
 @app.get("/api/locations")
@@ -354,92 +270,53 @@ def get_locations(max_year: int = 1421):
     return [loc for loc in VOYAGE_LOCATIONS if loc["year"] <= max_year]
 
 
-# Documents
+# ── Documents ─────────────────────────────────────────────────────────
 
 @app.get("/api/documents")
 async def get_documents(limit: int = Query(default=50, le=500), offset: int = 0):
-    docs, total = get_documents_from_sqlite(limit, offset)
-
-    if not docs:
-        meta_path = FAISS_DIR / "faiss_metadata.pkl"
-        if meta_path.exists():
-            with open(meta_path, "rb") as f:
-                data = pickle.load(f)
-            all_docs = data.get("documents", [])
-            metas    = data.get("metadatas", [])
-            doc_ids  = data.get("document_ids", [])
-            total    = len(all_docs)
-            for i in range(offset, min(offset + limit, total)):
-                meta   = metas[i]   if i < len(metas)   else {}
-                source = meta.get("source", "") if isinstance(meta, dict) else ""
-                text   = all_docs[i]            if i < len(all_docs)  else ""
-                docs.append({
-                    "id":               doc_ids[i] if i < len(doc_ids) else str(i),
-                    "title":            Path(source).stem if source else f"Document {i+1}",
-                    "author":           meta.get("author", "Unknown") if isinstance(meta, dict) else "Unknown",
-                    "year":             meta.get("year",   0)          if isinstance(meta, dict) else 0,
-                    "type":             meta.get("type",   "document") if isinstance(meta, dict) else "document",
-                    "description":      (text[:200] + "...") if len(text) > 200 else text,
-                    "tags":             meta.get("tags", []) if isinstance(meta, dict) else [],
-                    "content_preview":  (text[:500] + "...") if len(text) > 500 else text,
-                    "source_file":      source,
-                    "page_number":      meta.get("page", None) if isinstance(meta, dict) else None,
-                    "similarity_score": None,
-                })
-
-    return {"documents": docs, "total": total, "limit": limit, "offset": offset}
+    """Return paginated documents from in-memory store."""
+    total  = len(_docs_store)
+    paged  = _docs_store[offset: offset + limit]
+    # Strip content_full from response (too large)
+    safe   = [{k: v for k, v in d.items() if k != "content_full"} for d in paged]
+    return {"documents": safe, "total": total, "limit": limit, "offset": offset}
 
 
 @app.get("/api/documents/search")
 async def search_documents_endpoint(q: str, limit: int = 50):
-    semantic = search_documents_semantic(q, min(limit, 10))
-    keyword  = search_sqlite(q, limit)
-    seen = {r["id"] for r in semantic}
-    for r in keyword:
-        if r["id"] not in seen:
-            semantic.append(r)
-            seen.add(r["id"])
-    final = semantic[:limit]
+    """Search documents — semantic + keyword merged."""
+    semantic = search_semantic(q, min(limit, 10))
+    keyword  = search_keyword(q, limit)
+    seen = {d["id"] for d in semantic}
+    for d in keyword:
+        if d["id"] not in seen:
+            semantic.append(d)
+            seen.add(d["id"])
+    final = [{k: v for k, v in d.items() if k != "content_full"}
+             for d in semantic[:limit]]
     return {"results": final, "total": len(final), "query": q}
 
 
 @app.get("/api/documents/types")
 async def get_document_types():
-    if not DB_PATH.exists():
-        return {"types": []}
-    conn  = open_sqlite()
-    types = [r[0] for r in conn.execute(
-        "SELECT DISTINCT type FROM documents WHERE type IS NOT NULL AND type != '' AND type != 'unknown'"
-    ).fetchall()]
-    conn.close()
-    return {"types": types}
+    types = list({d["type"] for d in _docs_store if d["type"] and d["type"] != "unknown"})
+    return {"types": sorted(types)}
 
 
 @app.get("/api/documents/years")
 async def get_document_years():
-    if not DB_PATH.exists():
-        return {"years": []}
-    conn  = open_sqlite()
-    years = [r[0] for r in conn.execute(
-        "SELECT DISTINCT year FROM documents WHERE year > 0 ORDER BY year DESC"
-    ).fetchall()]
-    conn.close()
+    years = sorted({d["year"] for d in _docs_store if d["year"] and d["year"] > 0}, reverse=True)
     return {"years": years}
 
 
 @app.get("/api/documents/authors")
 async def get_document_authors():
-    if not DB_PATH.exists():
-        return {"authors": []}
-    conn    = open_sqlite()
-    authors = [r[0] for r in conn.execute(
-        "SELECT DISTINCT author FROM documents WHERE author IS NOT NULL AND author != '' AND author != 'Unknown'"
-    ).fetchall()]
-    conn.close()
+    authors = sorted({d["author"] for d in _docs_store
+                      if d["author"] and d["author"] != "Unknown"})
     return {"authors": authors}
 
 
-# Chat helpers
+# ── Chat helpers ──────────────────────────────────────────────────────
 
 def _build_system(context: str) -> str:
     s  = SYSTEM_PROMPT + "\n\n"
@@ -464,7 +341,7 @@ def _to_lc(system: str, messages: list) -> list:
     return lc
 
 
-# Chat endpoints
+# ── Chat endpoints ────────────────────────────────────────────────────
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
@@ -509,13 +386,13 @@ async def chat_stream(req: ChatRequest):
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
-# RAG debug - open in browser to verify documents are being used
+# ── RAG debug ─────────────────────────────────────────────────────────
 
 @app.get("/api/debug/rag")
 async def debug_rag(q: str = "Zheng He voyages"):
     """
-    Visit: http://localhost:8000/api/debug/rag?q=Zheng+He
-    Shows exactly what context gets injected into the chat prompt.
+    http://localhost:8000/api/debug/rag?q=Zheng+He
+    Shows exactly what gets injected into the chat prompt.
     """
     context, docs = get_relevant_context(q, top_k=5)
     return {
@@ -524,84 +401,74 @@ async def debug_rag(q: str = "Zheng He voyages"):
         "doc_titles":      [d["title"] for d in docs],
         "faiss_loaded":    _vector_index is not None,
         "faiss_vectors":   _vector_index.ntotal if _vector_index else 0,
-        "sqlite_exists":   DB_PATH.exists(),
-        "context_preview": context[:1000] if context else "(empty - no docs matched)",
+        "store_size":      len(_docs_store),
+        "context_preview": context[:1200] if context else "(empty - no docs matched)",
     }
 
 
-# Feedback
+# ── Feedback ──────────────────────────────────────────────────────────
 
 @app.post("/api/feedback")
 def submit_feedback(req: FeedbackRequest):
+    """Store feedback - writes to a simple JSON file since SQLite is corrupted."""
+    import json
+    feedback_path = DATA_DIR / "feedback.json"
     try:
-        if DB_PATH.exists():
-            conn = sqlite3.connect(str(DB_PATH))
-            conn.execute("""CREATE TABLE IF NOT EXISTS feedback (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT, email TEXT NOT NULL,
-                feedback_type TEXT, message TEXT NOT NULL,
-                created_at TEXT DEFAULT (datetime('now')))""")
-            conn.execute(
-                "INSERT INTO feedback (name,email,feedback_type,message) VALUES (?,?,?,?)",
-                (req.name or "Anonymous", req.email, req.feedback_type, req.message),
-            )
-            conn.commit()
-            conn.close()
+        existing = []
+        if feedback_path.exists():
+            with open(feedback_path) as f:
+                existing = json.load(f)
+        existing.append({
+            "name":          req.name or "Anonymous",
+            "email":         req.email,
+            "feedback_type": req.feedback_type,
+            "message":       req.message,
+            "created_at":    datetime.now().isoformat(),
+        })
+        with open(feedback_path, "w") as f:
+            json.dump(existing, f, indent=2)
     except Exception as e:
         print(f"Feedback store error: {e}")
     return {"status": "ok", "message": "Feedback received"}
 
 
-# Stats
+# ── Stats ─────────────────────────────────────────────────────────────
 
 @app.get("/api/stats")
 def get_stats():
-    doc_count = feedback_count = 0
+    import json
+    feedback_count = 0
+    feedback_path  = DATA_DIR / "feedback.json"
     try:
-        if DB_PATH.exists():
-            conn = sqlite3.connect(str(DB_PATH))
-            doc_count = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
-            try:
-                feedback_count = conn.execute("SELECT COUNT(*) FROM feedback").fetchone()[0]
-            except Exception:
-                pass
-            conn.close()
-    except Exception as e:
-        print(f"Stats error: {e}")
+        if feedback_path.exists():
+            with open(feedback_path) as f:
+                feedback_count = len(json.load(f))
+    except Exception:
+        pass
     return {
         "feedback_count":  feedback_count,
         "locations_count": len(VOYAGE_LOCATIONS),
-        "documents_count": doc_count or 347,
+        "documents_count": len(_docs_store) or 347,
     }
 
 
-# Test DB
+# ── Test ──────────────────────────────────────────────────────────────
 
 @app.get("/api/test-db")
 async def test_db():
-    sqlite_docs, sqlite_total = get_documents_from_sqlite(5, 0)
-    index, meta = load_vector_database()
-    faiss_path  = FAISS_DIR / "faiss_index.bin"
-    meta_keys   = list(meta.keys())[:5] if isinstance(meta, dict) else str(type(meta))
+    sample = [{"id": d["id"], "title": d["title"]} for d in _docs_store[:5]]
     return {
-        "sqlite": {
-            "exists":         DB_PATH.exists(),
-            "document_count": sqlite_total,
-            "sample_titles":  [d["title"] for d in sqlite_docs],
-        },
-        "vector_db": {
-            "faiss_exists": faiss_path.exists(),
-            "vectors":      index.ntotal if index else 0,
-            "meta_keys":    meta_keys,
-        },
+        "store_size":    len(_docs_store),
+        "faiss_loaded":  _vector_index is not None,
+        "faiss_vectors": _vector_index.ntotal if _vector_index else 0,
+        "sample":        sample,
     }
 
 
-# Startup
+# ── Startup ───────────────────────────────────────────────────────────
 
 @app.on_event("startup")
 def init_app():
     print(f"BASE_DIR : {BASE_DIR}")
-    print(f"DB_PATH  : {DB_PATH}  (exists={DB_PATH.exists()})")
-    print(f"FAISS_DIR: {FAISS_DIR}  (exists={FAISS_DIR.exists()})")
-    load_vector_database()
+    print(f"DATA_DIR : {DATA_DIR}  (exists={DATA_DIR.exists()})")
+    load_knowledge_base()
