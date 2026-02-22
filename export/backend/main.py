@@ -93,7 +93,7 @@ def search_documents(query: str, top_k: int = 5):
         # Get query embedding
         embeddings = OpenAIEmbeddings(
             model="text-embedding-3-small",
-            api_key=os.getenv("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")
+            api_key=os.getenv("OPENAI_API_KEY")
         )
         query_embedding = embeddings.embed_query(query)
         query_vector = np.array([query_embedding]).astype('float32')
@@ -244,7 +244,7 @@ presenting contested theories. Structure responses with clear paragraphs."""
 def get_llm():
     return ChatOpenAI(
         model="gpt-4o-mini",
-        api_key=os.getenv("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"),
+        api_key=os.getenv("OPENAI_API_KEY"),
         streaming=True,
         temperature=0.7
     )
@@ -267,7 +267,7 @@ def get_document_count():
 def get_embeddings():
     return OpenAIEmbeddings(
         model="text-embedding-3-small",
-        api_key=os.getenv("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"),
+        api_key=os.getenv("OPENAI_API_KEY"),
     )
 
 
@@ -401,7 +401,81 @@ from pathlib import Path
 import pickle
 from pathlib import Path
 
+# Remove ALL duplicate get_documents_from_vector_db functions and keep only this one:
+
 def get_documents_from_vector_db(limit: int = 100, offset: int = 0):
+    """Get documents from vector database metadata."""
+    try:
+        metadata_path = Path("data/vector_databases/main_index/faiss_metadata.pkl")
+        if not metadata_path.exists():
+            print("⚠️ Vector database metadata not found")
+            return []
+        
+        # Load metadata
+        with open(metadata_path, 'rb') as f:
+            data = pickle.load(f)
+        
+        # Extract the components
+        documents = data.get('documents', [])
+        metadatas = data.get('metadatas', [])
+        document_ids = data.get('document_ids', [])
+        
+        print(f"📊 Found {len(documents)} documents in vector DB")
+        
+        # Convert to document list for frontend
+        result = []
+        for i in range(offset, min(offset + limit, len(documents))):
+            doc_content = documents[i] if i < len(documents) else ""
+            doc_metadata = metadatas[i] if i < len(metadatas) else {}
+            doc_id = document_ids[i] if i < len(document_ids) else str(i)
+            
+            # Extract metadata fields
+            source = doc_metadata.get('source', 'Unknown')
+            title = Path(source).stem if source != 'Unknown' else f"Document {i+1}"
+            year = doc_metadata.get('year', 0)
+            author = doc_metadata.get('author', 'Unknown')
+            doc_type = doc_metadata.get('type', 'document')
+            
+            # Create document object
+            document = {
+                'id': doc_id,
+                'title': title,
+                'author': author,
+                'year': year,
+                'type': doc_type,
+                'description': doc_content[:200] + "..." if len(doc_content) > 200 else doc_content,
+                'tags': doc_metadata.get('tags', []),
+                'content_preview': doc_content[:500] + "..." if len(doc_content) > 500 else doc_content,
+                'source_file': source,
+                'page_number': doc_metadata.get('page', 0),
+                'similarity_score': None
+            }
+            result.append(document)
+        
+        return result
+        
+    except Exception as e:
+        print(f"❌ Error reading vector database: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+
+# Keep ONLY ONE version of the /api/documents endpoint:
+
+@app.get("/api/documents")
+async def get_documents(limit: int = 50, offset: int = 0):
+    """Get documents from vector database."""
+    documents = get_documents_from_vector_db(limit, offset)
+    
+    # Get total count
+    total = 347  # Your known count
+    
+    return {
+        "documents": documents,
+        "total": total,
+        "limit": limit,
+        "offset": offset
+    }
     """Get documents from vector database metadata."""
     try:
         # Correct path to your vector database

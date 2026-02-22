@@ -200,7 +200,7 @@ def create_embeddings_and_index(chunks: List[Dict[str, Any]]):
     # Initialize embeddings
     embeddings = OpenAIEmbeddings(
         model="text-embedding-3-small",
-        api_key=os.getenv("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"),
+        api_key=os.getenv("OPENAI_API_KEY"),
     )
     
     # Extract texts
