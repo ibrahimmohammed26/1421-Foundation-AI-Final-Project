@@ -22,192 +22,10 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 import faiss
 import numpy as np
-# Add this near the top with other imports
-import pickle
-import sqlite3
-from pathlib import Path
-import faiss
-import numpy as np
-from langchain_openai import OpenAIEmbeddings
 
-# Add these global variables after your other global variables
-_vector_index = None
-_vector_metadata = None
-_knowledge_base_conn = None
-
-def load_vector_database():
-    """Load FAISS index and metadata from your existing files."""
-    global _vector_index, _vector_metadata
-    
-    if _vector_index is not None and _vector_metadata is not None:
-        return _vector_index, _vector_metadata
-    
-    # Path to your existing vector database files
-    index_path = Path("data/vector_databases/main_index/faiss_index.bin")
-    metadata_path = Path("data/vector_databases/main_index/faiss_metadata.pkl")
-    
-    if not index_path.exists() or not metadata_path.exists():
-        print("⚠️ Vector database files not found")
-        return None, None
-    
-    try:
-        _vector_index = faiss.read_index(str(index_path))
-        with open(metadata_path, 'rb') as f:
-            _vector_metadata = pickle.load(f)
-        print(f"✅ Loaded FAISS index with {_vector_index.ntotal} vectors")
-        return _vector_index, _vector_metadata
-    except Exception as e:
-        print(f"❌ Error loading vector database: {e}")
-        return None, None
-
-def get_knowledge_base():
-    """Connect to your existing SQLite knowledge base."""
-    global _knowledge_base_conn
-    
-    if _knowledge_base_conn is not None:
-        return _knowledge_base_conn
-    
-    db_path = Path("data/knowledge_base.db")
-    if not db_path.exists():
-        print("⚠️ knowledge_base.db not found")
-        return None
-    
-    try:
-        _knowledge_base_conn = sqlite3.connect(str(db_path))
-        _knowledge_base_conn.row_factory = sqlite3.Row
-        print("✅ Connected to knowledge_base.db")
-        return _knowledge_base_conn
-    except Exception as e:
-        print(f"❌ Error connecting to knowledge base: {e}")
-        return None
-
-def search_documents(query: str, top_k: int = 5):
-    """Search for relevant documents using vector similarity."""
-    index, metadata = load_vector_database()
-    conn = get_knowledge_base()
-    
-    if not index or not metadata or not conn:
-        return []
-    
-    try:
-        # Get query embedding
-        embeddings = OpenAIEmbeddings(
-            model="text-embedding-3-small",
-            api_key=os.getenv("OPENAI_API_KEY")
-        )
-        query_embedding = embeddings.embed_query(query)
-        query_vector = np.array([query_embedding]).astype('float32')
-        
-        # Search in FAISS
-        distances, indices = index.search(query_vector, min(top_k, index.ntotal))
-        
-        # Get document details from SQLite
-        results = []
-        cursor = conn.cursor()
-        
-        for i, idx in enumerate(indices[0]):
-            if idx >= 0 and str(idx) in metadata:
-                doc_id = metadata[str(idx)].get('id', str(idx))
-                cursor.execute("""
-                    SELECT id, title, author, year, type, description, tags, 
-                           content_preview, source_file, page_number
-                    FROM documents WHERE id = ?
-                """, (doc_id,))
-                row = cursor.fetchone()
-                if row:
-                    results.append({
-                        'id': row['id'],
-                        'title': row['title'],
-                        'author': row['author'],
-                        'year': row['year'],
-                        'type': row['type'],
-                        'description': row['description'],
-                        'tags': row['tags'].split(',') if row['tags'] else [],
-                        'content_preview': row['content_preview'],
-                        'source_file': row['source_file'],
-                        'page_number': row['page_number'],
-                        'similarity_score': float(distances[0][i])
-                    })
-        
-        conn.close()
-        return results
-        
-    except Exception as e:
-        print(f"❌ Error searching documents: {e}")
-        return []
-
-def get_all_documents(limit: int = 100, offset: int = 0):
-    """Get all documents from your existing database."""
-    try:
-        # Try to read from knowledge_base.db first
-        conn = sqlite3.connect("data/knowledge_base.db")
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        # Check if table exists
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='documents'")
-        if cursor.fetchone():
-            cursor.execute("""
-                SELECT id, title, author, year, type, description, tags, 
-                       content_preview, source_file, page_number
-                FROM documents
-                ORDER BY year DESC
-                LIMIT ? OFFSET ?
-            """, (limit, offset))
-            
-            results = []
-            for row in cursor.fetchall():
-                results.append({
-                    'id': row['id'],
-                    'title': row['title'],
-                    'author': row['author'] or "Unknown",
-                    'year': row['year'] or 0,
-                    'type': row['type'] or "document",
-                    'description': row['description'] or "",
-                    'tags': row['tags'].split(',') if row['tags'] else [],
-                    'content_preview': row['content_preview'] or "",
-                    'source_file': row['source_file'] or "",
-                    'page_number': row['page_number']
-                })
-            conn.close()
-            return results
-    except Exception as e:
-        print(f"Error reading from knowledge_base.db: {e}")
-    
-    # If no database, return empty list
-    return []
-
-    """Get all documents for the Documents page."""
-    conn = get_knowledge_base()
-    if not conn:
-        return []
-    
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT id, title, author, year, type, description, tags, 
-               content_preview, source_file, page_number
-        FROM documents
-        ORDER BY year DESC
-        LIMIT ? OFFSET ?
-    """, (limit, offset))
-    
-    results = []
-    for row in cursor.fetchall():
-        results.append({
-            'id': row['id'],
-            'title': row['title'],
-            'author': row['author'],
-            'year': row['year'],
-            'type': row['type'],
-            'description': row['description'],
-            'tags': row['tags'].split(',') if row['tags'] else [],
-            'content_preview': row['content_preview'],
-            'source_file': row['source_file'],
-            'page_number': row['page_number']
-        })
-    
-    conn.close()
-    return results
+# Load environment variables
+from dotenv import load_dotenv
+load_dotenv()
 
 app = FastAPI(title="1421 Foundation API", version="1.0.0")
 
@@ -249,20 +67,6 @@ def get_llm():
         temperature=0.7
     )
 
-import json
-from pathlib import Path
-
-def get_document_count():
-    """Get document count from database_stats.json."""
-    stats_path = Path("data/database_stats.json")
-    if stats_path.exists():
-        try:
-            with open(stats_path, 'r') as f:
-                stats = json.load(f)
-                return stats.get("document_count", 0)
-        except:
-            pass
-    return 347  # Your actual count from the JSON
 
 def get_embeddings():
     return OpenAIEmbeddings(
@@ -275,13 +79,13 @@ def get_embeddings():
 class ChatRequest(BaseModel):
     messages: list[dict]  # [{role: "user"|"assistant", content: str}]
     session_id: Optional[str] = None
-    use_documents: bool = True  # New flag to enable/disable document search
+    use_documents: bool = True
 
 
 class ChatResponse(BaseModel):
     content: str
     session_id: str
-    sources: Optional[List[dict]] = None  # Add sources for citations
+    sources: Optional[List[dict]] = None
 
 
 class FeedbackRequest(BaseModel):
@@ -357,13 +161,14 @@ VOYAGE_LOCATIONS = [
 ]
 
 
-# ── Hybrid Search Functions ─────────────────────────────────────────
+# ── Vector Database Functions ────────────────────────────────────────
 
-# Global variables to cache the vector index and metadata
+# Global variables
 _vector_index = None
 _vector_metadata = None
 _knowledge_base_conn = None
 _embeddings = None
+
 
 def get_embeddings_model():
     global _embeddings
@@ -371,8 +176,9 @@ def get_embeddings_model():
         _embeddings = get_embeddings()
     return _embeddings
 
+
 def load_vector_database():
-    """Load FAISS index and metadata into memory."""
+    """Load FAISS index and metadata from your existing files."""
     global _vector_index, _vector_metadata
     
     if _vector_index is not None and _vector_metadata is not None:
@@ -382,61 +188,125 @@ def load_vector_database():
     metadata_path = Path("data/vector_databases/main_index/faiss_metadata.pkl")
     
     if not index_path.exists() or not metadata_path.exists():
-        print("⚠️ Vector database not found")
+        print("⚠️ Vector database files not found")
         return None, None
     
     try:
         _vector_index = faiss.read_index(str(index_path))
         with open(metadata_path, 'rb') as f:
             _vector_metadata = pickle.load(f)
-        print(f"✓ Loaded FAISS index with {_vector_index.ntotal} vectors")
+        print(f"✅ Loaded FAISS index with {_vector_index.ntotal} vectors")
         return _vector_index, _vector_metadata
     except Exception as e:
-        print(f"Error loading vector database: {e}")
+        print(f"❌ Error loading vector database: {e}")
         return None, None
-import pickle
-import json
-from pathlib import Path
 
-import pickle
-from pathlib import Path
 
-# Remove ALL duplicate get_documents_from_vector_db functions and keep only this one:
+def get_knowledge_base():
+    """Connect to your existing SQLite knowledge base."""
+    global _knowledge_base_conn
+    
+    if _knowledge_base_conn is not None:
+        return _knowledge_base_conn
+    
+    db_path = Path("data/knowledge_base.db")
+    if not db_path.exists():
+        print("⚠️ knowledge_base.db not found")
+        return None
+    
+    try:
+        _knowledge_base_conn = sqlite3.connect(str(db_path))
+        _knowledge_base_conn.row_factory = sqlite3.Row
+        print("✅ Connected to knowledge_base.db")
+        return _knowledge_base_conn
+    except Exception as e:
+        print(f"❌ Error connecting to knowledge base: {e}")
+        return None
+
+
+def get_documents_from_sqlite(limit: int = 50, offset: int = 0):
+    """Get documents from SQLite database (simpler, no embeddings needed)."""
+    try:
+        db_path = Path("data/knowledge_base.db")
+        if not db_path.exists():
+            print("⚠️ SQLite database not found")
+            return [], 0
+        
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        # Check if table exists
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='documents'")
+        if not cursor.fetchone():
+            print("⚠️ Documents table not found")
+            conn.close()
+            return [], 0
+        
+        # Get total count
+        cursor.execute("SELECT COUNT(*) as count FROM documents")
+        total = cursor.fetchone()['count']
+        
+        # Get documents with pagination
+        cursor.execute("""
+            SELECT id, title, author, year, type, content_preview, source_file
+            FROM documents
+            ORDER BY year DESC
+            LIMIT ? OFFSET ?
+        """, (limit, offset))
+        
+        documents = []
+        for row in cursor.fetchall():
+            documents.append({
+                'id': row['id'],
+                'title': row['title'],
+                'author': row['author'] or 'Unknown',
+                'year': row['year'] or 0,
+                'type': row['type'] or 'document',
+                'description': row['content_preview'][:200] + '...' if row['content_preview'] and len(row['content_preview']) > 200 else (row['content_preview'] or ''),
+                'content_preview': row['content_preview'] or '',
+                'source_file': row['source_file'] or '',
+                'tags': [],
+                'similarity_score': None
+            })
+        
+        conn.close()
+        return documents, total
+        
+    except Exception as e:
+        print(f"❌ Error getting documents from SQLite: {e}")
+        return [], 0
+
 
 def get_documents_from_vector_db(limit: int = 100, offset: int = 0):
-    """Get documents from vector database metadata."""
+    """Get documents from vector database metadata (for advanced search)."""
     try:
         metadata_path = Path("data/vector_databases/main_index/faiss_metadata.pkl")
         if not metadata_path.exists():
             print("⚠️ Vector database metadata not found")
             return []
         
-        # Load metadata
         with open(metadata_path, 'rb') as f:
             data = pickle.load(f)
         
-        # Extract the components
         documents = data.get('documents', [])
         metadatas = data.get('metadatas', [])
         document_ids = data.get('document_ids', [])
         
         print(f"📊 Found {len(documents)} documents in vector DB")
         
-        # Convert to document list for frontend
         result = []
         for i in range(offset, min(offset + limit, len(documents))):
             doc_content = documents[i] if i < len(documents) else ""
             doc_metadata = metadatas[i] if i < len(metadatas) else {}
             doc_id = document_ids[i] if i < len(document_ids) else str(i)
             
-            # Extract metadata fields
             source = doc_metadata.get('source', 'Unknown')
             title = Path(source).stem if source != 'Unknown' else f"Document {i+1}"
             year = doc_metadata.get('year', 0)
             author = doc_metadata.get('author', 'Unknown')
             doc_type = doc_metadata.get('type', 'document')
             
-            # Create document object
             document = {
                 'id': doc_id,
                 'title': title,
@@ -456,191 +326,8 @@ def get_documents_from_vector_db(limit: int = 100, offset: int = 0):
         
     except Exception as e:
         print(f"❌ Error reading vector database: {e}")
-        import traceback
-        traceback.print_exc()
         return []
 
-# Keep ONLY ONE version of the /api/documents endpoint:
-
-@app.get("/api/documents")
-async def get_documents(limit: int = 50, offset: int = 0):
-    """Get documents from vector database."""
-    documents = get_documents_from_vector_db(limit, offset)
-    
-    # Get total count
-    total = 347  # Your known count
-    
-    return {
-        "documents": documents,
-        "total": total,
-        "limit": limit,
-        "offset": offset
-    }
-    """Get documents from vector database metadata."""
-    try:
-        # Correct path to your vector database
-        metadata_path = Path("data/vector_databases/main_index/faiss_metadata.pkl")
-        if not metadata_path.exists():
-            print("⚠️ Vector database metadata not found")
-            return []
-        
-        # Load metadata
-        with open(metadata_path, 'rb') as f:
-            data = pickle.load(f)
-        
-        # Extract the components
-        documents = data.get('documents', [])
-        metadatas = data.get('metadatas', [])
-        document_ids = data.get('document_ids', [])
-        
-        print(f"📊 Found {len(documents)} documents in vector DB")
-        
-        # Convert to document list for frontend
-        result = []
-        for i in range(offset, min(offset + limit, len(documents))):
-            doc_content = documents[i] if i < len(documents) else ""
-            doc_metadata = metadatas[i] if i < len(metadatas) else {}
-            doc_id = document_ids[i] if i < len(document_ids) else str(i)
-            
-            # Extract metadata fields
-            source = doc_metadata.get('source', 'Unknown')
-            title = Path(source).stem if source != 'Unknown' else f"Document {i+1}"
-            year = doc_metadata.get('year', 0)
-            author = doc_metadata.get('author', 'Unknown')
-            
-            # Create document object
-            document = {
-                'id': doc_id,
-                'title': title,
-                'author': author,
-                'year': year,
-                'type': doc_metadata.get('type', 'document'),
-                'description': doc_content[:200] + "..." if len(doc_content) > 200 else doc_content,
-                'tags': doc_metadata.get('tags', []),
-                'content_preview': doc_content[:500] + "..." if len(doc_content) > 500 else doc_content,
-                'source_file': source,
-                'page_number': doc_metadata.get('page', 0),
-                'similarity_score': None
-            }
-            result.append(document)
-        
-        return result
-        
-    except Exception as e:
-        print(f"❌ Error reading vector database: {e}")
-        import traceback
-        traceback.print_exc()
-        return []
-
-@app.get("/api/documents")
-async def get_documents(limit: int = 50, offset: int = 0):
-    """Get documents from vector database."""
-    documents = get_documents_from_vector_db(limit, offset)
-    
-    # Get total count from the metadata
-    total = 347  # We know it's 347 from your data
-    
-    return {
-        "documents": documents,
-        "total": total,
-        "limit": limit,
-        "offset": offset
-    }
-   
-
-@app.get("/api/documents")
-async def get_documents(limit: int = 50, offset: int = 0):
-    """Get documents from vector database."""
-    documents = get_documents_from_vector_db(limit, offset)
-    
-    # Get total count from stats file
-    total = 347
-    stats_path = Path("data/database_stats.json")
-    if stats_path.exists():
-        with open(stats_path, 'r') as f:
-            stats = json.load(f)
-            total = stats.get("document_count", len(documents))
-    
-    return {
-        "documents": documents,
-        "total": total,
-        "limit": limit,
-        "offset": offset
-    }
-    """Get document list from vector database metadata."""
-    try:
-        # Load the FAISS metadata
-        metadata_path = Path("data/vector_databases/main_index/faiss_metadata.pkl")
-        if not metadata_path.exists():
-            print("⚠️ FAISS metadata not found")
-            return []
-        
-        with open(metadata_path, 'rb') as f:
-            metadata = pickle.load(f)
-        
-        # Convert metadata to document list
-        documents = []
-        for key, value in metadata.items():
-            # Each entry in metadata represents a document chunk
-            # You might want to group by source_file to show unique documents
-            doc = {
-                'id': value.get('id', key),
-                'title': value.get('title', Path(value.get('source_file', 'Unknown')).stem),
-                'author': value.get('author', 'Unknown'),
-                'year': value.get('year', 0),
-                'type': value.get('type', 'document'),
-                'description': value.get('content_preview', '')[:200],
-                'tags': [],
-                'content_preview': value.get('content_preview', ''),
-                'source_file': value.get('source_file', ''),
-                'page_number': value.get('chunk_index', 0)
-            }
-            documents.append(doc)
-        
-        # Remove duplicates by source_file (if you want unique documents)
-        unique_docs = {}
-        for doc in documents:
-            source = doc['source_file']
-            if source not in unique_docs:
-                unique_docs[source] = doc
-        
-        return list(unique_docs.values())[offset:offset+limit]
-    
-    except Exception as e:
-        print(f"Error reading vector database: {e}")
-        return []
-
-@app.get("/api/documents")
-async def get_documents(limit: int = 50, offset: int = 0):
-    """Get documents from vector database."""
-    documents = get_documents_from_vector_db(limit, offset)
-    return {
-        "documents": documents,
-        "total": len(documents),
-        "limit": limit,
-        "offset": offset
-    }
-
-def get_knowledge_base():
-    """Get connection to SQLite knowledge base."""
-    global _knowledge_base_conn
-    
-    if _knowledge_base_conn is not None:
-        return _knowledge_base_conn
-    
-    db_path = Path("data/knowledge_base.db")
-    if not db_path.exists():
-        print("⚠️ Knowledge base not found")
-        return None
-    
-    try:
-        _knowledge_base_conn = sqlite3.connect(str(db_path))
-        _knowledge_base_conn.row_factory = sqlite3.Row
-        print("✓ Connected to knowledge base")
-        return _knowledge_base_conn
-    except Exception as e:
-        print(f"Error connecting to knowledge base: {e}")
-        return None
 
 def search_documents_semantic(query: str, top_k: int = 5) -> List[Document]:
     """Search documents using semantic similarity with FAISS."""
@@ -651,15 +338,12 @@ def search_documents_semantic(query: str, top_k: int = 5) -> List[Document]:
         return []
     
     try:
-        # Get query embedding
         embeddings = get_embeddings_model()
         query_embedding = embeddings.embed_query(query)
         query_vector = np.array([query_embedding]).astype('float32')
         
-        # Search in FAISS
         distances, indices = index.search(query_vector, min(top_k, index.ntotal))
         
-        # Get metadata for results
         results = []
         cursor = conn.cursor()
         
@@ -668,7 +352,7 @@ def search_documents_semantic(query: str, top_k: int = 5) -> List[Document]:
                 doc_id = metadata[str(idx)].get('id', str(idx))
                 cursor.execute("""
                     SELECT id, title, author, year, type, description, tags, 
-                           content_preview, source_file, page_number, file_size, language
+                           content_preview, source_file, page_number
                     FROM documents WHERE id = ?
                 """, (doc_id,))
                 row = cursor.fetchone()
@@ -684,8 +368,6 @@ def search_documents_semantic(query: str, top_k: int = 5) -> List[Document]:
                         content_preview=row['content_preview'] or "",
                         source_file=row['source_file'] or "",
                         page_number=row['page_number'],
-                        file_size=row['file_size'],
-                        language=row['language'] or "en",
                         similarity_score=float(distances[0][i])
                     )
                     results.append(doc)
@@ -696,6 +378,7 @@ def search_documents_semantic(query: str, top_k: int = 5) -> List[Document]:
     except Exception as e:
         print(f"Error in semantic search: {e}")
         return []
+
 
 def get_relevant_context(query: str, top_k: int = 3) -> tuple[str, List[Document]]:
     """Get relevant document context for RAG."""
@@ -740,60 +423,14 @@ async def chat(req: ChatRequest):
     """Chat with AI using documents for context."""
     llm = get_llm()
     
-    # Get the last user message
-    last_user_msg = next((msg["content"] for msg in reversed(req.messages) if msg["role"] == "user"), "")
-    
-    # Search for relevant documents
-    relevant_docs = []
-    if last_user_msg:
-        relevant_docs = search_documents(last_user_msg, top_k=3)
-    
-    # Build context from documents
-    context = ""
-    if relevant_docs:
-        context = "Here are some relevant documents from our knowledge base:\n\n"
-        for i, doc in enumerate(relevant_docs, 1):
-            context += f"[Document {i}] {doc['title']}"
-            if doc['author'] != "Unknown":
-                context += f" by {doc['author']}"
-            if doc['year']:
-                context += f" ({doc['year']})"
-            context += f"\n{doc['content_preview']}\n\n"
-    
-    # Enhance system prompt with document context
-    enhanced_prompt = SYSTEM_PROMPT + "\n\n"
-    if context:
-        enhanced_prompt += context + "\n"
-    enhanced_prompt += "Use the provided documents when relevant to give accurate, well-cited answers."
-
-    langchain_messages = [SystemMessage(content=enhanced_prompt)]
-    for msg in req.messages:
-        if msg["role"] == "user":
-            langchain_messages.append(HumanMessage(content=msg["content"]))
-        elif msg["role"] == "assistant":
-            langchain_messages.append(AIMessage(content=msg["content"]))
-
-    try:
-        response = llm.invoke(langchain_messages)
-        return ChatResponse(
-            content=response.content,
-            session_id=req.session_id or datetime.now().isoformat(),
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    """Chat with the 1421 historian AI using hybrid search (documents + web)."""
-    llm = get_llm()
-    
-    # Get the last user message
     last_user_msg = next((msg["content"] for msg in reversed(req.messages) if msg["role"] == "user"), "")
     
     # Get document context if enabled
     context = ""
     sources = []
     if req.use_documents and last_user_msg:
-        context, sources = get_relevant_context(last_user_msg, top_k=5)
+        context, sources = get_relevant_context(last_user_msg, top_k=3)
     
-    # Build enhanced system prompt with document context
     enhanced_prompt = SYSTEM_PROMPT + "\n\n"
     if context:
         enhanced_prompt += context
@@ -816,7 +453,6 @@ async def chat(req: ChatRequest):
     try:
         response = llm.invoke(langchain_messages)
         
-        # Convert sources to dict for JSON response
         sources_dict = []
         for doc in sources:
             sources_dict.append({
@@ -841,15 +477,12 @@ async def chat_stream(req: ChatRequest):
     """Stream chat responses using LangChain with hybrid search."""
     llm = get_llm()
     
-    # Get the last user message
     last_user_msg = next((msg["content"] for msg in reversed(req.messages) if msg["role"] == "user"), "")
     
-    # Get document context if enabled
     context = ""
     if req.use_documents and last_user_msg:
         context, _ = get_relevant_context(last_user_msg, top_k=3)
     
-    # Build enhanced system prompt
     enhanced_prompt = SYSTEM_PROMPT + "\n\n"
     if context:
         enhanced_prompt += context
@@ -874,27 +507,6 @@ async def chat_stream(req: ChatRequest):
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
-@app.post("/api/documents/reindex")
-async def reindex_documents():
-    """Trigger document reindexing."""
-    try:
-        import subprocess
-        import sys
-        
-        # Run the indexing script
-        script_path = Path(__file__).parent / "scripts" / "index_documents_simple.py"
-        result = subprocess.run(
-            [sys.executable, str(script_path), "--reset"],
-            capture_output=True,
-            text=True
-        )
-        
-        if result.returncode == 0:
-            return {"status": "success", "message": "Reindexing completed"}
-        else:
-            return {"status": "error", "message": result.stderr}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/feedback")
 def submit_feedback(req: FeedbackRequest):
@@ -911,7 +523,6 @@ def submit_feedback(req: FeedbackRequest):
         conn.close()
     except Exception as e:
         print(f"Feedback DB error: {e}")
-        pass  # DB optional — still return success
     return {"status": "ok", "message": "Feedback received"}
 
 
@@ -919,7 +530,7 @@ def submit_feedback(req: FeedbackRequest):
 def get_stats():
     """Return basic system stats."""
     try:
-        # Get feedback count from PostgreSQL
+        # Get feedback count
         feedback_count = 0
         try:
             conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
@@ -931,8 +542,23 @@ def get_stats():
         except Exception as e:
             print(f"PostgreSQL error: {e}")
         
-        # Document count is 347 from your vector database
-        doc_count = 347
+        # Get document count from SQLite
+        doc_count = 0
+        try:
+            db_path = Path("data/knowledge_base.db")
+            if db_path.exists():
+                conn = sqlite3.connect(str(db_path))
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) as count FROM documents")
+                result = cursor.fetchone()
+                doc_count = result[0] if result else 0
+                conn.close()
+        except Exception as e:
+            print(f"SQLite error: {e}")
+        
+        # Fallback to hardcoded value if no database
+        if doc_count == 0:
+            doc_count = 347
         
         return {
             "feedback_count": feedback_count, 
@@ -946,405 +572,37 @@ def get_stats():
             "locations_count": len(VOYAGE_LOCATIONS),
             "documents_count": 347
         }
-    """Return basic system stats including document count from database_stats.json."""
-    try:
-        # Get feedback count
-        feedback_count = 0
-        try:
-            conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
-            cur = conn.cursor()
-            cur.execute("SELECT count(*) as count FROM feedback")
-            result = cur.fetchone()
-            feedback_count = result["count"] if result else 0
-            conn.close()
-        except:
-            pass
-        
-        # Get document count from database_stats.json
-        doc_count = 0
-        stats_path = Path("data/database_stats.json")
-        if stats_path.exists():
-            with open(stats_path, 'r') as f:
-                stats = json.load(f)
-                doc_count = stats.get("document_count", 0)
-        
-        return {
-            "feedback_count": feedback_count, 
-            "locations_count": len(VOYAGE_LOCATIONS),
-            "documents_count": doc_count
-        }
-    except Exception as e:
-        print(f"Stats error: {e}")
-        return {
-            "feedback_count": 0, 
-            "locations_count": len(VOYAGE_LOCATIONS),
-            "documents_count": 347  # Hardcode as fallback
-        }
-    """Return basic system stats including document count from database_stats.json."""
-    try:
-        # Get feedback count from PostgreSQL
-        feedback_count = 0
-        try:
-            conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
-            cur = conn.cursor()
-            cur.execute("SELECT count(*) as count FROM feedback")
-            result = cur.fetchone()
-            feedback_count = result["count"] if result else 0
-            conn.close()
-        except Exception as e:
-            print(f"PostgreSQL error: {e}")
-        
-        # Get document count from database_stats.json
-        doc_count = 0
-        stats_path = Path("data/database_stats.json")
-        if stats_path.exists():
-            try:
-                with open(stats_path, 'r') as f:
-                    stats = json.load(f)
-                    doc_count = stats.get("document_count", 0)
-                print(f"✅ Read document count from stats file: {doc_count}")
-            except Exception as e:
-                print(f"Error reading stats file: {e}")
-        
-        # If stats file doesn't have count, try SQLite as fallback
-        if doc_count == 0:
-            try:
-                db_path = Path("data/knowledge_base.db")
-                if db_path.exists():
-                    conn = sqlite3.connect(str(db_path))
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT COUNT(*) as count FROM documents")
-                    result = cursor.fetchone()
-                    doc_count = result[0] if result else 0
-                    conn.close()
-            except Exception as e:
-                print(f"SQLite error: {e}")
-        
-        return {
-            "feedback_count": feedback_count, 
-            "locations_count": len(VOYAGE_LOCATIONS),
-            "documents_count": doc_count
-        }
-    except Exception as e:
-        print(f"Stats error: {e}")
-        return {
-            "feedback_count": 0, 
-            "locations_count": len(VOYAGE_LOCATIONS),
-            "documents_count": 347  # Hardcode your actual count as fallback
-        }
-    """Return basic system stats including document count from database_stats.json."""
-    try:
-        # Get feedback count from PostgreSQL
-        feedback_count = 0
-        try:
-            conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
-            cur = conn.cursor()
-            cur.execute("SELECT count(*) as count FROM feedback")
-            feedback_count = cur.fetchone()["count"]
-            conn.close()
-        except:
-            pass
-        
-        # Get document count from database_stats.json
-        doc_count = 0
-        stats_path = Path("data/database_stats.json")
-        if stats_path.exists():
-            try:
-                with open(stats_path, 'r') as f:
-                    stats = json.load(f)
-                    doc_count = stats.get("document_count", 0)
-            except:
-                pass
-        
-        # Also try to get from knowledge_base.db as fallback
-        if doc_count == 0:
-            try:
-                conn = sqlite3.connect("data/knowledge_base.db")
-                cursor = conn.cursor()
-                cursor.execute("SELECT COUNT(*) as count FROM documents")
-                result = cursor.fetchone()
-                doc_count = result[0] if result else 0
-                conn.close()
-            except:
-                pass
-        
-        return {
-            "feedback_count": feedback_count, 
-            "locations_count": len(VOYAGE_LOCATIONS),
-            "documents_count": doc_count
-        }
-    except Exception as e:
-        print(f"Stats error: {e}")
-        return {
-            "feedback_count": 0, 
-            "locations_count": len(VOYAGE_LOCATIONS),
-            "documents_count": 347  # Hardcode as fallback from your JSON
-        }
-    """Return basic system stats."""
-    try:
-        # Get feedback count from PostgreSQL
-        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
-        cur = conn.cursor()
-        cur.execute("SELECT count(*) as count FROM feedback")
-        feedback_count = cur.fetchone()["count"]
-        conn.close()
-        
-        # Get document count from knowledge base
-        kb_conn = get_knowledge_base()
-        doc_count = 0
-        if kb_conn:
-            cursor = kb_conn.cursor()
-            cursor.execute("SELECT COUNT(*) as count FROM documents")
-            result = cursor.fetchone()
-            doc_count = result['count'] if result else 0
-        
-        return {
-            "feedback_count": feedback_count, 
-            "locations_count": len(VOYAGE_LOCATIONS),
-            "documents_count": doc_count
-        }
-    except Exception as e:
-        print(f"Stats error: {e}")
-        return {
-            "feedback_count": 0, 
-            "locations_count": len(VOYAGE_LOCATIONS),
-            "documents_count": 0
-        }
 
 
 # ── Document Routes ──────────────────────────────────────────────────
-# Add these new endpoints after your existing ones
 
 @app.get("/api/documents")
 async def get_documents(limit: int = 50, offset: int = 0):
-    """Get all documents for the Documents page."""
-    documents = get_all_documents(limit, offset)
+    """Get documents for the Documents page."""
+    # Try SQLite first (simpler)
+    documents, total = get_documents_from_sqlite(limit, offset)
+    
+    # If SQLite has no documents, try vector DB
+    if not documents:
+        documents = get_documents_from_vector_db(limit, offset)
+        total = len(documents)
+    
     return {
         "documents": documents,
-        "total": len(documents),
+        "total": total,
         "limit": limit,
         "offset": offset
     }
 
-@app.get("/api/documents/{doc_id}")
-async def get_document(doc_id: str):
-    """Get a specific document by ID."""
-    conn = get_knowledge_base()
-    if not conn:
-        raise HTTPException(status_code=503, detail="Database not available")
-    
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT id, title, author, year, type, description, tags, 
-               content_preview, source_file, page_number
-        FROM documents WHERE id = ?
-    """, (doc_id,))
-    
-    row = cursor.fetchone()
-    conn.close()
-    
-    if not row:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    return {
-        'id': row['id'],
-        'title': row['title'],
-        'author': row['author'],
-        'year': row['year'],
-        'type': row['type'],
-        'description': row['description'],
-        'tags': row['tags'].split(',') if row['tags'] else [],
-        'content_preview': row['content_preview'],
-        'source_file': row['source_file'],
-        'page_number': row['page_number']
-    }
-
-@app.get("/api/documents/search")
-async def search_documents_endpoint(q: str, limit: int = 10):
-    """Search documents by query."""
-    results = search_documents(q, limit)
-    return {
-        "results": results,
-        "query": q,
-        "count": len(results)
-    }
-
-@app.post("/api/documents/search", response_model=DocumentSearchResponse)
-async def search_documents_endpoint(request: DocumentSearchRequest):
-    """Search documents using semantic search or metadata filters."""
-    start_time = time.time()
-    
-    try:
-        if request.semantic_search and request.query:
-            # Semantic search using FAISS
-            documents = search_documents_semantic(request.query, request.top_k)
-        else:
-            # Metadata filtering (fallback)
-            documents = []
-            conn = get_knowledge_base()
-            if conn:
-                cursor = conn.cursor()
-                query = "SELECT id, title, author, year, type, description, tags, content_preview, source_file, page_number, file_size, language FROM documents WHERE 1=1"
-                params = []
-                
-                if request.filter_type:
-                    query += " AND type = ?"
-                    params.append(request.filter_type)
-                if request.filter_year:
-                    query += " AND year = ?"
-                    params.append(request.filter_year)
-                if request.filter_author:
-                    query += " AND author LIKE ?"
-                    params.append(f'%{request.filter_author}%')
-                
-                query += " ORDER BY year DESC LIMIT ?"
-                params.append(request.top_k)
-                
-                cursor.execute(query, params)
-                
-                for row in cursor.fetchall():
-                    documents.append(Document(
-                        id=row['id'],
-                        title=row['title'],
-                        author=row['author'] or "Unknown",
-                        year=row['year'] or 0,
-                        type=row['type'] or "document",
-                        description=row['description'] or "",
-                        tags=row['tags'].split(',') if row['tags'] else [],
-                        content_preview=row['content_preview'] or "",
-                        source_file=row['source_file'] or "",
-                        page_number=row['page_number'],
-                        file_size=row['file_size'],
-                        language=row['language'] or "en"
-                    ))
-                conn.close()
-        
-        end_time = time.time()
-        search_time_ms = (end_time - start_time) * 1000
-        
-        return DocumentSearchResponse(
-            documents=documents,
-            total_found=len(documents),
-            search_time_ms=round(search_time_ms, 2),
-            query=request.query
-        )
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/documents/{document_id}", response_model=DocumentDetailResponse)
-async def get_document(document_id: str):
-    """Get detailed information about a specific document."""
-    conn = get_knowledge_base()
-    if not conn:
-        raise HTTPException(status_code=503, detail="Knowledge base not available")
-    
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT id, title, author, year, type, description, tags, 
-               content_preview, source_file, page_number, file_size, language
-        FROM documents 
-        WHERE id = ?
-    """, (document_id,))
-    
-    row = cursor.fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    document = Document(
-        id=row['id'],
-        title=row['title'],
-        author=row['author'] or "Unknown",
-        year=row['year'] or 0,
-        type=row['type'] or "document",
-        description=row['description'] or "",
-        tags=row['tags'].split(',') if row['tags'] else [],
-        content_preview=row['content_preview'] or "",
-        source_file=row['source_file'] or "",
-        page_number=row['page_number'],
-        file_size=row['file_size'],
-        language=row['language'] or "en"
-    )
-    
-    # Find related documents (same author)
-    cursor.execute("""
-        SELECT id, title, author, year, type
-        FROM documents 
-        WHERE author = ? AND id != ?
-        ORDER BY year DESC
-        LIMIT 5
-    """, (row['author'], document_id))
-    
-    related = []
-    for r in cursor.fetchall():
-        related.append(Document(
-            id=r['id'],
-            title=r['title'],
-            author=r['author'] or "Unknown",
-            year=r['year'] or 0,
-            type=r['type'] or "document",
-            description="",
-            tags=[],
-            content_preview="",
-            source_file=""
-        ))
-    
-    conn.close()
-    
-    return DocumentDetailResponse(
-        document=document,
-        related_documents=related
-    )
-
-
-@app.get("/api/documents/types")
-async def get_document_types():
-    """Get all available document types for filtering."""
-    conn = get_knowledge_base()
-    if not conn:
-        return {"types": []}
-    
-    cursor = conn.cursor()
-    cursor.execute("SELECT DISTINCT type FROM documents WHERE type IS NOT NULL ORDER BY type")
-    types = [row['type'] for row in cursor.fetchall()]
-    conn.close()
-    return {"types": types}
-
-
-@app.get("/api/documents/years")
-async def get_document_years():
-    """Get all available years for filtering."""
-    conn = get_knowledge_base()
-    if not conn:
-        return {"years": []}
-    
-    cursor = conn.cursor()
-    cursor.execute("SELECT DISTINCT year FROM documents WHERE year > 0 ORDER BY year DESC")
-    years = [row['year'] for row in cursor.fetchall()]
-    conn.close()
-    return {"years": years}
-
-
-@app.get("/api/documents/authors")
-async def get_document_authors():
-    """Get all authors for filtering."""
-    conn = get_knowledge_base()
-    if not conn:
-        return {"authors": []}
-    
-    cursor = conn.cursor()
-    cursor.execute("SELECT DISTINCT author FROM documents WHERE author IS NOT NULL AND author != 'Unknown' ORDER BY author")
-    authors = [row['author'] for row in cursor.fetchall()]
-    conn.close()
-    return {"authors": authors}
 
 @app.get("/api/documents/search")
 async def search_documents_endpoint(q: str, limit: int = 50):
     """Search documents by query."""
     try:
-        # Load metadata
         metadata_path = Path("data/vector_databases/main_index/faiss_metadata.pkl")
+        if not metadata_path.exists():
+            return {"results": [], "total": 0, "query": q}
+        
         with open(metadata_path, 'rb') as f:
             data = pickle.load(f)
         
@@ -1352,7 +610,6 @@ async def search_documents_endpoint(q: str, limit: int = 50):
         metadatas = data.get('metadatas', [])
         document_ids = data.get('document_ids', [])
         
-        # Simple text search (case insensitive)
         q_lower = q.lower()
         results = []
         
@@ -1361,17 +618,11 @@ async def search_documents_endpoint(q: str, limit: int = 50):
             doc_metadata = metadatas[i] if i < len(metadatas) else {}
             doc_id = document_ids[i] if i < len(document_ids) else str(i)
             
-            # Search in title, content, and author
             title = Path(doc_metadata.get('source', '')).stem.lower()
             content = doc_content.lower()
             author = doc_metadata.get('author', '').lower()
             
-            if (q_lower in title or 
-                q_lower in content or 
-                q_lower in author or
-                any(q_lower in str(v).lower() for v in doc_metadata.values())):
-                
-                # Calculate simple relevance score
+            if (q_lower in title or q_lower in content or q_lower in author):
                 score = 0
                 if q_lower in title:
                     score += 0.5
@@ -1393,7 +644,6 @@ async def search_documents_endpoint(q: str, limit: int = 50):
                     'similarity_score': score
                 })
         
-        # Sort by relevance score
         results.sort(key=lambda x: x['similarity_score'], reverse=True)
         
         return {
@@ -1405,7 +655,42 @@ async def search_documents_endpoint(q: str, limit: int = 50):
     except Exception as e:
         print(f"Search error: {e}")
         return {"results": [], "total": 0, "query": q}
-    
+
+
+@app.get("/api/test-db")
+async def test_db():
+    """Test endpoint to check database connection."""
+    try:
+        # Check SQLite
+        sqlite_docs, sqlite_total = get_documents_from_sqlite(5, 0)
+        
+        # Check vector DB
+        vector_docs = get_documents_from_vector_db(5, 0)
+        
+        # Check stats file
+        stats_path = Path("data/database_stats.json")
+        stats = {}
+        if stats_path.exists():
+            with open(stats_path, 'r') as f:
+                stats = json.load(f)
+        
+        return {
+            "sqlite": {
+                "exists": Path("data/knowledge_base.db").exists(),
+                "document_count": sqlite_total,
+                "sample": sqlite_docs[:2] if sqlite_docs else []
+            },
+            "vector_db": {
+                "exists": Path("data/vector_databases/main_index/faiss_metadata.pkl").exists(),
+                "document_count": len(vector_docs),
+                "sample": vector_docs[:2] if vector_docs else []
+            },
+            "stats_file": stats
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # ── DB Init ──────────────────────────────────────────────────────────
 @app.on_event("startup")
 def init_db():
@@ -1437,6 +722,12 @@ def init_db():
     except Exception as e:
         print(f"PostgreSQL init skipped: {e}")
     
-    # Initialize vector database and knowledge base
+    # Initialize vector database
     load_vector_database()
-    get_knowledge_base()
+    
+    # Check SQLite database
+    db_path = Path("data/knowledge_base.db")
+    if db_path.exists():
+        print(f"✓ SQLite database found at {db_path}")
+    else:
+        print("⚠️ SQLite database not found. Run the indexer to create it.")

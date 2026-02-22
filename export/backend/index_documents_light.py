@@ -344,7 +344,7 @@ def main():
     print("="*50)
     
     # Check OpenAI API key
-    if not os.getenv("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"):
+    if not os.getenv("OPENAI_API_KEY"):
         print("❌ OPENAI_API_KEY environment variable not set")
         print("Please set it with: export OPENAI_API_KEY='your-key'")
         return
