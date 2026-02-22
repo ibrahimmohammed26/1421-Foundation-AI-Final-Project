@@ -135,8 +135,8 @@ def load_vector_database():
     if _vector_index is not None:
         return _vector_index, _vector_metadata
 
-    index_path = Path("data/vector_databases/main_index/faiss_index.bin")
-    metadata_path = Path("data/vector_databases/main_index/faiss_metadata.pkl")
+    index_path = Path(__file__).resolve().parents[2] / "data" / "vector_databases" / "main_index" / "faiss_index.bin"
+    metadata_path = Path(__file__).resolve().parents[2] / "data" / "vector_databases" / "main_index" / "faiss_metadata.pkl"
 
     if not index_path.exists() or not metadata_path.exists():
         print("⚠️  Vector database files not found")
@@ -155,7 +155,9 @@ def load_vector_database():
 
 # ── SQLite helpers ────────────────────────────────────────────────────
 
-DB_PATH = Path("data/knowledge_base.db")
+# Data folder is at C:\Users\ibrah\1421-Foundation-AI-Final-Project\data
+# This file runs from export\backend\ so we go up two levels
+DB_PATH = Path(__file__).resolve().parents[2] / "data" / "knowledge_base.db"
 
 
 def open_sqlite():
@@ -366,7 +368,7 @@ async def get_documents(limit: int = Query(default=50, le=500), offset: int = 0)
 
     # Fallback: try vector DB metadata if SQLite is empty
     if not docs:
-        meta_path = Path("data/vector_databases/main_index/faiss_metadata.pkl")
+        meta_path = Path(__file__).resolve().parents[2] / "data" / "vector_databases" / "main_index" / "faiss_metadata.pkl"
         if meta_path.exists():
             with open(meta_path, "rb") as f:
                 data = pickle.load(f)
@@ -599,7 +601,7 @@ async def test_db():
             "sample_titles": [d["title"] for d in sqlite_docs],
         },
         "vector_db": {
-            "faiss_exists": Path("data/vector_databases/main_index/faiss_index.bin").exists(),
+            "faiss_exists": Path(__file__).resolve().parents[2] / "data" / "vector_databases" / "main_index" / "faiss_index.bin".exists(),
             "vectors": index.ntotal if index else 0,
         },
     }
