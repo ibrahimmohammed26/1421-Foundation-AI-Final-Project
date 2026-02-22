@@ -21,6 +21,11 @@ import numpy as np
 
 from dotenv import load_dotenv
 load_dotenv()
+api_key = os.getenv("OPENAI_API_KEY")
+print(f"OPENAI_API_KEY loaded: {'Yes' if api_key else 'No'}")
+if api_key:
+    print(f"Key starts with: {api_key[:15]}...")
+    print(f"Key length: {len(api_key)}")
 
 app = FastAPI(title="1421 Foundation API", version="1.0.0")
 
