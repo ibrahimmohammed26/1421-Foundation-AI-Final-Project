@@ -214,21 +214,27 @@ def load_knowledge_base():
 # ── Search ────────────────────────────────────────────────────────────
 
 def search_semantic(query: str, top_k: int = 5) -> List[dict]:
-    """Vector search using FAISS — returns docs with similarity_score."""
+    """Vector search using FAISS — returns docs with similarity_score.
+    Returns [] on any failure so keyword search fallback always runs."""
     global _embeddings_model
     if _vector_index is None or not _docs_store:
         return []
     try:
         if _embeddings_model is None:
             _embeddings_model = get_embeddings_fn()
+    except Exception as e:
+        print(f"WARNING: Could not init embeddings model: {e}")
+        return []
+    try:
         vec = np.array([_embeddings_model.embed_query(query)], dtype="float32")
         distances, indices = _vector_index.search(vec, min(top_k, _vector_index.ntotal))
         results = []
         for i, idx in enumerate(indices[0]):
             if 0 <= idx < len(_docs_store):
-                doc = dict(_docs_store[idx])          # copy
+                doc = dict(_docs_store[idx])
                 doc["similarity_score"] = float(distances[0][i])
                 results.append(doc)
+        print(f"Semantic search '{query}': {len(results)} results")
         return results
     except Exception as e:
         print(f"ERROR semantic search: {e}")
@@ -238,19 +244,33 @@ def search_semantic(query: str, top_k: int = 5) -> List[dict]:
 def search_keyword(query: str, limit: int = 50) -> List[dict]:
     """Keyword search across title, author, content_preview."""
     if not _docs_store:
+        print("WARNING: search_keyword called but _docs_store is empty")
         return []
     q = query.lower()
+    # Also split into individual words for broader matching
+    words = [w for w in q.split() if len(w) > 2]
     results = []
     for doc in _docs_store:
         score = 0
-        if q in doc["title"].lower():           score += 3
-        if q in doc["author"].lower():          score += 2
-        if q in doc["content_preview"].lower(): score += 1
+        title   = doc.get("title",           "").lower()
+        author  = doc.get("author",          "").lower()
+        preview = doc.get("content_preview", "").lower()
+        full    = doc.get("content_full",    "").lower()
+        # Exact phrase match
+        if q in title:   score += 5
+        if q in author:  score += 3
+        if q in preview: score += 2
+        if q in full:    score += 1
+        # Individual word matches (for multi-word queries)
+        for w in words:
+            if w in title:   score += 2
+            if w in preview: score += 1
         if score > 0:
             d = dict(doc)
-            d["similarity_score"] = score / 6.0   # normalise 0-1
+            d["similarity_score"] = min(score / 10.0, 1.0)
             results.append(d)
     results.sort(key=lambda x: x["similarity_score"], reverse=True)
+    print(f"Keyword search '{query}': {len(results)} results")
     return results[:limit]
 
 
