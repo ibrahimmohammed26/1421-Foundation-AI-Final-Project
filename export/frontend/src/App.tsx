@@ -13,8 +13,8 @@ const NAV = [
   { to: "/", label: "Dashboard", icon: Home },
   { to: "/chat", label: "Chat", icon: MessageSquare },
   { to: "/map", label: "Voyage Map", icon: Map },
-  { to: "/analytics", label: "Analytics", icon: BarChart3 },
   { to: "/documents", label: "Documents", icon: FileText },
+  { to: "/analytics", label: "Analytics", icon: BarChart3 },
   { to: "/feedback", label: "Feedback", icon: Send },
   { to: "/settings", label: "Settings", icon: Settings },
 ];

@@ -30,6 +30,25 @@ export interface Document {
   similarity_score?: number;
 }
 
+export interface DocumentsResponse {
+  documents: Document[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export async function getAllDocuments(limit: number = 50, offset: number = 0): Promise<DocumentsResponse> {
+  const res = await fetch(`${API}/api/documents?limit=${limit}&offset=${offset}`);
+  if (!res.ok) throw new Error('Failed to fetch documents');
+  return res.json();
+}
+
+export async function searchDocuments(query: string, limit: number = 50): Promise<{ results: Document[] }> {
+  const res = await fetch(`${API}/api/documents/search?q=${encodeURIComponent(query)}&limit=${limit}`);
+  if (!res.ok) throw new Error('Failed to search documents');
+  return res.json();
+}
+
 export interface ChatSource {
   title: string;
   author: string;
@@ -67,23 +86,6 @@ export interface Document {
   similarity_score?: number;
 }
 
-export async function getAllDocuments(limit: number = 50, offset: number = 0) {
-  const res = await fetch(`${API}/api/documents?limit=${limit}&offset=${offset}`);
-  if (!res.ok) throw new Error('Failed to fetch documents');
-  return res.json();
-}
-
-export async function getDocument(id: string) {
-  const res = await fetch(`${API}/api/documents/${id}`);
-  if (!res.ok) throw new Error('Failed to fetch document');
-  return res.json();
-}
-
-export async function searchDocuments(query: string, limit: number = 10) {
-  const res = await fetch(`${API}/api/documents/search?q=${encodeURIComponent(query)}&limit=${limit}`);
-  if (!res.ok) throw new Error('Failed to search documents');
-  return res.json();
-}
 
 export async function fetchLocations(maxYear: number = 1421): Promise<Location[]> {
   const res = await fetch(`${API}/api/locations?max_year=${maxYear}`);

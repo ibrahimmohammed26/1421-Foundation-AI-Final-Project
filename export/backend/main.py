@@ -1265,7 +1265,73 @@ async def get_document_authors():
     conn.close()
     return {"authors": authors}
 
-
+@app.get("/api/documents/search")
+async def search_documents_endpoint(q: str, limit: int = 50):
+    """Search documents by query."""
+    try:
+        # Load metadata
+        metadata_path = Path("data/vector_databases/main_index/faiss_metadata.pkl")
+        with open(metadata_path, 'rb') as f:
+            data = pickle.load(f)
+        
+        documents = data.get('documents', [])
+        metadatas = data.get('metadatas', [])
+        document_ids = data.get('document_ids', [])
+        
+        # Simple text search (case insensitive)
+        q_lower = q.lower()
+        results = []
+        
+        for i in range(len(documents)):
+            doc_content = documents[i] if i < len(documents) else ""
+            doc_metadata = metadatas[i] if i < len(metadatas) else {}
+            doc_id = document_ids[i] if i < len(document_ids) else str(i)
+            
+            # Search in title, content, and author
+            title = Path(doc_metadata.get('source', '')).stem.lower()
+            content = doc_content.lower()
+            author = doc_metadata.get('author', '').lower()
+            
+            if (q_lower in title or 
+                q_lower in content or 
+                q_lower in author or
+                any(q_lower in str(v).lower() for v in doc_metadata.values())):
+                
+                # Calculate simple relevance score
+                score = 0
+                if q_lower in title:
+                    score += 0.5
+                if q_lower in author:
+                    score += 0.3
+                if q_lower in content:
+                    score += 0.2
+                
+                results.append({
+                    'id': doc_id,
+                    'title': title,
+                    'author': doc_metadata.get('author', 'Unknown'),
+                    'year': doc_metadata.get('year', 0),
+                    'type': doc_metadata.get('type', 'document'),
+                    'description': doc_content[:200] + "..." if len(doc_content) > 200 else doc_content,
+                    'tags': doc_metadata.get('tags', []),
+                    'content_preview': doc_content[:500] + "..." if len(doc_content) > 500 else doc_content,
+                    'source_file': doc_metadata.get('source', ''),
+                    'similarity_score': score
+                })
+        
+        # Sort by relevance score
+        results.sort(key=lambda x: x['similarity_score'], reverse=True)
+        
+        return {
+            "results": results[:limit],
+            "total": len(results),
+            "query": q
+        }
+        
+    except Exception as e:
+        print(f"Search error: {e}")
+        return {"results": [], "total": 0, "query": q}
+    
 # ── DB Init ──────────────────────────────────────────────────────────
 @app.on_event("startup")
 def init_db():
