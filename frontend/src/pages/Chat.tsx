@@ -37,7 +37,10 @@ export default function Chat() {
       () => setIsTyping(false),
       (err) => {
         setIsTyping(false);
-        setMessages([...newMsgs, { role: "assistant", content: `Error: ${err}` }]);
+        setMessages([
+          ...newMsgs,
+          { role: "assistant", content: `Error: ${err}` },
+        ]);
       }
     );
   };
@@ -57,16 +60,23 @@ export default function Chat() {
 
   return (
     <div className="flex flex-col h-full">
+      {/* Header */}
       <div className="border-b border-gray-700 px-6 py-4">
         <h1 className="text-xl font-display font-bold text-gold">1421 AI Chat</h1>
-        <p className="text-xs text-gray-400 mt-0.5">Ask about Chinese exploration & the 1421 theory</p>
+        <p className="text-xs text-gray-400 mt-0.5">
+          Ask about Chinese exploration &amp; the 1421 theory
+        </p>
       </div>
 
+      {/* Messages */}
       <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
         {messages.length === 0 && !isTyping && (
           <div className="flex flex-col items-center justify-center h-full text-center">
-            <div className="w-14 h-14 rounded-2xl bg-gold flex items-center justify-center mb-4">
-              <span className="text-xl font-display font-bold text-navy-dark">14</span>
+            {/* 1421 icon — fixed from "14" */}
+            <div className="w-20 h-20 rounded-2xl bg-gold/20 border border-gold/40 flex items-center justify-center mb-5">
+              <span className="text-xl font-display font-bold text-gold tracking-tight leading-none">
+                1421
+              </span>
             </div>
             <h2 className="text-2xl font-display font-bold mb-2">Welcome to 1421 AI</h2>
             <p className="text-gray-400 max-w-md mb-6">
@@ -87,7 +97,10 @@ export default function Chat() {
         )}
 
         {messages.map((msg, idx) => (
-          <div key={idx} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+          <div
+            key={idx}
+            className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+          >
             <div
               className={`max-w-[75%] rounded-2xl px-5 py-4 ${
                 msg.role === "user"
@@ -102,7 +115,15 @@ export default function Chat() {
                     onClick={() => handleCopy(msg.content, idx)}
                     className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 transition-colors"
                   >
-                    {copiedIdx === idx ? <><Check className="h-3 w-3" /> Copied</> : <><Copy className="h-3 w-3" /> Copy</>}
+                    {copiedIdx === idx ? (
+                      <>
+                        <Check className="h-3 w-3" /> Copied
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="h-3 w-3" /> Copy
+                      </>
+                    )}
                   </button>
                 </div>
               )}
@@ -114,9 +135,18 @@ export default function Chat() {
           <div className="flex justify-start">
             <div className="bg-navy border border-gray-700 rounded-2xl rounded-bl-md px-5 py-4">
               <div className="flex items-center gap-1.5">
-                <div className="h-2 w-2 rounded-full bg-gold animate-bounce" style={{ animationDelay: "0ms" }} />
-                <div className="h-2 w-2 rounded-full bg-gold animate-bounce" style={{ animationDelay: "150ms" }} />
-                <div className="h-2 w-2 rounded-full bg-gold animate-bounce" style={{ animationDelay: "300ms" }} />
+                <div
+                  className="h-2 w-2 rounded-full bg-gold animate-bounce"
+                  style={{ animationDelay: "0ms" }}
+                />
+                <div
+                  className="h-2 w-2 rounded-full bg-gold animate-bounce"
+                  style={{ animationDelay: "150ms" }}
+                />
+                <div
+                  className="h-2 w-2 rounded-full bg-gold animate-bounce"
+                  style={{ animationDelay: "300ms" }}
+                />
               </div>
             </div>
           </div>
@@ -124,13 +154,19 @@ export default function Chat() {
         <div ref={endRef} />
       </div>
 
+      {/* Input */}
       <div className="border-t border-gray-700 px-6 py-4">
         <div className="flex items-end gap-3 max-w-3xl mx-auto">
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-            placeholder="Ask a question..."
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
+            placeholder="Ask a question…"
             rows={1}
             className="flex-1 resize-none rounded-xl border border-gray-600 bg-navy px-4 py-3 text-sm text-gray-100 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-gold/50"
           />
