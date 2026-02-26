@@ -27,7 +27,6 @@ export default function Chat() {
     setIsTyping(true);
 
     let content = "";
-
     await streamChat(
       newMsgs.map((m) => ({ role: m.role, content: m.content })),
       (chunk) => {
@@ -59,10 +58,11 @@ export default function Chat() {
   ];
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full bg-gray-100">
+
       {/* Header */}
-      <div className="border-b border-gray-700 px-6 py-4">
-        <h1 className="text-xl font-display font-bold text-gold">1421 AI Chat</h1>
+      <div className="border-b border-gray-200 px-6 py-4 bg-white shadow-sm">
+        <h1 className="text-xl font-display font-bold text-gray-900">1421 AI Chat</h1>
         <p className="text-xs text-gray-400 mt-0.5">
           Ask about Chinese exploration &amp; the 1421 theory
         </p>
@@ -72,14 +72,15 @@ export default function Chat() {
       <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
         {messages.length === 0 && !isTyping && (
           <div className="flex flex-col items-center justify-center h-full text-center">
-            {/* 1421 icon — fixed from "14" */}
-            <div className="w-20 h-20 rounded-2xl bg-gold/20 border border-gold/40 flex items-center justify-center mb-5">
-              <span className="text-xl font-display font-bold text-gold tracking-tight leading-none">
+            <div className="w-20 h-20 rounded-2xl bg-gold flex items-center justify-center mb-5 shadow-md">
+              <span className="text-xl font-display font-bold text-white tracking-tight leading-none">
                 1421
               </span>
             </div>
-            <h2 className="text-2xl font-display font-bold mb-2">Welcome to 1421 AI</h2>
-            <p className="text-gray-400 max-w-md mb-6">
+            <h2 className="text-2xl font-display font-bold text-gray-900 mb-2">
+              Welcome to 1421 AI
+            </h2>
+            <p className="text-gray-500 max-w-md mb-6">
               Ask any question about Chinese maritime exploration.
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg w-full">
@@ -87,7 +88,7 @@ export default function Chat() {
                 <button
                   key={q}
                   onClick={() => setInput(q)}
-                  className="text-left rounded-xl border border-gray-700 bg-navy p-3 text-sm text-gray-300 hover:border-gold/50 hover:bg-navy-light transition-all"
+                  className="text-left rounded-xl border border-gray-200 bg-white p-3 text-sm text-gray-600 hover:border-gold hover:bg-red-50 transition-all shadow-sm"
                 >
                   {q}
                 </button>
@@ -104,25 +105,21 @@ export default function Chat() {
             <div
               className={`max-w-[75%] rounded-2xl px-5 py-4 ${
                 msg.role === "user"
-                  ? "bg-gold text-navy-dark rounded-br-md"
-                  : "bg-navy border border-gray-700 text-gray-200 rounded-bl-md"
+                  ? "bg-gold text-white rounded-br-md shadow-sm"
+                  : "bg-white border border-gray-200 text-gray-800 rounded-bl-md shadow-sm"
               }`}
             >
               <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
               {msg.role === "assistant" && (
-                <div className="mt-2 pt-2 border-t border-gray-700 flex items-center gap-2">
+                <div className="mt-2 pt-2 border-t border-gray-100 flex items-center gap-2">
                   <button
                     onClick={() => handleCopy(msg.content, idx)}
-                    className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 transition-colors"
+                    className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 transition-colors"
                   >
                     {copiedIdx === idx ? (
-                      <>
-                        <Check className="h-3 w-3" /> Copied
-                      </>
+                      <><Check className="h-3 w-3" /> Copied</>
                     ) : (
-                      <>
-                        <Copy className="h-3 w-3" /> Copy
-                      </>
+                      <><Copy className="h-3 w-3" /> Copy</>
                     )}
                   </button>
                 </div>
@@ -133,20 +130,11 @@ export default function Chat() {
 
         {isTyping && (
           <div className="flex justify-start">
-            <div className="bg-navy border border-gray-700 rounded-2xl rounded-bl-md px-5 py-4">
+            <div className="bg-white border border-gray-200 rounded-2xl rounded-bl-md px-5 py-4 shadow-sm">
               <div className="flex items-center gap-1.5">
-                <div
-                  className="h-2 w-2 rounded-full bg-gold animate-bounce"
-                  style={{ animationDelay: "0ms" }}
-                />
-                <div
-                  className="h-2 w-2 rounded-full bg-gold animate-bounce"
-                  style={{ animationDelay: "150ms" }}
-                />
-                <div
-                  className="h-2 w-2 rounded-full bg-gold animate-bounce"
-                  style={{ animationDelay: "300ms" }}
-                />
+                <div className="h-2 w-2 rounded-full bg-gold animate-bounce" style={{ animationDelay: "0ms" }} />
+                <div className="h-2 w-2 rounded-full bg-gold animate-bounce" style={{ animationDelay: "150ms" }} />
+                <div className="h-2 w-2 rounded-full bg-gold animate-bounce" style={{ animationDelay: "300ms" }} />
               </div>
             </div>
           </div>
@@ -155,7 +143,7 @@ export default function Chat() {
       </div>
 
       {/* Input */}
-      <div className="border-t border-gray-700 px-6 py-4">
+      <div className="border-t border-gray-200 px-6 py-4 bg-white">
         <div className="flex items-end gap-3 max-w-3xl mx-auto">
           <textarea
             value={input}
@@ -168,12 +156,12 @@ export default function Chat() {
             }}
             placeholder="Ask a question…"
             rows={1}
-            className="flex-1 resize-none rounded-xl border border-gray-600 bg-navy px-4 py-3 text-sm text-gray-100 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-gold/50"
+            className="flex-1 resize-none rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gold/40 focus:border-gold"
           />
           <button
             onClick={handleSend}
             disabled={!input.trim() || isTyping}
-            className="h-11 w-11 rounded-xl bg-gold text-navy-dark disabled:opacity-40 hover:bg-gold-light transition flex items-center justify-center flex-shrink-0"
+            className="h-11 w-11 rounded-xl bg-gold text-white disabled:opacity-40 hover:bg-gold-light transition flex items-center justify-center flex-shrink-0 shadow-sm"
           >
             <Send className="h-4 w-4" />
           </button>
