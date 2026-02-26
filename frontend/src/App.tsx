@@ -26,21 +26,29 @@ export default function App() {
       {/* ── Sidebar ──────────────────────────────────────────────────── */}
       <aside className="w-72 bg-white border-r border-gray-200 flex flex-col flex-shrink-0 shadow-sm">
 
-        {/* Logo */}
-        <div className="px-6 py-6 border-b border-gray-200">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-xl bg-gold flex items-center justify-center flex-shrink-0">
-              <span className="text-sm font-display font-bold text-white tracking-tight leading-none">
-                1421
-              </span>
-            </div>
-            <div>
-              <h1 className="text-lg font-display font-bold text-gray-900 leading-none">
-                Foundation
-              </h1>
-              <p className="text-xs text-gray-400 mt-0.5">Research System</p>
-            </div>
-          </div>
+        {/* Logo — 1421 Foundation image */}
+        <div className="px-4 py-4 border-b border-gray-200 flex items-center justify-center bg-gray-50">
+          <img
+            src="/logo.png"
+            alt="1421 Foundation"
+            className="h-14 w-auto object-contain"
+            onError={(e) => {
+              /* Fallback text logo if image fails to load */
+              const el = e.currentTarget;
+              el.style.display = "none";
+              const parent = el.parentElement!;
+              parent.innerHTML = `
+                <div class="flex items-center gap-3">
+                  <div class="w-11 h-11 rounded-xl bg-gold flex items-center justify-center">
+                    <span class="text-sm font-bold text-white tracking-tight">1421</span>
+                  </div>
+                  <div>
+                    <p class="text-lg font-bold text-gray-900 leading-none">Foundation</p>
+                    <p class="text-xs text-gray-400 mt-0.5">Research System</p>
+                  </div>
+                </div>`;
+            }}
+          />
         </div>
 
         {/* Nav links */}
@@ -60,11 +68,7 @@ export default function App() {
             >
               {({ isActive }) => (
                 <>
-                  <Icon
-                    className={`h-[22px] w-[22px] flex-shrink-0 ${
-                      isActive ? "text-white" : "text-gray-400"
-                    }`}
-                  />
+                  <Icon className={`h-[22px] w-[22px] flex-shrink-0 ${isActive ? "text-white" : "text-gray-400"}`} />
                   <span>{label}</span>
                 </>
               )}
@@ -73,7 +77,7 @@ export default function App() {
         </nav>
 
         {/* User footer */}
-        <div className="px-4 py-5 border-t border-gray-200">
+        <div className="px-4 py-4 border-t border-gray-200">
           <div className="flex items-center gap-3 px-3 py-3 rounded-xl bg-gray-50 border border-gray-200">
             <div className="w-9 h-9 rounded-full bg-gold flex items-center justify-center flex-shrink-0">
               <span className="text-sm font-bold text-white">R</span>
