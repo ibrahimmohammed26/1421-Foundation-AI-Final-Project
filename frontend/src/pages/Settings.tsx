@@ -180,15 +180,26 @@ export default function Settings() {
               <p className="text-sm text-gray-500">
                 A platform for exploring Chinese maritime history using vector databases and AI.
               </p>
-              <a
-                href="https://www.1421.tv"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 text-gold hover:text-gold-dark transition-colors text-sm"
-              >
-                Visit 1421 Foundation Website
-                <ExternalLink className="h-4 w-4" />
-              </a>
+              <div className="flex flex-col gap-2 pt-1">
+                <a
+                  href="https://www.1421foundation.org/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 text-gold hover:text-gold-dark transition-colors text-sm"
+                >
+                  <ExternalLink className="h-4 w-4 flex-shrink-0" />
+                  1421 Foundation Website
+                </a>
+                <a
+                  href="https://www.gavinmenzies.net/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 text-gold hover:text-gold-dark transition-colors text-sm"
+                >
+                  <ExternalLink className="h-4 w-4 flex-shrink-0" />
+                  Gavin Menzies Official Website
+                </a>
+              </div>
               <div className="pt-3 text-xs text-gray-400">
                 © 2026 1421 Foundation. All rights reserved.
               </div>

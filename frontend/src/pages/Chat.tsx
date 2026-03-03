@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import {
   Send, Copy, Check, FileText, Trash2,
   ChevronDown, ChevronUp,
@@ -20,6 +20,45 @@ interface Source {
   similarity?: number;
 }
 
+// ── Persist messages in sessionStorage so navigation doesn't wipe them ──
+const STORAGE_KEY = "1421_chat_messages";
+
+function loadMessages(): Message[] {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    // Never restore a mid-stream message — mark it complete
+    return (JSON.parse(raw) as Message[]).map((m) =>
+      m.streaming ? { ...m, streaming: false } : m
+    );
+  } catch {
+    return [];
+  }
+}
+
+function saveMessages(msgs: Message[]) {
+  try {
+    const toSave = msgs.map((m) =>
+      m.streaming ? { ...m, streaming: false } : m
+    );
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+  } catch {}
+}
+
+// ── Smart spacing: add space between letters & digits EXCEPT ordinals ──
+// Keeps: 15th, 21st, 2nd, 3rd — adds space elsewhere: "1421AD" → "1421 AD"
+function smartSpace(text: string): string {
+  // Step 1: protect ordinal suffixes (th/st/nd/rd directly after a digit)
+  const protected_ = text.replace(/(\d)(th|st|nd|rd)(?=[^a-zA-Z]|$)/gi, "$1\x01$2");
+  // Step 2: add spaces between letter→digit and digit→letter
+  const spaced = protected_
+    .replace(/([a-zA-Z])(\d)/g, "$1 $2")
+    .replace(/(\d)([a-zA-Z])/g, "$1 $2");
+  // Step 3: remove the protection markers (collapse the space that snuck in)
+  return spaced.replace(/(\d) \x01(th|st|nd|rd)/gi, "$1$2");
+}
+
+// ── Render assistant message with bold [Document N] + smart spacing ──
 function MessageContent({ content }: { content: string }) {
   const parts = content.split(/(\[Document\s*\d+\])/gi);
   return (
@@ -29,23 +68,29 @@ function MessageContent({ content }: { content: string }) {
           const normalised = part.replace(/\[Document\s*(\d+)\]/i, "[Document $1]");
           return <strong key={i}>{normalised}</strong>;
         }
-        const spaced = part
-          .replace(/([a-zA-Z])(\d)/g, "$1 $2")
-          .replace(/(\d)([a-zA-Z])/g, "$1 $2");
-        return <span key={i}>{spaced}</span>;
+        return <span key={i}>{smartSpace(part)}</span>;
       })}
     </p>
   );
 }
 
 export default function Chat() {
-  const [messages, setMessages]               = useState<Message[]>([]);
+  const [messages, setMessages]               = useState<Message[]>(loadMessages);
   const [input, setInput]                     = useState("");
   const [isTyping, setIsTyping]               = useState(false);
   const [copiedIdx, setCopiedIdx]             = useState<number | null>(null);
   const [copiedAll, setCopiedAll]             = useState(false);
   const [expandedSources, setExpandedSources] = useState<Set<number>>(new Set());
-  const endRef = useRef<HTMLDivElement>(null);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+
+  // Abort ref — flip to true to silently stop an in-progress stream
+  const abortRef = useRef(false);
+  const endRef   = useRef<HTMLDivElement>(null);
+
+  // Persist messages to sessionStorage whenever they change
+  useEffect(() => {
+    saveMessages(messages);
+  }, [messages]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -55,6 +100,7 @@ export default function Chat() {
     const text = (overrideText ?? input).trim();
     if (!text || isTyping) return;
 
+    abortRef.current = false;
     setInput("");
     setIsTyping(true);
 
@@ -68,10 +114,12 @@ export default function Chat() {
     await streamChat(
       newMsgs.map((m) => ({ role: m.role, content: m.content })),
       (chunk) => {
+        if (abortRef.current) return;
         content += chunk;
         setMessages([...newMsgs, { role: "assistant", content, streaming: true }]);
       },
       async () => {
+        if (abortRef.current) return;
         setIsTyping(false);
         try {
           const full = await sendChatMessage(
@@ -79,20 +127,25 @@ export default function Chat() {
             undefined,
             true
           );
-          setMessages([
-            ...newMsgs,
-            {
-              role: "assistant",
-              content,
-              sources: full.sources || [],
-              streaming: false,
-            },
-          ]);
+          if (!abortRef.current) {
+            setMessages([
+              ...newMsgs,
+              {
+                role: "assistant",
+                content,
+                sources: full.sources || [],
+                streaming: false,
+              },
+            ]);
+          }
         } catch {
-          setMessages([...newMsgs, { role: "assistant", content, streaming: false }]);
+          if (!abortRef.current) {
+            setMessages([...newMsgs, { role: "assistant", content, streaming: false }]);
+          }
         }
       },
       (err) => {
+        if (abortRef.current) return;
         setIsTyping(false);
         setMessages([
           ...newMsgs,
@@ -117,10 +170,18 @@ export default function Chat() {
     setTimeout(() => setCopiedAll(false), 2000);
   };
 
-  const handleClear = () => {
+  // Open confirm popup
+  const handleClearRequest = () => setShowClearConfirm(true);
+
+  // Confirmed — abort stream + wipe everything
+  const handleClearConfirmed = useCallback(() => {
+    abortRef.current = true;
+    setIsTyping(false);
     setMessages([]);
     setInput("");
-  };
+    setShowClearConfirm(false);
+    sessionStorage.removeItem(STORAGE_KEY);
+  }, []);
 
   const toggleSources = (idx: number) => {
     setExpandedSources((prev) => {
@@ -142,7 +203,7 @@ export default function Chat() {
   return (
     <div className="flex flex-col h-full bg-gray-100">
 
-      {/* Header */}
+      {/* ── Header ───────────────────────────────────────────────────── */}
       <div className="border-b border-gray-200 px-6 py-4 bg-white shadow-sm flex-shrink-0 flex items-center justify-between">
         <div>
           <h1 className="text-xl font-display font-bold text-black">1421 AI Chat</h1>
@@ -163,9 +224,8 @@ export default function Chat() {
                 <><Copy className="h-3.5 w-3.5" /> Copy all</>
               )}
             </button>
-            {/* Clear chat — red text always */}
             <button
-              onClick={handleClear}
+              onClick={handleClearRequest}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-medium text-red-600 hover:border-red-400 hover:bg-red-50 transition-colors bg-white"
             >
               <Trash2 className="h-3.5 w-3.5" /> Clear chat
@@ -174,7 +234,7 @@ export default function Chat() {
         )}
       </div>
 
-      {/* Messages */}
+      {/* ── Messages ─────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
 
         {!hasMessages && (
@@ -237,9 +297,12 @@ export default function Chat() {
                     : <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
                 )}
 
+                {/* Action bar — only after streaming fully ends */}
                 {msg.role === "assistant" && !isStreaming && hasContent && (
                   <>
                     <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-3 flex-wrap">
+
+                      {/* Copy */}
                       <button
                         onClick={() => handleCopy(msg.content, idx)}
                         className="flex items-center gap-1.5 text-xs font-medium text-black hover:text-gold transition-colors"
@@ -251,14 +314,7 @@ export default function Chat() {
                         )}
                       </button>
 
-                      <a
-                        href="/documents"
-                        className="flex items-center gap-1.5 text-xs font-medium text-gold border border-gold/30 rounded-lg px-2.5 py-1 bg-red-50 hover:bg-red-100 transition-colors"
-                      >
-                        <FileText className="h-3.5 w-3.5" />
-                        View documents
-                      </a>
-
+                      {/* Sources toggle — LEFT of view documents */}
                       {sourceCount > 0 && (
                         <button
                           onClick={() => toggleSources(idx)}
@@ -271,6 +327,15 @@ export default function Chat() {
                           )}
                         </button>
                       )}
+
+                      {/* View documents */}
+                      <a
+                        href="/documents"
+                        className="flex items-center gap-1.5 text-xs font-medium text-gold border border-gold/30 rounded-lg px-2.5 py-1 bg-red-50 hover:bg-red-100 transition-colors"
+                      >
+                        <FileText className="h-3.5 w-3.5" />
+                        View documents
+                      </a>
                     </div>
 
                     {showSources && sourceCount > 0 && (
@@ -321,7 +386,7 @@ export default function Chat() {
         <div ref={endRef} />
       </div>
 
-      {/* Input */}
+      {/* ── Input ────────────────────────────────────────────────────── */}
       <div className="border-t border-gray-200 px-6 py-4 bg-white flex-shrink-0">
         <div className="flex items-end gap-3 max-w-3xl mx-auto">
           <div className="flex-1 relative">
@@ -356,6 +421,43 @@ export default function Chat() {
           Press Enter to send · Shift+Enter for new line
         </p>
       </div>
+
+      {/* ── Clear Chat Confirmation Modal ─────────────────────────────── */}
+      {showClearConfirm && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl border border-gray-200 p-6 max-w-sm w-full mx-4 shadow-2xl">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-full bg-red-50 border border-red-200 flex items-center justify-center flex-shrink-0">
+                <Trash2 className="h-4 w-4 text-red-600" />
+              </div>
+              <h3 className="text-base font-display font-bold text-gray-900">Clear Chat?</h3>
+            </div>
+            <p className="text-sm text-gray-500 mb-1 leading-relaxed">
+              This will permanently delete all messages in this conversation.
+            </p>
+            {isTyping && (
+              <p className="text-sm text-amber-600 font-medium mb-4">
+                The current response will also be stopped.
+              </p>
+            )}
+            {!isTyping && <div className="mb-4" />}
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowClearConfirm(false)}
+                className="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleClearConfirmed}
+                className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700 transition-colors"
+              >
+                Clear all
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
