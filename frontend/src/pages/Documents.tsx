@@ -10,8 +10,6 @@ import {
 
 const PAGE_SIZE = 50;
 
-// ── Document Detail Modal ─────────────────────────────────────────────
-
 function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void }) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -44,7 +42,6 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
     >
       <div className="bg-white border border-gray-200 rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl">
 
-        {/* Modal header */}
         <div className="flex items-start justify-between gap-4 px-6 py-5 border-b border-gray-100">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-9 h-9 rounded-lg bg-gold flex items-center justify-center flex-shrink-0">
@@ -67,10 +64,7 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
           </button>
         </div>
 
-        {/* Modal body */}
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
-
-          {/* Badges */}
           <div className="flex items-center gap-2 flex-wrap">
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-medium text-emerald-700">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
@@ -88,7 +82,6 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
             )}
           </div>
 
-          {/* Metadata */}
           <div className="bg-gray-50 rounded-xl border border-gray-100 px-4 py-1">
             {doc.author && doc.author !== "Unknown" && (
               <MetaRow icon={User} label="Author" value={doc.author} />
@@ -124,7 +117,6 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
             />
           </div>
 
-          {/* Description */}
           {doc.description && (
             <div>
               <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
@@ -134,7 +126,6 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
             </div>
           )}
 
-          {/* Content preview */}
           {doc.content_preview && (
             <div>
               <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-2">
@@ -149,7 +140,6 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
             </div>
           )}
 
-          {/* Tags */}
           {doc.tags && doc.tags.length > 0 && (
             <div>
               <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-2">
@@ -170,7 +160,6 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
           )}
         </div>
 
-        {/* Modal footer */}
         <div className="px-6 py-4 border-t border-gray-100 flex justify-end">
           <button
             onClick={onClose}
@@ -183,8 +172,6 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
     </div>
   );
 }
-
-// ── Main Documents Page ───────────────────────────────────────────────
 
 export default function Documents() {
   const [documents, setDocuments] = useState<Document[]>([]);
@@ -258,7 +245,7 @@ export default function Documents() {
     <>
       <div className="flex flex-col h-full bg-gray-100">
 
-        {/* Header */}
+        {/* Header — single title only */}
         <div className="border-b border-gray-200 px-6 py-4 bg-white shadow-sm">
           <h1 className="text-xl font-display font-bold text-gray-900">Research Documents</h1>
           <p className="text-xs text-gray-400 mt-0.5">
@@ -406,6 +393,7 @@ export default function Documents() {
                           {doc.title}
                         </h3>
                       </div>
+                      {/* Single metadata row — no duplicate type label */}
                       <div className="flex items-center gap-2 text-xs text-gray-400 mb-2 flex-wrap">
                         {doc.author && doc.author !== "Unknown" && <span>By {doc.author}</span>}
                         {doc.year > 0 && <><span>•</span><span>{doc.year}</span></>}
@@ -419,7 +407,7 @@ export default function Documents() {
                           </span></>
                         )}
                         {doc.page_number != null && (
-                          <><span>•</span><span>p.{doc.page_number}</span></>
+                          <><span>•</span><span>p. {doc.page_number}</span></>
                         )}
                         <span>•</span>
                         <span className="inline-flex items-center gap-1 text-emerald-600">

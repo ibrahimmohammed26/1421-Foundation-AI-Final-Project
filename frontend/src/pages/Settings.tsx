@@ -82,8 +82,9 @@ export default function Settings() {
         <p className="text-xs text-gray-400 mt-0.5">Manage your data and system settings</p>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-6 py-6">
-        <div className="max-w-2xl space-y-6">
+      {/* Centered content */}
+      <div className="flex-1 overflow-y-auto flex items-start justify-center px-6 py-6">
+        <div className="w-full max-w-2xl space-y-6">
 
           {/* Document Status */}
           <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
@@ -180,7 +181,7 @@ export default function Settings() {
                 A platform for exploring Chinese maritime history using vector databases and AI.
               </p>
               <a
-                href="https://1421foundation.org"
+                href="https://www.1421.tv"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 text-gold hover:text-gold-dark transition-colors text-sm"
@@ -222,7 +223,6 @@ export default function Settings() {
         </div>
       )}
 
-      {/* Toasts */}
       {clearSuccess && (
         <div className="fixed bottom-6 right-6 bg-emerald-600 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2">
           <Check className="h-4 w-4" />

@@ -40,8 +40,9 @@ export default function Feedback() {
         </p>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-6 py-6">
-        <div className="max-w-xl space-y-5">
+      {/* Centered form */}
+      <div className="flex-1 overflow-y-auto flex items-start justify-center px-6 py-6">
+        <div className="w-full max-w-xl space-y-5">
 
           {/* Name + Email */}
           <div className="grid grid-cols-2 gap-4">
@@ -110,7 +111,6 @@ export default function Feedback() {
             {submitting ? "Submitting…" : "Submit Feedback"}
           </button>
 
-          {/* Status messages */}
           {status === "success" && (
             <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-700 text-sm">
               <CheckCircle className="h-4 w-4 flex-shrink-0" />

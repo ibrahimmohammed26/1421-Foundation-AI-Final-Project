@@ -7,7 +7,6 @@ import "leaflet/dist/leaflet.css";
 import { fetchLocations } from "@/lib/api";
 import { Play, Pause, RotateCcw, Zap, MapPin, Clock } from "lucide-react";
 
-// ── Fix default icons ─────────────────────────────────────────────────
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png",
@@ -59,7 +58,6 @@ export default function VoyageMap() {
     fetchLocations(MAX_YEAR).then((d) => { setLocations(d); setLoading(false); });
   }, []);
 
-  // Animation loop
   useEffect(() => {
     if (isPlaying) {
       const tick = () => {
@@ -110,7 +108,6 @@ export default function VoyageMap() {
     setMapZoom(6);
   };
 
-  // Sorted newest-first for the vertical scrollable timeline
   const timelineLocations = [...visibleLocations].sort((a, b) => b.year - a.year);
 
   if (loading) {
@@ -124,7 +121,7 @@ export default function VoyageMap() {
   return (
     <div className="flex flex-col h-full bg-gray-100">
 
-      {/* ── Page header ──────────────────────────────────────────────── */}
+      {/* Page header */}
       <div className="border-b border-gray-200 px-6 py-4 bg-white shadow-sm flex-shrink-0">
         <h1 className="text-xl font-display font-bold text-gray-900">Voyage Map</h1>
         <p className="text-xs text-gray-400 mt-0.5">
@@ -132,7 +129,7 @@ export default function VoyageMap() {
         </p>
       </div>
 
-      {/* ── Map (takes most of the height) ───────────────────────────── */}
+      {/* Map */}
       <div className="relative flex-1 min-h-0">
         <MapContainer
           center={mapCenter}
@@ -141,19 +138,13 @@ export default function VoyageMap() {
           zoomControl={true}
         >
           <MapController center={mapCenter} zoom={mapZoom} />
-
-          {/* English-only Stadia / Stamen tiles */}
           <TileLayer
             attribution='&copy; <a href="https://stadia.com">Stadia Maps</a> &copy; <a href="https://stamen.com">Stamen Design</a> &copy; <a href="https://openmaptiles.org/">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
             url="https://tiles.stadiamaps.com/tiles/stamen_toner_lite/{z}/{x}/{y}{r}.png"
           />
-
-          {/* Route lines — foundation red */}
           {routeLines.map((line, idx) => (
             <Polyline key={idx} positions={line} color="#c0272d" weight={2.5} opacity={0.7} dashArray="6 4" />
           ))}
-
-          {/* Past locations — grey */}
           {visibleLocations.map((loc, idx) => (
             <Marker
               key={`v-${idx}`}
@@ -170,8 +161,6 @@ export default function VoyageMap() {
               </Popup>
             </Marker>
           ))}
-
-          {/* Current year — red */}
           {currentYearLocations.map((loc, idx) => (
             <Marker key={`c-${idx}`} position={[loc.lat, loc.lon]} icon={redIcon}>
               <Popup>
@@ -229,7 +218,7 @@ export default function VoyageMap() {
         )}
       </div>
 
-      {/* ── Slider controls ───────────────────────────────────────────── */}
+      {/* Slider controls */}
       <div className="bg-white border-t border-gray-200 px-6 py-4 flex-shrink-0 shadow-sm">
         <div className="flex items-center gap-4">
           <button
@@ -283,9 +272,8 @@ export default function VoyageMap() {
         </div>
       </div>
 
-      {/* ── Vertical scrollable timeline below the slider ─────────────── */}
+      {/* Timeline — vertical line removed */}
       <div className="bg-white border-t border-gray-200 flex-shrink-0" style={{ maxHeight: "220px" }}>
-        {/* Section header — stays fixed */}
         <div className="px-6 py-2 border-b border-gray-100 flex items-center gap-2 sticky top-0 bg-white z-10">
           <MapPin className="h-4 w-4 text-gold flex-shrink-0" />
           <p className="text-sm font-semibold text-gray-800">
@@ -296,17 +284,14 @@ export default function VoyageMap() {
           </span>
         </div>
 
-        {/* Scrollable list */}
         <div className="overflow-y-auto" style={{ maxHeight: "172px" }}>
           {timelineLocations.length === 0 ? (
             <div className="px-6 py-4 text-xs text-gray-400 text-center">
               Press play or move the slider to reveal voyage locations
             </div>
           ) : (
-            <div className="relative px-6 py-2">
-              {/* Vertical connecting line */}
-              <div className="absolute left-[35px] top-0 bottom-0 w-0.5 bg-gray-100" />
-
+            <div className="px-6 py-2">
+              {/* No vertical line — removed */}
               <div className="space-y-0">
                 {timelineLocations.map((loc, idx) => {
                   const isCurrent  = loc.year === currentYear;
@@ -319,7 +304,6 @@ export default function VoyageMap() {
                         isSelected ? "bg-red-50" : "hover:bg-gray-50"
                       }`}
                     >
-                      {/* Timeline dot */}
                       <span
                         className={`mt-1 w-3.5 h-3.5 rounded-full border-2 flex-shrink-0 ${
                           isCurrent
@@ -329,8 +313,6 @@ export default function VoyageMap() {
                             : "bg-white border-gray-300"
                         }`}
                       />
-
-                      {/* Content */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className={`text-xs font-bold ${isCurrent ? "text-gold" : "text-gray-400"}`}>

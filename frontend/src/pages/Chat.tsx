@@ -20,6 +20,24 @@ interface Source {
   similarity?: number;
 }
 
+function MessageContent({ content }: { content: string }) {
+  const parts = content.split(/(\[Document\s*\d+\])/gi);
+  return (
+    <p className="text-sm leading-relaxed whitespace-pre-wrap">
+      {parts.map((part, i) => {
+        if (/^\[Document\s*\d+\]$/i.test(part)) {
+          const normalised = part.replace(/\[Document\s*(\d+)\]/i, "[Document $1]");
+          return <strong key={i}>{normalised}</strong>;
+        }
+        const spaced = part
+          .replace(/([a-zA-Z])(\d)/g, "$1 $2")
+          .replace(/(\d)([a-zA-Z])/g, "$1 $2");
+        return <span key={i}>{spaced}</span>;
+      })}
+    </p>
+  );
+}
+
 export default function Chat() {
   const [messages, setMessages]               = useState<Message[]>([]);
   const [input, setInput]                     = useState("");
@@ -43,7 +61,6 @@ export default function Chat() {
     const userMsg: Message = { role: "user", content: text };
     const newMsgs = [...messages, userMsg];
 
-    // Add streaming placeholder — dots show until first chunk arrives
     setMessages([...newMsgs, { role: "assistant", content: "", streaming: true }]);
 
     let content = "";
@@ -52,12 +69,10 @@ export default function Chat() {
       newMsgs.map((m) => ({ role: m.role, content: m.content })),
       (chunk) => {
         content += chunk;
-        // Once first chunk arrives dots disappear, text streams in naturally
         setMessages([...newMsgs, { role: "assistant", content, streaming: true }]);
       },
       async () => {
         setIsTyping(false);
-        // Fetch sources after streaming completes
         try {
           const full = await sendChatMessage(
             newMsgs.map((m) => ({ role: m.role, content: m.content })),
@@ -127,7 +142,7 @@ export default function Chat() {
   return (
     <div className="flex flex-col h-full bg-gray-100">
 
-      {/* ── Header ───────────────────────────────────────────────────── */}
+      {/* Header */}
       <div className="border-b border-gray-200 px-6 py-4 bg-white shadow-sm flex-shrink-0 flex items-center justify-between">
         <div>
           <h1 className="text-xl font-display font-bold text-black">1421 AI Chat</h1>
@@ -136,7 +151,6 @@ export default function Chat() {
           </p>
         </div>
 
-        {/* Toolbar — only shown when conversation has started */}
         {hasMessages && (
           <div className="flex items-center gap-2">
             <button
@@ -149,9 +163,10 @@ export default function Chat() {
                 <><Copy className="h-3.5 w-3.5" /> Copy all</>
               )}
             </button>
+            {/* Clear chat — red text always */}
             <button
               onClick={handleClear}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-medium text-black hover:border-red-400 hover:text-red-600 transition-colors bg-white"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-medium text-red-600 hover:border-red-400 hover:bg-red-50 transition-colors bg-white"
             >
               <Trash2 className="h-3.5 w-3.5" /> Clear chat
             </button>
@@ -159,10 +174,9 @@ export default function Chat() {
         )}
       </div>
 
-      {/* ── Messages ─────────────────────────────────────────────────── */}
+      {/* Messages */}
       <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
 
-        {/* Welcome screen */}
         {!hasMessages && (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <div className="w-20 h-20 rounded-2xl bg-gold flex items-center justify-center mb-5 shadow-md">
@@ -190,7 +204,6 @@ export default function Chat() {
           </div>
         )}
 
-        {/* Message list */}
         {messages.map((msg, idx) => {
           const isStreaming = msg.streaming === true;
           const hasContent  = msg.content.trim().length > 0;
@@ -210,7 +223,6 @@ export default function Chat() {
                     : "bg-white border border-gray-200 text-black rounded-bl-md shadow-sm"
                 }`}
               >
-                {/* Dots — only before first character arrives */}
                 {showDots && (
                   <div className="flex items-center gap-1.5 py-1">
                     <div className="h-2 w-2 rounded-full bg-gold animate-bounce" style={{ animationDelay: "0ms" }} />
@@ -219,19 +231,15 @@ export default function Chat() {
                   </div>
                 )}
 
-                {/* Message text — dots gone once content starts arriving */}
                 {hasContent && (
-                  <p className="text-sm leading-relaxed whitespace-pre-wrap">
-                    {msg.content}
-                  </p>
+                  msg.role === "assistant"
+                    ? <MessageContent content={msg.content} />
+                    : <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
                 )}
 
-                {/* Action bar — only after streaming fully ends */}
                 {msg.role === "assistant" && !isStreaming && hasContent && (
                   <>
                     <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-3 flex-wrap">
-
-                      {/* Copy this message */}
                       <button
                         onClick={() => handleCopy(msg.content, idx)}
                         className="flex items-center gap-1.5 text-xs font-medium text-black hover:text-gold transition-colors"
@@ -243,7 +251,6 @@ export default function Chat() {
                         )}
                       </button>
 
-                      {/* View all documents — links to Documents page */}
                       <a
                         href="/documents"
                         className="flex items-center gap-1.5 text-xs font-medium text-gold border border-gold/30 rounded-lg px-2.5 py-1 bg-red-50 hover:bg-red-100 transition-colors"
@@ -252,7 +259,6 @@ export default function Chat() {
                         View documents
                       </a>
 
-                      {/* Inline sources toggle */}
                       {sourceCount > 0 && (
                         <button
                           onClick={() => toggleSources(idx)}
@@ -267,7 +273,6 @@ export default function Chat() {
                       )}
                     </div>
 
-                    {/* Expanded sources panel */}
                     {showSources && sourceCount > 0 && (
                       <div className="mt-3 space-y-2">
                         {msg.sources!.map((src, sIdx) => (
@@ -316,7 +321,7 @@ export default function Chat() {
         <div ref={endRef} />
       </div>
 
-      {/* ── Input ────────────────────────────────────────────────────── */}
+      {/* Input */}
       <div className="border-t border-gray-200 px-6 py-4 bg-white flex-shrink-0">
         <div className="flex items-end gap-3 max-w-3xl mx-auto">
           <div className="flex-1 relative">
