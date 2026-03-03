@@ -5,6 +5,10 @@ import {
 } from "lucide-react";
 import { streamChat, sendChatMessage } from "@/lib/api";
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────────────────────
+
 interface Message {
   role: "user" | "assistant";
   content: string;
@@ -20,14 +24,25 @@ interface Source {
   similarity?: number;
 }
 
-// ── Persist messages in sessionStorage so navigation doesn't wipe them ──
+// ─────────────────────────────────────────────────────────────────────────────
+// Global chat store — lives outside React so it survives page navigation
+// The component subscribes via a simple listener pattern.
+// ─────────────────────────────────────────────────────────────────────────────
+
 const STORAGE_KEY = "1421_chat_messages";
 
-function loadMessages(): Message[] {
+function persistMessages(msgs: Message[]) {
+  try {
+    // Never persist a mid-stream placeholder
+    const clean = msgs.map((m) => (m.streaming ? { ...m, streaming: false } : m));
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(clean));
+  } catch {}
+}
+
+function restoreMessages(): Message[] {
   try {
     const raw = sessionStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
-    // Never restore a mid-stream message — mark it complete
     return (JSON.parse(raw) as Message[]).map((m) =>
       m.streaming ? { ...m, streaming: false } : m
     );
@@ -36,29 +51,65 @@ function loadMessages(): Message[] {
   }
 }
 
-function saveMessages(msgs: Message[]) {
-  try {
-    const toSave = msgs.map((m) =>
-      m.streaming ? { ...m, streaming: false } : m
-    );
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
-  } catch {}
-}
+type Listener = () => void;
 
-// ── Smart spacing: add space between letters & digits EXCEPT ordinals ──
-// Keeps: 15th, 21st, 2nd, 3rd — adds space elsewhere: "1421AD" → "1421 AD"
+const chatStore = {
+  messages: restoreMessages() as Message[],
+  isTyping: false,
+  listeners: new Set<Listener>(),
+
+  subscribe(fn: Listener) {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  },
+
+  notify() {
+    this.listeners.forEach((fn) => fn());
+  },
+
+  setMessages(msgs: Message[]) {
+    this.messages = msgs;
+    persistMessages(msgs);
+    this.notify();
+  },
+
+  setIsTyping(v: boolean) {
+    this.isTyping = v;
+    this.notify();
+  },
+
+  clear() {
+    this.messages = [];
+    this.isTyping = false;
+    sessionStorage.removeItem(STORAGE_KEY);
+    this.notify();
+  },
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Smart spacing — adds a space between letters and digits EXCEPT ordinals
+// e.g. "1421AD" → "1421 AD", "early15th" → "early 15th", "15th" stays "15th"
+// ─────────────────────────────────────────────────────────────────────────────
+
 function smartSpace(text: string): string {
-  // Step 1: protect ordinal suffixes (th/st/nd/rd directly after a digit)
-  const protected_ = text.replace(/(\d)(th|st|nd|rd)(?=[^a-zA-Z]|$)/gi, "$1\x01$2");
-  // Step 2: add spaces between letter→digit and digit→letter
-  const spaced = protected_
-    .replace(/([a-zA-Z])(\d)/g, "$1 $2")
-    .replace(/(\d)([a-zA-Z])/g, "$1 $2");
-  // Step 3: remove the protection markers (collapse the space that snuck in)
-  return spaced.replace(/(\d) \x01(th|st|nd|rd)/gi, "$1$2");
+  return (
+    text
+      // letter → digit: always add a space
+      .replace(/([a-zA-Z])(\d)/g, "$1 $2")
+      // digit → letter: add a space ONLY if it is NOT an ordinal suffix
+      .replace(/(\d)([a-zA-Z])/g, (match, digit, letter, offset, str) => {
+        // look ahead: is the letter the start of th / st / nd / rd?
+        const ahead = str.slice(offset + 1); // everything from the letter onward
+        const isOrdinal = /^(th|st|nd|rd)(?:[^a-zA-Z]|$)/i.test(ahead);
+        return isOrdinal ? digit + letter : digit + " " + letter;
+      })
+  );
 }
 
-// ── Render assistant message with bold [Document N] + smart spacing ──
+// ─────────────────────────────────────────────────────────────────────────────
+// MessageContent — bold [Document N] + smart spacing
+// ─────────────────────────────────────────────────────────────────────────────
+
 function MessageContent({ content }: { content: string }) {
   const parts = content.split(/(\[Document\s*\d+\])/gi);
   return (
@@ -74,86 +125,95 @@ function MessageContent({ content }: { content: string }) {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Chat component
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function Chat() {
-  const [messages, setMessages]               = useState<Message[]>(loadMessages);
-  const [input, setInput]                     = useState("");
-  const [isTyping, setIsTyping]               = useState(false);
-  const [copiedIdx, setCopiedIdx]             = useState<number | null>(null);
-  const [copiedAll, setCopiedAll]             = useState(false);
+  // Mirror global store into local state so React re-renders on changes
+  const [messages, setMessagesLocal]   = useState<Message[]>(() => chatStore.messages);
+  const [isTyping, setIsTypingLocal]   = useState(() => chatStore.isTyping);
+  const [input, setInput]              = useState("");
+  const [copiedIdx, setCopiedIdx]      = useState<number | null>(null);
+  const [copiedAll, setCopiedAll]      = useState(false);
   const [expandedSources, setExpandedSources] = useState<Set<number>>(new Set());
   const [showClearConfirm, setShowClearConfirm] = useState(false);
 
-  // Abort ref — flip to true to silently stop an in-progress stream
-  const abortRef = useRef(false);
-  const endRef   = useRef<HTMLDivElement>(null);
+  const endRef = useRef<HTMLDivElement>(null);
 
-  // Persist messages to sessionStorage whenever they change
+  // Subscribe to global store — re-render whenever store changes
   useEffect(() => {
-    saveMessages(messages);
-  }, [messages]);
+    const unsub = chatStore.subscribe(() => {
+      setMessagesLocal([...chatStore.messages]);
+      setIsTypingLocal(chatStore.isTyping);
+    });
+    return () => {
+      unsub();
+    };
+  }, []);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // ── Send ──────────────────────────────────────────────────────────────────
+
   const handleSend = async (overrideText?: string) => {
     const text = (overrideText ?? input).trim();
-    if (!text || isTyping) return;
+    if (!text || chatStore.isTyping) return;
 
-    abortRef.current = false;
     setInput("");
-    setIsTyping(true);
+    chatStore.setIsTyping(true);
 
     const userMsg: Message = { role: "user", content: text };
-    const newMsgs = [...messages, userMsg];
+    const newMsgs = [...chatStore.messages, userMsg];
 
-    setMessages([...newMsgs, { role: "assistant", content: "", streaming: true }]);
+    chatStore.setMessages([...newMsgs, { role: "assistant", content: "", streaming: true }]);
 
     let content = "";
 
     await streamChat(
       newMsgs.map((m) => ({ role: m.role, content: m.content })),
       (chunk) => {
-        if (abortRef.current) return;
+        // Stream continues even when component is unmounted (user navigated away)
+        if (!chatStore.isTyping) return; // aborted
         content += chunk;
-        setMessages([...newMsgs, { role: "assistant", content, streaming: true }]);
+        chatStore.setMessages([...newMsgs, { role: "assistant", content, streaming: true }]);
       },
       async () => {
-        if (abortRef.current) return;
-        setIsTyping(false);
+        if (!chatStore.isTyping) return;
+        chatStore.setIsTyping(false);
         try {
           const full = await sendChatMessage(
             newMsgs.map((m) => ({ role: m.role, content: m.content })),
             undefined,
             true
           );
-          if (!abortRef.current) {
-            setMessages([
-              ...newMsgs,
-              {
-                role: "assistant",
-                content,
-                sources: full.sources || [],
-                streaming: false,
-              },
-            ]);
-          }
+          chatStore.setMessages([
+            ...newMsgs,
+            {
+              role: "assistant",
+              content,
+              sources: full.sources || [],
+              streaming: false,
+            },
+          ]);
         } catch {
-          if (!abortRef.current) {
-            setMessages([...newMsgs, { role: "assistant", content, streaming: false }]);
-          }
+          chatStore.setMessages([...newMsgs, { role: "assistant", content, streaming: false }]);
         }
       },
       (err) => {
-        if (abortRef.current) return;
-        setIsTyping(false);
-        setMessages([
+        if (!chatStore.isTyping) return;
+        chatStore.setIsTyping(false);
+        chatStore.setMessages([
           ...newMsgs,
           { role: "assistant", content: `Error: ${err}`, streaming: false },
         ]);
       }
     );
   };
+
+  // ── Copy ──────────────────────────────────────────────────────────────────
 
   const handleCopy = (text: string, idx: number) => {
     navigator.clipboard.writeText(text);
@@ -170,18 +230,17 @@ export default function Chat() {
     setTimeout(() => setCopiedAll(false), 2000);
   };
 
-  // Open confirm popup
+  // ── Clear ─────────────────────────────────────────────────────────────────
+
   const handleClearRequest = () => setShowClearConfirm(true);
 
-  // Confirmed — abort stream + wipe everything
   const handleClearConfirmed = useCallback(() => {
-    abortRef.current = true;
-    setIsTyping(false);
-    setMessages([]);
+    chatStore.clear(); // stops typing flag → stream callbacks bail out
     setInput("");
     setShowClearConfirm(false);
-    sessionStorage.removeItem(STORAGE_KEY);
   }, []);
+
+  // ── Sources ───────────────────────────────────────────────────────────────
 
   const toggleSources = (idx: number) => {
     setExpandedSources((prev) => {
@@ -190,6 +249,10 @@ export default function Chat() {
       return next;
     });
   };
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Render
+  // ─────────────────────────────────────────────────────────────────────────
 
   const STARTERS = [
     "What was the significance of Zheng He's voyages?",
@@ -314,7 +377,7 @@ export default function Chat() {
                         )}
                       </button>
 
-                      {/* Sources toggle — LEFT of view documents */}
+                      {/* Sources toggle — left of view documents */}
                       {sourceCount > 0 && (
                         <button
                           onClick={() => toggleSources(idx)}
