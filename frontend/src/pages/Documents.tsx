@@ -10,6 +10,12 @@ import {
 
 const PAGE_SIZE = 50;
 
+// Strip any leading "Content:" prefix that may come from the backend
+function cleanDescription(text: string | undefined): string {
+  if (!text) return "";
+  return text.replace(/^content:\s*/i, "").trim();
+}
+
 function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void }) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -35,6 +41,8 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
     </div>
   );
 
+  const description = cleanDescription(doc.description || doc.content_preview);
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
@@ -42,13 +50,14 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
     >
       <div className="bg-white border border-gray-200 rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl">
 
+        {/* Modal header */}
         <div className="flex items-start justify-between gap-4 px-6 py-5 border-b border-gray-100">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-9 h-9 rounded-lg bg-gold flex items-center justify-center flex-shrink-0">
               <FileText className="h-4 w-4 text-white" />
             </div>
             <div className="min-w-0">
-              <h2 className="text-base font-display font-bold text-gray-900 leading-snug line-clamp-2">
+              <h2 className="text-base font-display font-bold text-gray-900 leading-snug">
                 {doc.title}
               </h2>
               {doc.author && doc.author !== "Unknown" && (
@@ -64,7 +73,10 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
           </button>
         </div>
 
+        {/* Modal body */}
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+
+          {/* Status badges */}
           <div className="flex items-center gap-2 flex-wrap">
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-medium text-emerald-700">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
@@ -82,6 +94,7 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
             )}
           </div>
 
+          {/* Metadata */}
           <div className="bg-gray-50 rounded-xl border border-gray-100 px-4 py-1">
             {doc.author && doc.author !== "Unknown" && (
               <MetaRow icon={User} label="Author" value={doc.author} />
@@ -117,29 +130,19 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
             />
           </div>
 
-          {doc.description && (
+          {/* Full document content — no "Content:" label, full untruncated text */}
+          {description && (
             <div>
-              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
-                Description
+              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
+                Document Content
               </h3>
-              <p className="text-sm text-gray-700 leading-relaxed">{doc.description}</p>
+              <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
+                {description}
+              </p>
             </div>
           )}
 
-          {doc.content_preview && (
-            <div>
-              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-2">
-                <Eye className="h-3.5 w-3.5" />
-                Content Preview
-              </h3>
-              <div className="bg-gray-50 rounded-xl border border-gray-100 p-4">
-                <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
-                  {doc.content_preview}
-                </p>
-              </div>
-            </div>
-          )}
-
+          {/* Tags */}
           {doc.tags && doc.tags.length > 0 && (
             <div>
               <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-2">
@@ -160,6 +163,7 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
           )}
         </div>
 
+        {/* Modal footer */}
         <div className="px-6 py-4 border-t border-gray-100 flex justify-end">
           <button
             onClick={onClose}
@@ -245,7 +249,7 @@ export default function Documents() {
     <>
       <div className="flex flex-col h-full bg-gray-100">
 
-        {/* Header — single title only */}
+        {/* Header */}
         <div className="border-b border-gray-200 px-6 py-4 bg-white shadow-sm">
           <h1 className="text-xl font-display font-bold text-gray-900">Research Documents</h1>
           <p className="text-xs text-gray-400 mt-0.5">
@@ -389,11 +393,11 @@ export default function Documents() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-3 mb-2">
                         <FileText className="h-5 w-5 text-gold flex-shrink-0" />
-                        <h3 className="text-base font-display font-semibold text-gray-900 truncate">
+                        <h3 className="text-base font-display font-semibold text-gray-900 leading-snug">
                           {doc.title}
                         </h3>
                       </div>
-                      {/* Single metadata row — no duplicate type label */}
+                      {/* Metadata row */}
                       <div className="flex items-center gap-2 text-xs text-gray-400 mb-2 flex-wrap">
                         {doc.author && doc.author !== "Unknown" && <span>By {doc.author}</span>}
                         {doc.year > 0 && <><span>•</span><span>{doc.year}</span></>}
@@ -415,9 +419,10 @@ export default function Documents() {
                           Active
                         </span>
                       </div>
+                      {/* Card preview — short cleaned snippet */}
                       {(doc.description || doc.content_preview) && (
                         <p className="text-sm text-gray-600 mb-3 line-clamp-3">
-                          {doc.description || doc.content_preview}
+                          {cleanDescription(doc.description || doc.content_preview)}
                         </p>
                       )}
                       {doc.tags && doc.tags.length > 0 && (

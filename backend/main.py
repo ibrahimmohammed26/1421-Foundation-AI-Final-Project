@@ -45,13 +45,23 @@ FAISS_DIR = DATA_DIR / "vector_databases" / "main_index"
 
 # ── LLM ──────────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """You are a professional historian specialising in Chinese maritime exploration 
-during the Ming dynasty (1368-1644), particularly the voyages of Admiral Zheng He and the 
-controversial 1421 hypothesis by Gavin Menzies.
+SYSTEM_PROMPT = """You are a professional historian and research assistant for the 1421 Foundation,
+specialising in Chinese maritime exploration during the Ming dynasty (1368–1644), particularly
+the voyages of Admiral Zheng He and the controversial 1421 hypothesis by Gavin Menzies.
 
-Write in clear, engaging, academic UK English. Provide comprehensive, well-structured answers 
-that synthesize information. Use proper historical terminology. Be objective and balanced when 
-presenting contested theories. Structure responses with clear paragraphs."""
+You have access to the 1421 Foundation's full research knowledge base. When a user asks about
+an article, document, or piece of research — whether they mention its title, topic, or author —
+you must find and summarise the relevant document(s) from the context provided. Always reference
+documents by name and number e.g. [Document 1], and include key details such as the author,
+year, and main findings or arguments.
+
+Write in clear, engaging, academic UK English. Provide comprehensive, well-structured answers
+that synthesise information across sources. Use proper historical terminology. Be objective and
+balanced when presenting contested theories. Structure responses with clear paragraphs.
+
+IMPORTANT: You must ALWAYS ground your answers in the provided documents. If the user asks
+about a specific article or document title, locate it in the context and report its full content.
+Never say you cannot access the documents — they are provided to you in this prompt."""
 
 
 def get_llm():
@@ -123,35 +133,27 @@ VOYAGE_LOCATIONS = [
 
 
 # ── In-memory document store (loaded from pickle) ─────────────────────
-# Structure of faiss_metadata.pkl:
-#   {
-#     "documents":    [str, ...]        # full text of each doc
-#     "metadatas":    [dict, ...]       # {id, title, author, source_type, ...}
-#     "document_ids": [int, ...]        # integer IDs matching metadatas index
-#     "dimension":    int               # embedding dimension
-#   }
 
-_docs_store: List[dict] = []   # list of unified doc dicts, index == FAISS index
+_docs_store: List[dict] = []
 _vector_index = None
 _embeddings_model = None
 
 
 def _clean_text(text: str) -> str:
-    """Strip leading whitespace/newlines and collapse internal whitespace runs."""
+    """Strip metadata header lines and collapse whitespace runs."""
     import re
-    # Remove lines that are just metadata labels (Title: / Author: / Source:)
     lines = text.split("\n")
     cleaned = []
+    # These prefixes are metadata labels, not content — strip them
+    skip_prefixes = ("Title:", "Author:", "Source:", "Content:", "Type:", "Tags:")
     for line in lines:
         stripped = line.strip()
-        # Skip blank lines and pure metadata header lines
         if not stripped:
             continue
-        if stripped.startswith("Title:") or stripped.startswith("Author:") or stripped.startswith("Source:"):
+        if any(stripped.startswith(p) for p in skip_prefixes):
             continue
         cleaned.append(stripped)
     result = " ".join(cleaned)
-    # Collapse multiple spaces
     result = re.sub(r"  +", " ", result)
     return result.strip()
 
@@ -167,10 +169,13 @@ def _meta_to_doc(idx: int, text: str, meta: dict, doc_id) -> dict:
         "author":           author,
         "year":             int(meta.get("year", 0) or 0),
         "type":             meta.get("source_type", meta.get("type", "document")) or "document",
-        "description":      clean[:250] + ("..." if len(clean) > 250 else ""),
+        # description = full cleaned text so the modal shows everything
+        "description":      clean,
         "tags":             meta.get("tags", []) or [],
-        "content_preview":  clean[:500] + ("..." if len(clean) > 500 else ""),
-        "content_full":     clean,   # cleaned text used for RAG context
+        # content_preview = short snippet for card list view
+        "content_preview":  clean[:300] + ("..." if len(clean) > 300 else ""),
+        # content_full = used internally for RAG context, never sent to frontend directly
+        "content_full":     clean,
         "source_file":      meta.get("source", meta.get("source_type", "")) or "",
         "page_number":      meta.get("page", None),
         "similarity_score": None,
@@ -188,39 +193,35 @@ def load_knowledge_base():
         print(f"ERROR: {meta_path} not found")
         return
 
-    # Load pickle
     with open(meta_path, "rb") as f:
         data = pickle.load(f)
 
-    documents   = data.get("documents",    [])
-    metadatas   = data.get("metadatas",    [])
+    documents    = data.get("documents",    [])
+    metadatas    = data.get("metadatas",    [])
     document_ids = data.get("document_ids", list(range(len(documents))))
 
     _docs_store = []
     for i in range(len(documents)):
-        text = documents[i]   if i < len(documents)    else ""
-        meta = metadatas[i]   if i < len(metadatas)    else {}
+        text = documents[i]    if i < len(documents)    else ""
+        meta = metadatas[i]    if i < len(metadatas)    else {}
         did  = document_ids[i] if i < len(document_ids) else i
         _docs_store.append(_meta_to_doc(i, text, meta, did))
 
     print(f"OK: Loaded {len(_docs_store)} documents from pickle")
 
-    # Load FAISS index
     if index_path.exists():
         _vector_index = faiss.read_index(str(index_path))
         print(f"OK: Loaded FAISS index with {_vector_index.ntotal} vectors")
     else:
         print(f"WARNING: FAISS index not found at {index_path}")
 
-    # Embeddings are lazy-loaded on first search (requires OPENAI_API_KEY at query time)
     print("OK: Knowledge base ready (embeddings load on first query)")
 
 
 # ── Search ────────────────────────────────────────────────────────────
 
 def search_semantic(query: str, top_k: int = 5) -> List[dict]:
-    """Vector search using FAISS — returns docs with similarity_score.
-    Returns [] on any failure so keyword search fallback always runs."""
+    """Vector search using FAISS — returns docs with similarity_score."""
     global _embeddings_model
     if _vector_index is None or not _docs_store:
         return []
@@ -247,26 +248,25 @@ def search_semantic(query: str, top_k: int = 5) -> List[dict]:
 
 
 def search_keyword(query: str, limit: int = 50) -> List[dict]:
-    """Keyword search across title, author, content_preview."""
+    """Keyword search across title, author, content_full."""
     if not _docs_store:
         print("WARNING: search_keyword called but _docs_store is empty")
         return []
     q = query.lower()
-    # Also split into individual words for broader matching
     words = [w for w in q.split() if len(w) > 2]
     results = []
     for doc in _docs_store:
-        score = 0
-        title   = doc.get("title",           "").lower()
-        author  = doc.get("author",          "").lower()
+        score   = 0
+        title   = doc.get("title",        "").lower()
+        author  = doc.get("author",       "").lower()
         preview = doc.get("content_preview", "").lower()
-        full    = doc.get("content_full",    "").lower()
-        # Exact phrase match
+        full    = doc.get("content_full", "").lower()
+        # Exact phrase
         if q in title:   score += 5
         if q in author:  score += 3
         if q in preview: score += 2
         if q in full:    score += 1
-        # Individual word matches (for multi-word queries)
+        # Individual words
         for w in words:
             if w in title:   score += 2
             if w in preview: score += 1
@@ -279,31 +279,94 @@ def search_keyword(query: str, limit: int = 50) -> List[dict]:
     return results[:limit]
 
 
+def search_by_title(title_query: str, limit: int = 5) -> List[dict]:
+    """
+    Direct title match search — used when the user explicitly mentions an article
+    or document by name. Returns docs whose titles closely match the query.
+    """
+    q = title_query.lower().strip()
+    results = []
+    for doc in _docs_store:
+        title = doc.get("title", "").lower()
+        # Strong match: query is a substring of title or title is a substring of query
+        if q in title or title in q:
+            d = dict(doc)
+            d["similarity_score"] = 1.0
+            results.append(d)
+    # Sort: prefer shorter titles (more exact matches) first
+    results.sort(key=lambda x: len(x["title"]))
+    return results[:limit]
+
+
 def get_relevant_context(query: str, top_k: int = 5) -> tuple:
-    """Get RAG context — semantic first, keyword fallback."""
-    docs = search_semantic(query, top_k)
+    """
+    Get RAG context for a query.
+    - If the query looks like it's asking about a specific article/document by title,
+      run a title search first for a direct match.
+    - Then run semantic search.
+    - Fall back to keyword search if semantic returns nothing.
+    """
+    docs = []
+    seen_ids = set()
+
+    # ── Title match: detect if user is asking about a specific article ──
+    # Patterns: "tell me about X", "what does X say", "summarise X", "the article X"
+    import re
+    title_patterns = [
+        r'(?:article|document|paper|report|piece|post)\s+(?:about|called|titled|named|on)\s+["\']?(.+?)["\']?$',
+        r'(?:tell me about|summarise|summarize|what does|what is in|explain)\s+["\'](.+?)["\']',
+        r'["\'](.+?)["\']',  # anything in quotes
+    ]
+    title_hit = None
+    for pattern in title_patterns:
+        match = re.search(pattern, query, re.IGNORECASE)
+        if match:
+            title_hit = match.group(1).strip()
+            break
+
+    if title_hit:
+        title_docs = search_by_title(title_hit)
+        for d in title_docs:
+            if d["id"] not in seen_ids:
+                docs.append(d)
+                seen_ids.add(d["id"])
+
+    # ── Semantic search ──
+    semantic = search_semantic(query, top_k)
+    for d in semantic:
+        if d["id"] not in seen_ids:
+            docs.append(d)
+            seen_ids.add(d["id"])
+
+    # ── Keyword fallback ──
     if not docs:
-        docs = search_keyword(query, top_k)
+        keyword = search_keyword(query, top_k)
+        for d in keyword:
+            if d["id"] not in seen_ids:
+                docs.append(d)
+                seen_ids.add(d["id"])
+
     if not docs:
         return "", []
 
+    # ── Build context string injected into the LLM system prompt ──
     context = "Relevant documents from the 1421 Foundation knowledge base:\n\n"
-    for i, doc in enumerate(docs, 1):
+    for i, doc in enumerate(docs[:top_k], 1):
         context += f"[Document {i}] {doc['title']}"
         if doc.get("year") and doc["year"] > 0:
             context += f" ({doc['year']})"
         if doc.get("author") and doc["author"] != "Unknown":
             context += f" by {doc['author']}"
         context += f"\nType: {doc['type']}\n"
-        # Use full content for better RAG context
+        # Use full cleaned content — no "Content:" prefix
         full = doc.get("content_full", doc.get("content_preview", ""))
         if full:
-            context += f"Content: {full[:800]}\n"
+            context += f"{full[:1200]}\n"
         if doc.get("tags"):
             context += f"Tags: {', '.join(doc['tags'])}\n"
         context += "\n"
 
-    return context, docs
+    return context, docs[:top_k]
 
 
 # ── Routes ────────────────────────────────────────────────────────────
@@ -322,28 +385,41 @@ def get_locations(max_year: int = 1421):
 
 @app.get("/api/documents")
 async def get_documents(limit: int = Query(default=50, le=500), offset: int = 0):
-    """Return paginated documents from in-memory store."""
+    """Return paginated documents. Strips content_full (internal only)."""
     if not _docs_store:
         return {"documents": [], "total": 0, "limit": limit, "offset": offset}
-    total  = len(_docs_store)
-    paged  = _docs_store[offset: offset + limit]
-    # Strip content_full from response (not needed by frontend, saves bandwidth)
-    safe   = [{k: v for k, v in d.items() if k != "content_full"} for d in paged]
+    total = len(_docs_store)
+    paged = _docs_store[offset: offset + limit]
+    safe  = [{k: v for k, v in d.items() if k != "content_full"} for d in paged]
     return {"documents": safe, "total": total, "limit": limit, "offset": offset}
 
 
 @app.get("/api/documents/search")
 async def search_documents_endpoint(q: str, limit: int = 50):
-    """Search documents — semantic + keyword merged."""
-    semantic = search_semantic(q, min(limit, 10))
-    keyword  = search_keyword(q, limit)
-    seen = {d["id"] for d in semantic}
-    for d in keyword:
+    """Search documents — title match + semantic + keyword merged."""
+    results = []
+    seen = set()
+
+    # Title match first
+    for d in search_by_title(q, 5):
         if d["id"] not in seen:
-            semantic.append(d)
+            results.append(d)
             seen.add(d["id"])
+
+    # Semantic
+    for d in search_semantic(q, min(limit, 10)):
+        if d["id"] not in seen:
+            results.append(d)
+            seen.add(d["id"])
+
+    # Keyword
+    for d in search_keyword(q, limit):
+        if d["id"] not in seen:
+            results.append(d)
+            seen.add(d["id"])
+
     final = [{k: v for k, v in d.items() if k != "content_full"}
-             for d in semantic[:limit]]
+             for d in results[:limit]]
     return {"results": final, "total": len(final), "query": q}
 
 
@@ -370,13 +446,17 @@ async def get_document_authors():
 
 def _build_system(context: str) -> str:
     s  = SYSTEM_PROMPT + "\n\n"
-    s += context if context else "(No specific documents found - using general knowledge only)\n\n"
+    if context:
+        s += context
+    else:
+        s += "(No specific documents matched this query — answer from general historical knowledge.)\n\n"
     s += (
         "\nWhen answering:\n"
-        "1. Cite relevant documents using [Document X] references\n"
-        "2. Combine information from multiple sources when relevant\n"
-        "3. Be clear about what comes from the documents vs general knowledge\n"
-        "4. Write in academic UK English with clear paragraph structure"
+        "1. Cite documents using [Document X] references\n"
+        "2. If asked about a specific article or document, summarise its full content and key arguments\n"
+        "3. Combine information from multiple sources when relevant\n"
+        "4. Be clear about what comes from the documents vs general knowledge\n"
+        "5. Write in academic UK English with clear paragraph structure"
     )
     return s
 
@@ -405,9 +485,13 @@ async def chat(req: ChatRequest):
         return ChatResponse(
             content=response.content,
             session_id=req.session_id or datetime.now().isoformat(),
-            sources=[{"title": d["title"], "author": d["author"], "year": d["year"],
-                      "type": d["type"], "similarity": d.get("similarity_score")}
-                     for d in sources] or None,
+            sources=[{
+                "title":      d["title"],
+                "author":     d["author"],
+                "year":       d["year"],
+                "type":       d["type"],
+                "similarity": d.get("similarity_score"),
+            } for d in sources] or None,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -441,8 +525,8 @@ async def chat_stream(req: ChatRequest):
 @app.get("/api/debug/rag")
 async def debug_rag(q: str = "Zheng He voyages"):
     """
-    http://localhost:8000/api/debug/rag?q=Zheng+He
-    Shows exactly what gets injected into the chat prompt.
+    Test RAG retrieval without calling the LLM.
+    Visit: http://localhost:8000/api/debug/rag?q=your+query
     """
     context, docs = get_relevant_context(q, top_k=5)
     return {
@@ -452,7 +536,7 @@ async def debug_rag(q: str = "Zheng He voyages"):
         "faiss_loaded":    _vector_index is not None,
         "faiss_vectors":   _vector_index.ntotal if _vector_index else 0,
         "store_size":      len(_docs_store),
-        "context_preview": context[:1200] if context else "(empty - no docs matched)",
+        "context_preview": context[:2000] if context else "(empty — no docs matched)",
     }
 
 
@@ -460,7 +544,6 @@ async def debug_rag(q: str = "Zheng He voyages"):
 
 @app.post("/api/feedback")
 def submit_feedback(req: FeedbackRequest):
-    """Store feedback - writes to a simple JSON file since SQLite is corrupted."""
     import json
     feedback_path = DATA_DIR / "feedback.json"
     try:
