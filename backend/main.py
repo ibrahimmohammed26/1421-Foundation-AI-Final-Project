@@ -161,7 +161,23 @@ def _clean_text(text: str) -> str:
 def _meta_to_doc(idx: int, text: str, meta: dict, doc_id) -> dict:
     """Convert pickle entry to our standard document dict."""
     clean  = _clean_text(text)
-    title  = meta.get("title", "") or f"Document {idx+1}"
+    # Recover full title — the pickle may store a truncated version.
+    # We look for a "Title:" line in the raw text first, which contains the full value.
+    raw_title = meta.get("title", "") or ""
+    title = raw_title.strip()
+    # Try to find a longer version in the raw text (Title: line is not stripped yet here)
+    for line in text.split("
+"):
+        stripped_line = line.strip()
+        if stripped_line.lower().startswith("title:"):
+            candidate = stripped_line[6:].strip()
+            # Use the raw-text title if it is longer than what metadata gave us
+            if len(candidate) > len(title):
+                title = candidate
+            break
+    if not title:
+        first = clean.split(".")[0].strip()
+        title = first[:200] if first else f"Document {idx+1}"
     author = meta.get("author", "Unknown") or "Unknown"
     return {
         "id":               str(doc_id),
