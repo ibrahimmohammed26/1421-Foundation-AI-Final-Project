@@ -140,19 +140,36 @@ _embeddings_model = None
 
 
 def _clean_text(text: str) -> str:
-    """Strip metadata header lines and collapse whitespace runs."""
+    """Strip metadata label prefixes but keep the content that follows them."""
     import re
     lines = text.split("\n")
     cleaned = []
-    # These prefixes are metadata labels, not content — strip them
-    skip_prefixes = ("Title:", "Author:", "Source:", "Content:", "Type:", "Tags:")
+    # For these labels: strip the label, keep the value after the colon
+    strip_label_prefixes = ("Title:", "Author:", "Source:", "Type:", "Tags:")
+    # For Content: specifically — strip the label and keep everything after it
     for line in lines:
         stripped = line.strip()
         if not stripped:
             continue
-        if any(stripped.startswith(p) for p in skip_prefixes):
+        if stripped.lower().startswith("content:"):
+            # Keep the actual content text after the "Content:" label
+            value = stripped[8:].strip()
+            if value:
+                cleaned.append(value)
             continue
-        cleaned.append(stripped)
+        matched = False
+        for prefix in strip_label_prefixes:
+            if stripped.startswith(prefix):
+                # Keep the value after the label (e.g. "Author: John" → "John")
+                value = stripped[len(prefix):].strip()
+                # Only keep non-trivial values (skip Author/Title/Type lines,
+                # keep Source values since they may contain useful text)
+                if prefix == "Source:" and value:
+                    cleaned.append(value)
+                matched = True
+                break
+        if not matched:
+            cleaned.append(stripped)
     result = " ".join(cleaned)
     result = re.sub(r"  +", " ", result)
     return result.strip()
@@ -166,8 +183,7 @@ def _meta_to_doc(idx: int, text: str, meta: dict, doc_id) -> dict:
     raw_title = meta.get("title", "") or ""
     title = raw_title.strip()
     # Try to find a longer version in the raw text (Title: line is not stripped yet here)
-    for line in text.split("
-"):
+    for line in text.split("\n"):
         stripped_line = line.strip()
         if stripped_line.lower().startswith("title:"):
             candidate = stripped_line[6:].strip()
