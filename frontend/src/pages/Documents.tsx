@@ -424,7 +424,7 @@ export default function Documents() {
                       </div>
                       {/* Content Preview */}
                       {doc.content_preview && (
-                        <div className="mb-3">
+                        <div className="mb-3 mt-4">
                           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
                             Content Preview
                           </p>
