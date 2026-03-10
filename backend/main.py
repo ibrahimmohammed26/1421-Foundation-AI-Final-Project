@@ -28,10 +28,16 @@ if api_key:
     print(f"Key length: {len(api_key)}")
 
 app = FastAPI(title="1421 Foundation API", version="1.0.0")
+
 allowed_origins = [
     "http://localhost:5173",
-    os.getenv("FRONTEND_URL", "https://1421-foundation-ai-final-project.vercel.app"),
+    "http://localhost:3000",
+    "https://1421-foundation-ai-final-project.vercel.app",
 ]
+# Add FRONTEND_URL from env if set and not already listed
+_env_origin = os.getenv("FRONTEND_URL", "")
+if _env_origin and _env_origin not in allowed_origins:
+    allowed_origins.append(_env_origin)
 
 app.add_middleware(
     CORSMiddleware,
