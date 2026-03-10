@@ -10,6 +10,8 @@ import {
   Globe,
 } from "lucide-react";
 
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
 interface Stats {
   feedback_count: number;
   locations_count: number;
@@ -25,7 +27,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("http://localhost:8000/api/stats")
+    fetch(`${API_URL}/api/stats`)
       .then((r) => r.json())
       .then((data) => setStats(data))
       .catch(console.error)
