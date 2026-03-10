@@ -515,6 +515,35 @@ async def chat_stream(req: ChatRequest):
     return StreamingResponse(
         generate(),
         media_type="text/event-stream",
+        # Remove the custom headers - let CORS middleware handle it
+        # headers={
+        #     "Access-Control-Allow-Origin": "https://1421-foundation-ai-final-project.vercel.app",
+        #     "Access-Control-Allow-Credentials": "true",
+        #     "Cache-Control": "no-cache",
+        #     "X-Accel-Buffering": "no",
+        # }
+    )
+    llm  = get_llm()
+    last = next((m["content"] for m in reversed(req.messages) if m["role"] == "user"), "")
+    context = ""
+    if req.use_documents and last:
+        context, _ = get_relevant_context(last, top_k=5)
+
+    lc_messages = _to_lc(_build_system(context), req.messages)
+
+    async def generate():
+        try:
+            async for chunk in llm.astream(lc_messages):
+                if chunk.content:
+                    safe = chunk.content.replace("\n", "\\n")
+                    yield f"data: {safe}\n\n"
+            yield "data: [DONE]\n\n"
+        except Exception as e:
+            yield f"data: ERROR: {str(e)}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
         headers={
             "Access-Control-Allow-Origin": "https://1421-foundation-ai-final-project.vercel.app",
             "Access-Control-Allow-Credentials": "true",
