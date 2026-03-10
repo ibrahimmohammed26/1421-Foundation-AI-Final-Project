@@ -37,27 +37,14 @@ export default function App() {
         {/* Logo + collapse button */}
         <div className="px-4 py-4 border-b border-gray-200 flex items-center justify-between bg-gray-50">
           {!collapsed && (
-            <div className="flex-1 flex items-center justify-center">
-              <img
-                src="/logo.png"
-                alt="1421 Foundation"
-                className="h-14 w-auto object-contain"
-                onError={(e) => {
-                  const el = e.currentTarget;
-                  el.style.display = "none";
-                  const parent = el.parentElement!;
-                  parent.innerHTML = `
-                    <div class="flex items-center gap-3">
-                      <div class="w-11 h-11 rounded-xl bg-gold flex items-center justify-center">
-                        <span class="text-sm font-bold text-white tracking-tight">1421</span>
-                      </div>
-                      <div>
-                        <p class="text-lg font-bold text-gray-900 leading-none">Foundation</p>
-                        <p class="text-xs text-gray-400 mt-0.5">Research System</p>
-                      </div>
-                    </div>`;
-                }}
-              />
+            <div className="flex-1 flex items-center gap-3 px-1">
+              <div className="w-11 h-11 rounded-xl bg-gold flex items-center justify-center flex-shrink-0">
+                <span className="text-sm font-bold text-white tracking-tight">1421</span>
+              </div>
+              <div>
+                <p className="text-base font-bold text-gray-900 leading-none">Foundation</p>
+                <p className="text-xs text-gray-400 mt-0.5">Research System</p>
+              </div>
             </div>
           )}
 
