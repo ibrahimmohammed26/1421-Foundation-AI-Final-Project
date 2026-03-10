@@ -6,11 +6,13 @@ Data source: FAISS metadata pickle (SQLite is corrupted, pickle has everything)
 import os
 import pickle
 import sqlite3
+import json
+import logging
 from datetime import datetime
 from typing import Optional, List
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -20,6 +22,11 @@ import faiss
 import numpy as np
 
 from dotenv import load_dotenv
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 load_dotenv()
 api_key = os.getenv("OPENAI_API_KEY")
 print(f"OPENAI_API_KEY loaded: {'Yes' if api_key else 'No'}")
@@ -29,21 +36,38 @@ if api_key:
 
 app = FastAPI(title="1421 Foundation API", version="1.0.0")
 
+# CORS Configuration - Make sure this is comprehensive
 allowed_origins = [
     "http://localhost:5173",
     "http://localhost:3000",
+    "http://localhost:5174",
+    "http://localhost:5175",
     "https://1421-foundation-ai-final-project.vercel.app",
+    "https://one421-foundation-ai-final-project.onrender.com",
 ]
-_env_origin = os.getenv("FRONTEND_URL", "")
+
+# Add any frontend URL from environment variable
+_env_origin = os.getenv("FRONTEND_URL", "").rstrip('/')
 if _env_origin and _env_origin not in allowed_origins:
     allowed_origins.append(_env_origin)
 
+# Add Vercel preview URLs if in development
+if os.getenv("VERCEL_ENV") == "preview":
+    vercel_url = os.getenv("VERCEL_URL", "")
+    if vercel_url:
+        allowed_origins.append(f"https://{vercel_url}")
+
+print(f"CORS configured with origins: {allowed_origins}")
+
+# Add CORS middleware - MUST be before any routes
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=600,  # Cache preflight requests for 10 minutes
 )
 
 # Paths
@@ -492,9 +516,24 @@ async def chat(req: ChatRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.options("/api/chat/stream")
+async def chat_stream_options():
+    """Handle preflight OPTIONS request for streaming endpoint"""
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": "https://1421-foundation-ai-final-project.vercel.app",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Max-Age": "3600",
+        }
+    )
+
+
 @app.post("/api/chat/stream")
 async def chat_stream(req: ChatRequest):
-    llm  = get_llm()
+    llm = get_llm()
     last = next((m["content"] for m in reversed(req.messages) if m["role"] == "user"), "")
     context = ""
     if req.use_documents and last:
@@ -506,49 +545,27 @@ async def chat_stream(req: ChatRequest):
         try:
             async for chunk in llm.astream(lc_messages):
                 if chunk.content:
-                    safe = chunk.content.replace("\n", "\\n")
-                    yield f"data: {safe}\n\n"
-            yield "data: [DONE]\n\n"
+                    # Send as JSON to handle newlines properly
+                    yield f"data: {json.dumps({'content': chunk.content})}\n\n"
+            yield f"data: {json.dumps({'done': True})}\n\n"
         except Exception as e:
-            yield f"data: ERROR: {str(e)}\n\n"
+            error_msg = str(e)
+            logger.error(f"Stream error: {error_msg}")
+            yield f"data: {json.dumps({'error': error_msg})}\n\n"
 
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream",
-        # Remove the custom headers - let CORS middleware handle it
-        # headers={
-        #     "Access-Control-Allow-Origin": "https://1421-foundation-ai-final-project.vercel.app",
-        #     "Access-Control-Allow-Credentials": "true",
-        #     "Cache-Control": "no-cache",
-        #     "X-Accel-Buffering": "no",
-        # }
-    )
-    llm  = get_llm()
-    last = next((m["content"] for m in reversed(req.messages) if m["role"] == "user"), "")
-    context = ""
-    if req.use_documents and last:
-        context, _ = get_relevant_context(last, top_k=5)
-
-    lc_messages = _to_lc(_build_system(context), req.messages)
-
-    async def generate():
-        try:
-            async for chunk in llm.astream(lc_messages):
-                if chunk.content:
-                    safe = chunk.content.replace("\n", "\\n")
-                    yield f"data: {safe}\n\n"
-            yield "data: [DONE]\n\n"
-        except Exception as e:
-            yield f"data: ERROR: {str(e)}\n\n"
-
+    # Get the origin from the request
+    origin = "https://1421-foundation-ai-final-project.vercel.app"
+    
     return StreamingResponse(
         generate(),
         media_type="text/event-stream",
         headers={
-            "Access-Control-Allow-Origin": "https://1421-foundation-ai-final-project.vercel.app",
-            "Access-Control-Allow-Credentials": "true",
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
         }
     )
 
@@ -627,10 +644,38 @@ async def test_db():
     }
 
 
+# ── Debug routes ──────────────────────────────────────────────────────
+
+@app.get("/api/debug/routes")
+async def debug_routes():
+    """Debug endpoint to see all registered routes"""
+    routes = []
+    for route in app.routes:
+        routes.append({
+            "path": route.path,
+            "name": route.name,
+            "methods": list(route.methods) if hasattr(route, 'methods') else None
+        })
+    return {"routes": routes}
+
+
 # ── Startup ───────────────────────────────────────────────────────────
 
 @app.on_event("startup")
 def init_app():
+    print(f"=== STARTUP DEBUG ===")
     print(f"BASE_DIR : {BASE_DIR}")
     print(f"DATA_DIR : {DATA_DIR}  (exists={DATA_DIR.exists()})")
+    print(f"FAISS_DIR: {FAISS_DIR} (exists={FAISS_DIR.exists()})")
+    print(f"Allowed origins: {allowed_origins}")
+    print(f"OpenAI API key loaded: {bool(os.getenv('OPENAI_API_KEY'))}")
+    
     load_knowledge_base()
+    
+    # Print all registered routes
+    print("\n=== REGISTERED ROUTES ===")
+    for route in app.routes:
+        methods = getattr(route, 'methods', None)
+        if methods:
+            print(f"{route.path} - {methods}")
+    print("=== END ROUTES ===\n")
