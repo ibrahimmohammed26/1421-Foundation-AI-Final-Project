@@ -34,7 +34,6 @@ allowed_origins = [
     "http://localhost:3000",
     "https://1421-foundation-ai-final-project.vercel.app",
 ]
-# Add FRONTEND_URL from env if set and not already listed
 _env_origin = os.getenv("FRONTEND_URL", "")
 if _env_origin and _env_origin not in allowed_origins:
     allowed_origins.append(_env_origin)
@@ -154,15 +153,12 @@ def _clean_text(text: str) -> str:
     import re
     lines = text.split("\n")
     cleaned = []
-    # For these labels: strip the label, keep the value after the colon
     strip_label_prefixes = ("Title:", "Author:", "Source:", "Type:", "Tags:")
-    # For Content: specifically — strip the label and keep everything after it
     for line in lines:
         stripped = line.strip()
         if not stripped:
             continue
         if stripped.lower().startswith("content:"):
-            # Keep the actual content text after the "Content:" label
             value = stripped[8:].strip()
             if value:
                 cleaned.append(value)
@@ -170,10 +166,7 @@ def _clean_text(text: str) -> str:
         matched = False
         for prefix in strip_label_prefixes:
             if stripped.startswith(prefix):
-                # Keep the value after the label (e.g. "Author: John" → "John")
                 value = stripped[len(prefix):].strip()
-                # Only keep non-trivial values (skip Author/Title/Type lines,
-                # keep Source values since they may contain useful text)
                 if prefix == "Source:" and value:
                     cleaned.append(value)
                 matched = True
@@ -187,17 +180,13 @@ def _clean_text(text: str) -> str:
 
 def _meta_to_doc(idx: int, text: str, meta: dict, doc_id) -> dict:
     """Convert pickle entry to our standard document dict."""
-    clean  = _clean_text(text)
-    # Recover full title — the pickle may store a truncated version.
-    # We look for a "Title:" line in the raw text first, which contains the full value.
+    clean = _clean_text(text)
     raw_title = meta.get("title", "") or ""
     title = raw_title.strip()
-    # Try to find a longer version in the raw text (Title: line is not stripped yet here)
     for line in text.split("\n"):
         stripped_line = line.strip()
         if stripped_line.lower().startswith("title:"):
             candidate = stripped_line[6:].strip()
-            # Use the raw-text title if it is longer than what metadata gave us
             if len(candidate) > len(title):
                 title = candidate
             break
@@ -211,12 +200,9 @@ def _meta_to_doc(idx: int, text: str, meta: dict, doc_id) -> dict:
         "author":           author,
         "year":             int(meta.get("year", 0) or 0),
         "type":             meta.get("source_type", meta.get("type", "document")) or "document",
-        # description = full cleaned text so the modal shows everything
         "description":      clean,
         "tags":             meta.get("tags", []) or [],
-        # content_preview = short snippet for card list view
         "content_preview":  clean[:300] + ("..." if len(clean) > 300 else ""),
-        # content_full = used internally for RAG context, never sent to frontend directly
         "content_full":     clean,
         "source_file":      meta.get("source", meta.get("source_type", "")) or "",
         "page_number":      meta.get("page", None),
@@ -303,12 +289,10 @@ def search_keyword(query: str, limit: int = 50) -> List[dict]:
         author  = doc.get("author",       "").lower()
         preview = doc.get("content_preview", "").lower()
         full    = doc.get("content_full", "").lower()
-        # Exact phrase
         if q in title:   score += 5
         if q in author:  score += 3
         if q in preview: score += 2
         if q in full:    score += 1
-        # Individual words
         for w in words:
             if w in title:   score += 2
             if w in preview: score += 1
@@ -322,42 +306,29 @@ def search_keyword(query: str, limit: int = 50) -> List[dict]:
 
 
 def search_by_title(title_query: str, limit: int = 5) -> List[dict]:
-    """
-    Direct title match search — used when the user explicitly mentions an article
-    or document by name. Returns docs whose titles closely match the query.
-    """
+    """Direct title match search."""
     q = title_query.lower().strip()
     results = []
     for doc in _docs_store:
         title = doc.get("title", "").lower()
-        # Strong match: query is a substring of title or title is a substring of query
         if q in title or title in q:
             d = dict(doc)
             d["similarity_score"] = 1.0
             results.append(d)
-    # Sort: prefer shorter titles (more exact matches) first
     results.sort(key=lambda x: len(x["title"]))
     return results[:limit]
 
 
 def get_relevant_context(query: str, top_k: int = 5) -> tuple:
-    """
-    Get RAG context for a query.
-    - If the query looks like it's asking about a specific article/document by title,
-      run a title search first for a direct match.
-    - Then run semantic search.
-    - Fall back to keyword search if semantic returns nothing.
-    """
+    """Get RAG context for a query."""
     docs = []
     seen_ids = set()
 
-    # ── Title match: detect if user is asking about a specific article ──
-    # Patterns: "tell me about X", "what does X say", "summarise X", "the article X"
     import re
     title_patterns = [
         r'(?:article|document|paper|report|piece|post)\s+(?:about|called|titled|named|on)\s+["\']?(.+?)["\']?$',
         r'(?:tell me about|summarise|summarize|what does|what is in|explain)\s+["\'](.+?)["\']',
-        r'["\'](.+?)["\']',  # anything in quotes
+        r'["\'](.+?)["\']',
     ]
     title_hit = None
     for pattern in title_patterns:
@@ -367,23 +338,18 @@ def get_relevant_context(query: str, top_k: int = 5) -> tuple:
             break
 
     if title_hit:
-        title_docs = search_by_title(title_hit)
-        for d in title_docs:
+        for d in search_by_title(title_hit):
             if d["id"] not in seen_ids:
                 docs.append(d)
                 seen_ids.add(d["id"])
 
-    # ── Semantic search ──
-    semantic = search_semantic(query, top_k)
-    for d in semantic:
+    for d in search_semantic(query, top_k):
         if d["id"] not in seen_ids:
             docs.append(d)
             seen_ids.add(d["id"])
 
-    # ── Keyword fallback ──
     if not docs:
-        keyword = search_keyword(query, top_k)
-        for d in keyword:
+        for d in search_keyword(query, top_k):
             if d["id"] not in seen_ids:
                 docs.append(d)
                 seen_ids.add(d["id"])
@@ -391,7 +357,6 @@ def get_relevant_context(query: str, top_k: int = 5) -> tuple:
     if not docs:
         return "", []
 
-    # ── Build context string injected into the LLM system prompt ──
     context = "Relevant documents from the 1421 Foundation knowledge base:\n\n"
     for i, doc in enumerate(docs[:top_k], 1):
         context += f"[Document {i}] {doc['title']}"
@@ -400,7 +365,6 @@ def get_relevant_context(query: str, top_k: int = 5) -> tuple:
         if doc.get("author") and doc["author"] != "Unknown":
             context += f" by {doc['author']}"
         context += f"\nType: {doc['type']}\n"
-        # Use full cleaned content — no "Content:" prefix
         full = doc.get("content_full", doc.get("content_preview", ""))
         if full:
             context += f"{full[:1200]}\n"
@@ -427,7 +391,6 @@ def get_locations(max_year: int = 1421):
 
 @app.get("/api/documents")
 async def get_documents(limit: int = Query(default=50, le=500), offset: int = 0):
-    """Return paginated documents. Strips content_full (internal only)."""
     if not _docs_store:
         return {"documents": [], "total": 0, "limit": limit, "offset": offset}
     total = len(_docs_store)
@@ -438,30 +401,21 @@ async def get_documents(limit: int = Query(default=50, le=500), offset: int = 0)
 
 @app.get("/api/documents/search")
 async def search_documents_endpoint(q: str, limit: int = 50):
-    """Search documents — title match + semantic + keyword merged."""
     results = []
     seen = set()
-
-    # Title match first
     for d in search_by_title(q, 5):
         if d["id"] not in seen:
             results.append(d)
             seen.add(d["id"])
-
-    # Semantic
     for d in search_semantic(q, min(limit, 10)):
         if d["id"] not in seen:
             results.append(d)
             seen.add(d["id"])
-
-    # Keyword
     for d in search_keyword(q, limit):
         if d["id"] not in seen:
             results.append(d)
             seen.add(d["id"])
-
-    final = [{k: v for k, v in d.items() if k != "content_full"}
-             for d in results[:limit]]
+    final = [{k: v for k, v in d.items() if k != "content_full"} for d in results[:limit]]
     return {"results": final, "total": len(final), "query": q}
 
 
@@ -479,8 +433,7 @@ async def get_document_years():
 
 @app.get("/api/documents/authors")
 async def get_document_authors():
-    authors = sorted({d["author"] for d in _docs_store
-                      if d["author"] and d["author"] != "Unknown"})
+    authors = sorted({d["author"] for d in _docs_store if d["author"] and d["author"] != "Unknown"})
     return {"authors": authors}
 
 
@@ -514,36 +467,9 @@ def _to_lc(system: str, messages: list) -> list:
 
 
 # ── Chat endpoints ────────────────────────────────────────────────────
-@app.post("/api/chat/stream")
-async def chat_stream(req: ChatRequest):
-    llm  = get_llm()
-    last = next((m["content"] for m in reversed(req.messages) if m["role"] == "user"), "")
-    context = ""
-    if req.use_documents and last:
-        context, _ = get_relevant_context(last, top_k=5)
 
-    lc_messages = _to_lc(_build_system(context), req.messages)
-
-    async def generate():
-        try:
-            async for chunk in llm.astream(lc_messages):
-                if chunk.content:
-                    safe = chunk.content.replace("\n", "\\n")
-                    yield f"data: {safe}\n\n"
-            yield "data: [DONE]\n\n"
-        except Exception as e:
-            yield f"data: ERROR: {str(e)}\n\n"
-
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream",
-        headers={
-            "Access-Control-Allow-Origin": "https://1421-foundation-ai-final-project.vercel.app",
-            "Access-Control-Allow-Credentials": "true",
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        }
-    )
+@app.post("/api/chat", response_model=ChatResponse)
+async def chat(req: ChatRequest):
     llm  = get_llm()
     last = next((m["content"] for m in reversed(req.messages) if m["role"] == "user"), "")
     context, sources = "", []
@@ -586,17 +512,22 @@ async def chat_stream(req: ChatRequest):
         except Exception as e:
             yield f"data: ERROR: {str(e)}\n\n"
 
-    return StreamingResponse(generate(), media_type="text/event-stream")
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Access-Control-Allow-Origin": "https://1421-foundation-ai-final-project.vercel.app",
+            "Access-Control-Allow-Credentials": "true",
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        }
+    )
 
 
 # ── RAG debug ─────────────────────────────────────────────────────────
 
 @app.get("/api/debug/rag")
 async def debug_rag(q: str = "Zheng He voyages"):
-    """
-    Test RAG retrieval without calling the LLM.
-    Visit: http://localhost:8000/api/debug/rag?q=your+query
-    """
     context, docs = get_relevant_context(q, top_k=5)
     return {
         "query":           q,
