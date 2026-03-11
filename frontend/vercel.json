@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://one421-foundation-ai-final-project.onrender.com/api/:path*"
+    }
+  ]
+}

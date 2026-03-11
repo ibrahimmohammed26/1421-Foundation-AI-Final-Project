@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-const API = (import.meta.env.VITE_API_URL as string) || "http://localhost:8000";
+const API = import.meta.env.DEV ? "http://localhost:8000" : "";
 
 // ── Types ─────────────────────────────────────────────────────────────
 
