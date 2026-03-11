@@ -131,6 +131,9 @@ export async function sendChatMessage(
   return res.json();
 }
 
+// ── streamChat — uses /api/chat (non-streaming) and simulates word-by-word
+//    display on the frontend. This avoids CORS issues with SSE on Render's
+//    free tier which strips Access-Control headers from streaming responses.
 export async function streamChat(
   messages: { role: string; content: string }[],
   onDelta: (text: string) => void,
@@ -138,53 +141,34 @@ export async function streamChat(
   onError: (err: string) => void,
   useDocuments: boolean = true
 ) {
-  const res = await fetch(`${API}/api/chat/stream`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, use_documents: useDocuments }),
-  });
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({ detail: "Request failed" }));
-    onError(body.detail || `Error ${res.status}`);
-    return;
-  }
-
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
   try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+    const res = await fetch(`${API}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages, use_documents: useDocuments }),
+    });
 
-      buffer += decoder.decode(value, { stream: true });
-
-      let idx: number;
-      while ((idx = buffer.indexOf("\n\n")) !== -1) {
-        const line = buffer.slice(0, idx).trim();
-        buffer = buffer.slice(idx + 2);
-
-        if (!line.startsWith("data: ")) continue;
-        const data = line.slice(6);
-
-        if (data === "[DONE]") {
-          onDone();
-          return;
-        }
-        if (data.startsWith("ERROR:")) {
-          onError(data.slice(7));
-          return;
-        }
-
-        // Server escapes \n as \\n — restore them
-        onDelta(data.replace(/\\n/g, "\n"));
-      }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ detail: "Request failed" }));
+      onError(body.detail || `Error ${res.status}`);
+      return;
     }
+
+    const data: ChatResponse = await res.json();
+    const fullText = data.content || "";
+
+    // Simulate word-by-word streaming for a natural feel
+    const words = fullText.split(" ");
+    for (let i = 0; i < words.length; i++) {
+      // Small delay between words to simulate streaming
+      await new Promise((resolve) => setTimeout(resolve, 18));
+      const chunk = i === 0 ? words[i] : " " + words[i];
+      onDelta(chunk);
+    }
+
     onDone();
   } catch (error) {
-    onError(error instanceof Error ? error.message : "Stream error");
+    onError(error instanceof Error ? error.message : "Request failed");
   }
 }
 
