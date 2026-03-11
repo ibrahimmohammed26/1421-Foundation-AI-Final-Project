@@ -56,18 +56,6 @@ class CORSEverythingMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(CORSEverythingMiddleware)
 
-# Also keep standard CORS middleware as backup
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://localhost:3000",
-        VERCEL_ORIGIN,
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # Paths
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -482,7 +470,7 @@ def _to_lc(system: str, messages: list) -> list:
 
 # ── Chat endpoints ────────────────────────────────────────────────────
 
-@app.post("/api/chat", response_model=ChatResponse)
+@app.post("/api/chat")
 async def chat(req: ChatRequest):
     llm  = get_llm()
     last = next((m["content"] for m in reversed(req.messages) if m["role"] == "user"), "")
