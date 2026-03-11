@@ -10,9 +10,11 @@ from datetime import datetime
 from typing import Optional, List
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 from pydantic import BaseModel
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
@@ -29,18 +31,39 @@ if api_key:
 
 app = FastAPI(title="1421 Foundation API", version="1.0.0")
 
-allowed_origins = [
-    "http://localhost:5173",
-    "http://localhost:3000",
-    "https://1421-foundation-ai-final-project.vercel.app",
-]
-_env_origin = os.getenv("FRONTEND_URL", "")
-if _env_origin and _env_origin not in allowed_origins:
-    allowed_origins.append(_env_origin)
+# ── CORS — custom middleware stamps header on EVERY response ──────────
+VERCEL_ORIGIN = "https://1421-foundation-ai-final-project.vercel.app"
 
+class CORSEverythingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if request.method == "OPTIONS":
+            return Response(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": VERCEL_ORIGIN,
+                    "Access-Control-Allow-Credentials": "true",
+                    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept",
+                    "Access-Control-Max-Age": "3600",
+                }
+            )
+        response = await call_next(request)
+        response.headers["Access-Control-Allow-Origin"] = VERCEL_ORIGIN
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept"
+        return response
+
+app.add_middleware(CORSEverythingMiddleware)
+
+# Also keep standard CORS middleware as backup
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:3000",
+        VERCEL_ORIGIN,
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -141,7 +164,7 @@ VOYAGE_LOCATIONS = [
 ]
 
 
-# ── In-memory document store (loaded from pickle) ─────────────────────
+# ── In-memory document store ──────────────────────────────────────────
 
 _docs_store: List[dict] = []
 _vector_index = None
@@ -149,7 +172,6 @@ _embeddings_model = None
 
 
 def _clean_text(text: str) -> str:
-    """Strip metadata label prefixes but keep the content that follows them."""
     import re
     lines = text.split("\n")
     cleaned = []
@@ -179,7 +201,6 @@ def _clean_text(text: str) -> str:
 
 
 def _meta_to_doc(idx: int, text: str, meta: dict, doc_id) -> dict:
-    """Convert pickle entry to our standard document dict."""
     clean = _clean_text(text)
     raw_title = meta.get("title", "") or ""
     title = raw_title.strip()
@@ -211,7 +232,6 @@ def _meta_to_doc(idx: int, text: str, meta: dict, doc_id) -> dict:
 
 
 def load_knowledge_base():
-    """Load FAISS index + pickle into memory. Called once at startup."""
     global _docs_store, _vector_index, _embeddings_model
 
     meta_path  = FAISS_DIR / "faiss_metadata.pkl"
@@ -249,7 +269,6 @@ def load_knowledge_base():
 # ── Search ────────────────────────────────────────────────────────────
 
 def search_semantic(query: str, top_k: int = 5) -> List[dict]:
-    """Vector search using FAISS — returns docs with similarity_score."""
     global _embeddings_model
     if _vector_index is None or not _docs_store:
         return []
@@ -276,9 +295,7 @@ def search_semantic(query: str, top_k: int = 5) -> List[dict]:
 
 
 def search_keyword(query: str, limit: int = 50) -> List[dict]:
-    """Keyword search across title, author, content_full."""
     if not _docs_store:
-        print("WARNING: search_keyword called but _docs_store is empty")
         return []
     q = query.lower()
     words = [w for w in q.split() if len(w) > 2]
@@ -301,12 +318,10 @@ def search_keyword(query: str, limit: int = 50) -> List[dict]:
             d["similarity_score"] = min(score / 10.0, 1.0)
             results.append(d)
     results.sort(key=lambda x: x["similarity_score"], reverse=True)
-    print(f"Keyword search '{query}': {len(results)} results")
     return results[:limit]
 
 
 def search_by_title(title_query: str, limit: int = 5) -> List[dict]:
-    """Direct title match search."""
     q = title_query.lower().strip()
     results = []
     for doc in _docs_store:
@@ -320,7 +335,6 @@ def search_by_title(title_query: str, limit: int = 5) -> List[dict]:
 
 
 def get_relevant_context(query: str, top_k: int = 5) -> tuple:
-    """Get RAG context for a query."""
     docs = []
     seen_ids = set()
 
@@ -516,7 +530,7 @@ async def chat_stream(req: ChatRequest):
         generate(),
         media_type="text/event-stream",
         headers={
-            "Access-Control-Allow-Origin": "https://1421-foundation-ai-final-project.vercel.app",
+            "Access-Control-Allow-Origin": VERCEL_ORIGIN,
             "Access-Control-Allow-Credentials": "true",
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
