@@ -17,56 +17,53 @@ const NAV = [
 
 export default function App() {
   const [collapsed, setCollapsed] = useState(false);
+  const [logoError, setLogoError] = useState(false);
 
   return (
     <div className="flex h-screen bg-gray-100">
       <aside className={`bg-white border-r border-gray-200 flex flex-col flex-shrink-0 shadow-sm transition-all duration-300 ${collapsed ? "w-20" : "w-72"}`}>
 
-        {/* Logo */}
+        {/* Logo + collapse button */}
         <div className="px-4 py-4 border-b border-gray-200 flex items-center justify-between bg-gray-50">
+
           {!collapsed && (
             <div className="flex-1 flex items-center gap-3 px-1">
-              <img
-                src="/logo.jpg"
-                alt="1421 Foundation"
-                className="w-11 h-11 rounded-xl object-cover flex-shrink-0"
-                onError={(e) => {
-                  // Fallback to gold box if image missing
-                  const target = e.currentTarget;
-                  target.style.display = "none";
-                  const next = target.nextElementSibling as HTMLElement;
-                  if (next) next.style.display = "flex";
-                }}
-              />
-              <div
-                className="w-11 h-11 rounded-xl bg-gold items-center justify-center flex-shrink-0 hidden"
-              >
-                <span className="text-sm font-bold text-white tracking-tight">1421</span>
-              </div>
+              {!logoError ? (
+                <img
+                  src="/logo.jpeg"
+                  alt="1421 Foundation"
+                  className="w-11 h-11 rounded-xl object-cover flex-shrink-0"
+                  onError={() => setLogoError(true)}
+                />
+              ) : (
+                <div className="w-11 h-11 rounded-xl bg-gold flex items-center justify-center flex-shrink-0">
+                  <span className="text-sm font-bold text-white tracking-tight">1421</span>
+                </div>
+              )}
               <div>
                 <p className="text-base font-bold text-gray-900 leading-none">Foundation</p>
                 <p className="text-xs text-gray-400 mt-0.5">Research System</p>
               </div>
             </div>
           )}
+
           {collapsed && (
             <div className="flex-1 flex items-center justify-center">
-              <img
-                src="/logo.jpg"
-                alt="1421"
-                className="w-10 h-10 rounded-xl object-cover"
-                onError={(e) => {
-                  const target = e.currentTarget;
-                  target.style.display = "none";
-                  const next = target.nextElementSibling as HTMLElement;
-                  if (next) next.style.display = "flex";
-                }}
-              />
-              <div className="w-10 h-10 rounded-xl bg-gold items-center justify-center hidden">
-                <span className="text-xs font-bold text-white tracking-tight">1421</span>
-              </div>
+              {!logoError ? (
+                <img
+                  src="/logo.jpeg"
+                  alt="1421"
+                  className="w-10 h-10 rounded-xl object-cover"
+                  onError={() => setLogoError(true)}
+                />
+              ) : (
+                <div className="w-10 h-10 rounded-xl bg-gold flex items-center justify-center">
+                  <span className="text-xs font-bold text-white tracking-tight">1421</span>
+                </div>
+              )}
             </div>
           )}
+
           <button
             onClick={() => setCollapsed((c) => !c)}
             className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-200 transition-colors flex-shrink-0"
@@ -76,7 +73,7 @@ export default function App() {
           </button>
         </div>
 
-        {/* Nav */}
+        {/* Nav links */}
         <nav className="flex-1 px-3 py-5 space-y-1 overflow-y-auto">
           {NAV.map(({ to, label, icon: Icon }) => (
             <NavLink
@@ -102,7 +99,7 @@ export default function App() {
           ))}
         </nav>
 
-        {/* Footer */}
+        {/* User footer */}
         {!collapsed && (
           <div className="px-4 py-4 border-t border-gray-200">
             <div className="flex items-center gap-3 px-3 py-3 rounded-xl bg-gray-50 border border-gray-200">

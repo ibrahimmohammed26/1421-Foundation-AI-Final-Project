@@ -477,7 +477,7 @@ async def chat(req: ChatRequest):
     last = next((m["content"] for m in reversed(req.messages) if m["role"] == "user"), "")
     context, sources = "", []
     if req.use_documents and last:
-        context, sources = get_relevant_context(last, top_k=5)
+        context, sources = get_relevant_context(last, top_k=8)
     try:
         response = llm.invoke(_to_lc(_build_system(context), req.messages))
         return ChatResponse(
@@ -500,7 +500,7 @@ async def chat_stream(req: ChatRequest):
     last = next((m["content"] for m in reversed(req.messages) if m["role"] == "user"), "")
     context = ""
     if req.use_documents and last:
-        context, _ = get_relevant_context(last, top_k=5)
+        context, _ = get_relevant_context(last, top_k=8)
     lc_messages = _to_lc(_build_system(context), req.messages)
     async def generate():
         try:
@@ -524,7 +524,7 @@ async def chat_stream(req: ChatRequest):
 
 @app.get("/api/debug/rag")
 async def debug_rag(q: str = "Zheng He voyages"):
-    context, docs = get_relevant_context(q, top_k=5)
+    context, docs = get_relevant_context(q, top_k=8)
     return {
         "query":           q,
         "docs_found":      len(docs),
