@@ -1,11 +1,13 @@
 """
 1421 Foundation Research System - FastAPI Backend
-Data source: FAISS metadata pickle (SQLite is corrupted, pickle has everything)
 """
 
 import os
 import pickle
-import sqlite3
+import smtplib
+import json
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 from typing import Optional, List
 from pathlib import Path
@@ -23,15 +25,12 @@ import numpy as np
 
 from dotenv import load_dotenv
 load_dotenv()
+
 api_key = os.getenv("OPENAI_API_KEY")
 print(f"OPENAI_API_KEY loaded: {'Yes' if api_key else 'No'}")
-if api_key:
-    print(f"Key starts with: {api_key[:15]}...")
-    print(f"Key length: {len(api_key)}")
 
 app = FastAPI(title="1421 Foundation API", version="1.0.0")
 
-# ── CORS — custom middleware stamps header on EVERY response ──────────
 VERCEL_ORIGIN = "https://1421-foundation-ai-final-project.vercel.app"
 
 class CORSEverythingMiddleware(BaseHTTPMiddleware):
@@ -56,12 +55,57 @@ class CORSEverythingMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(CORSEverythingMiddleware)
 
-
-# Paths
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR  = BASE_DIR / "data"
-DB_PATH   = DATA_DIR / "knowledge_base.db"
 FAISS_DIR = DATA_DIR / "vector_databases" / "main_index"
+
+# ── Email config ──────────────────────────────────────────────────────
+# Set these in Render environment variables:
+# SMTP_EMAIL    = your Gmail address (e.g. yourname@gmail.com)
+# SMTP_PASSWORD = your Gmail app password (16-char, not your main password)
+# NOTIFY_EMAIL  = Ian's email address
+SMTP_EMAIL    = os.getenv("SMTP_EMAIL", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+NOTIFY_EMAIL  = os.getenv("NOTIFY_EMAIL", "")
+
+def send_feedback_email(name: str, email: str, feedback_type: str, message: str):
+    """Send feedback notification email via Gmail SMTP."""
+    if not SMTP_EMAIL or not SMTP_PASSWORD:
+        print("WARNING: SMTP not configured — skipping email")
+        return
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = f"[1421 Foundation] New Feedback: {feedback_type}"
+        msg["From"]    = SMTP_EMAIL
+        msg["To"]      = NOTIFY_EMAIL or SMTP_EMAIL  # send to Ian, fallback to self
+
+        body = f"""
+New feedback submitted via the 1421 Foundation Research System.
+
+Name:    {name or 'Anonymous'}
+Email:   {email}
+Type:    {feedback_type}
+Date:    {datetime.now().strftime('%d %b %Y %H:%M')}
+
+Message:
+{message}
+
+---
+1421 Foundation Research System
+        """.strip()
+
+        msg.attach(MIMEText(body, "plain"))
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(SMTP_EMAIL, SMTP_PASSWORD)
+            recipients = [SMTP_EMAIL]
+            if NOTIFY_EMAIL and NOTIFY_EMAIL != SMTP_EMAIL:
+                recipients.append(NOTIFY_EMAIL)
+            server.sendmail(SMTP_EMAIL, recipients, msg.as_string())
+
+        print(f"Feedback email sent to {recipients}")
+    except Exception as e:
+        print(f"Email send error: {e}")
 
 # ── LLM ──────────────────────────────────────────────────────────────
 
@@ -92,13 +136,11 @@ def get_llm():
         temperature=0.7,
     )
 
-
 def get_embeddings_fn():
     return OpenAIEmbeddings(
         model="text-embedding-3-small",
         api_key=os.getenv("OPENAI_API_KEY"),
     )
-
 
 # ── Models ────────────────────────────────────────────────────────────
 
@@ -131,7 +173,6 @@ class Document(BaseModel):
     page_number: Optional[int] = None
     similarity_score: Optional[float] = None
 
-
 # ── Voyage locations ──────────────────────────────────────────────────
 
 VOYAGE_LOCATIONS = [
@@ -151,13 +192,11 @@ VOYAGE_LOCATIONS = [
     {"name": "Zanzibar",  "lat": -6.17, "lon":  39.20, "year": 1419, "event": "Trade agreements established"},
 ]
 
-
-# ── In-memory document store ──────────────────────────────────────────
+# ── Document store ────────────────────────────────────────────────────
 
 _docs_store: List[dict] = []
 _vector_index = None
 _embeddings_model = None
-
 
 def _clean_text(text: str) -> str:
     import re
@@ -186,7 +225,6 @@ def _clean_text(text: str) -> str:
     result = " ".join(cleaned)
     result = re.sub(r"  +", " ", result)
     return result.strip()
-
 
 def _meta_to_doc(idx: int, text: str, meta: dict, doc_id) -> dict:
     clean = _clean_text(text)
@@ -218,41 +256,31 @@ def _meta_to_doc(idx: int, text: str, meta: dict, doc_id) -> dict:
         "similarity_score": None,
     }
 
-
 def load_knowledge_base():
     global _docs_store, _vector_index, _embeddings_model
-
     meta_path  = FAISS_DIR / "faiss_metadata.pkl"
     index_path = FAISS_DIR / "faiss_index.bin"
-
     if not meta_path.exists():
         print(f"ERROR: {meta_path} not found")
         return
-
     with open(meta_path, "rb") as f:
         data = pickle.load(f)
-
     documents    = data.get("documents",    [])
     metadatas    = data.get("metadatas",    [])
     document_ids = data.get("document_ids", list(range(len(documents))))
-
     _docs_store = []
     for i in range(len(documents)):
         text = documents[i]    if i < len(documents)    else ""
         meta = metadatas[i]    if i < len(metadatas)    else {}
         did  = document_ids[i] if i < len(document_ids) else i
         _docs_store.append(_meta_to_doc(i, text, meta, did))
-
     print(f"OK: Loaded {len(_docs_store)} documents from pickle")
-
     if index_path.exists():
         _vector_index = faiss.read_index(str(index_path))
         print(f"OK: Loaded FAISS index with {_vector_index.ntotal} vectors")
     else:
         print(f"WARNING: FAISS index not found at {index_path}")
-
-    print("OK: Knowledge base ready (embeddings load on first query)")
-
+    print("OK: Knowledge base ready")
 
 # ── Search ────────────────────────────────────────────────────────────
 
@@ -275,12 +303,10 @@ def search_semantic(query: str, top_k: int = 5) -> List[dict]:
                 doc = dict(_docs_store[idx])
                 doc["similarity_score"] = float(distances[0][i])
                 results.append(doc)
-        print(f"Semantic search '{query}': {len(results)} results")
         return results
     except Exception as e:
         print(f"ERROR semantic search: {e}")
         return []
-
 
 def search_keyword(query: str, limit: int = 50) -> List[dict]:
     if not _docs_store:
@@ -290,10 +316,10 @@ def search_keyword(query: str, limit: int = 50) -> List[dict]:
     results = []
     for doc in _docs_store:
         score   = 0
-        title   = doc.get("title",        "").lower()
-        author  = doc.get("author",       "").lower()
+        title   = doc.get("title",           "").lower()
+        author  = doc.get("author",          "").lower()
         preview = doc.get("content_preview", "").lower()
-        full    = doc.get("content_full", "").lower()
+        full    = doc.get("content_full",    "").lower()
         if q in title:   score += 5
         if q in author:  score += 3
         if q in preview: score += 2
@@ -308,7 +334,6 @@ def search_keyword(query: str, limit: int = 50) -> List[dict]:
     results.sort(key=lambda x: x["similarity_score"], reverse=True)
     return results[:limit]
 
-
 def search_by_title(title_query: str, limit: int = 5) -> List[dict]:
     q = title_query.lower().strip()
     results = []
@@ -321,11 +346,9 @@ def search_by_title(title_query: str, limit: int = 5) -> List[dict]:
     results.sort(key=lambda x: len(x["title"]))
     return results[:limit]
 
-
 def get_relevant_context(query: str, top_k: int = 5) -> tuple:
     docs = []
     seen_ids = set()
-
     import re
     title_patterns = [
         r'(?:article|document|paper|report|piece|post)\s+(?:about|called|titled|named|on)\s+["\']?(.+?)["\']?$',
@@ -338,27 +361,22 @@ def get_relevant_context(query: str, top_k: int = 5) -> tuple:
         if match:
             title_hit = match.group(1).strip()
             break
-
     if title_hit:
         for d in search_by_title(title_hit):
             if d["id"] not in seen_ids:
                 docs.append(d)
                 seen_ids.add(d["id"])
-
     for d in search_semantic(query, top_k):
         if d["id"] not in seen_ids:
             docs.append(d)
             seen_ids.add(d["id"])
-
     if not docs:
         for d in search_keyword(query, top_k):
             if d["id"] not in seen_ids:
                 docs.append(d)
                 seen_ids.add(d["id"])
-
     if not docs:
         return "", []
-
     context = "Relevant documents from the 1421 Foundation knowledge base:\n\n"
     for i, doc in enumerate(docs[:top_k], 1):
         context += f"[Document {i}] {doc['title']}"
@@ -373,9 +391,7 @@ def get_relevant_context(query: str, top_k: int = 5) -> tuple:
         if doc.get("tags"):
             context += f"Tags: {', '.join(doc['tags'])}\n"
         context += "\n"
-
     return context, docs[:top_k]
-
 
 # ── Routes ────────────────────────────────────────────────────────────
 
@@ -383,13 +399,9 @@ def get_relevant_context(query: str, top_k: int = 5) -> tuple:
 def root():
     return {"status": "ok", "service": "1421 Foundation API", "docs_loaded": len(_docs_store)}
 
-
 @app.get("/api/locations")
 def get_locations(max_year: int = 1421):
     return [loc for loc in VOYAGE_LOCATIONS if loc["year"] <= max_year]
-
-
-# ── Documents ─────────────────────────────────────────────────────────
 
 @app.get("/api/documents")
 async def get_documents(limit: int = Query(default=50, le=500), offset: int = 0):
@@ -399,7 +411,6 @@ async def get_documents(limit: int = Query(default=50, le=500), offset: int = 0)
     paged = _docs_store[offset: offset + limit]
     safe  = [{k: v for k, v in d.items() if k != "content_full"} for d in paged]
     return {"documents": safe, "total": total, "limit": limit, "offset": offset}
-
 
 @app.get("/api/documents/search")
 async def search_documents_endpoint(q: str, limit: int = 50):
@@ -420,26 +431,20 @@ async def search_documents_endpoint(q: str, limit: int = 50):
     final = [{k: v for k, v in d.items() if k != "content_full"} for d in results[:limit]]
     return {"results": final, "total": len(final), "query": q}
 
-
 @app.get("/api/documents/types")
 async def get_document_types():
     types = list({d["type"] for d in _docs_store if d["type"] and d["type"] != "unknown"})
     return {"types": sorted(types)}
-
 
 @app.get("/api/documents/years")
 async def get_document_years():
     years = sorted({d["year"] for d in _docs_store if d["year"] and d["year"] > 0}, reverse=True)
     return {"years": years}
 
-
 @app.get("/api/documents/authors")
 async def get_document_authors():
     authors = sorted({d["author"] for d in _docs_store if d["author"] and d["author"] != "Unknown"})
     return {"authors": authors}
-
-
-# ── Chat helpers ──────────────────────────────────────────────────────
 
 def _build_system(context: str) -> str:
     s  = SYSTEM_PROMPT + "\n\n"
@@ -457,7 +462,6 @@ def _build_system(context: str) -> str:
     )
     return s
 
-
 def _to_lc(system: str, messages: list) -> list:
     lc = [SystemMessage(content=system)]
     for m in messages:
@@ -466,9 +470,6 @@ def _to_lc(system: str, messages: list) -> list:
         elif m["role"] == "assistant":
             lc.append(AIMessage(content=m["content"]))
     return lc
-
-
-# ── Chat endpoints ────────────────────────────────────────────────────
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
@@ -493,7 +494,6 @@ async def chat(req: ChatRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.post("/api/chat/stream")
 async def chat_stream(req: ChatRequest):
     llm  = get_llm()
@@ -501,9 +501,7 @@ async def chat_stream(req: ChatRequest):
     context = ""
     if req.use_documents and last:
         context, _ = get_relevant_context(last, top_k=5)
-
     lc_messages = _to_lc(_build_system(context), req.messages)
-
     async def generate():
         try:
             async for chunk in llm.astream(lc_messages):
@@ -513,7 +511,6 @@ async def chat_stream(req: ChatRequest):
             yield "data: [DONE]\n\n"
         except Exception as e:
             yield f"data: ERROR: {str(e)}\n\n"
-
     return StreamingResponse(
         generate(),
         media_type="text/event-stream",
@@ -525,9 +522,6 @@ async def chat_stream(req: ChatRequest):
         }
     )
 
-
-# ── RAG debug ─────────────────────────────────────────────────────────
-
 @app.get("/api/debug/rag")
 async def debug_rag(q: str = "Zheng He voyages"):
     context, docs = get_relevant_context(q, top_k=5)
@@ -538,15 +532,12 @@ async def debug_rag(q: str = "Zheng He voyages"):
         "faiss_loaded":    _vector_index is not None,
         "faiss_vectors":   _vector_index.ntotal if _vector_index else 0,
         "store_size":      len(_docs_store),
-        "context_preview": context[:2000] if context else "(empty — no docs matched)",
+        "context_preview": context[:2000] if context else "(empty)",
     }
-
-
-# ── Feedback ──────────────────────────────────────────────────────────
 
 @app.post("/api/feedback")
 def submit_feedback(req: FeedbackRequest):
-    import json
+    # Save to file
     feedback_path = DATA_DIR / "feedback.json"
     try:
         existing = []
@@ -564,14 +555,19 @@ def submit_feedback(req: FeedbackRequest):
             json.dump(existing, f, indent=2)
     except Exception as e:
         print(f"Feedback store error: {e}")
+
+    # Send email
+    send_feedback_email(
+        name=req.name or "Anonymous",
+        email=req.email,
+        feedback_type=req.feedback_type,
+        message=req.message,
+    )
+
     return {"status": "ok", "message": "Feedback received"}
-
-
-# ── Stats ─────────────────────────────────────────────────────────────
 
 @app.get("/api/stats")
 def get_stats():
-    import json
     feedback_count = 0
     feedback_path  = DATA_DIR / "feedback.json"
     try:
@@ -586,9 +582,6 @@ def get_stats():
         "documents_count": len(_docs_store) or 347,
     }
 
-
-# ── Test ──────────────────────────────────────────────────────────────
-
 @app.get("/api/test-db")
 async def test_db():
     sample = [{"id": d["id"], "title": d["title"]} for d in _docs_store[:5]]
@@ -599,11 +592,9 @@ async def test_db():
         "sample":        sample,
     }
 
-
-# ── Startup ───────────────────────────────────────────────────────────
-
 @app.on_event("startup")
 def init_app():
     print(f"BASE_DIR : {BASE_DIR}")
     print(f"DATA_DIR : {DATA_DIR}  (exists={DATA_DIR.exists()})")
+    print(f"Email configured: {bool(SMTP_EMAIL and SMTP_PASSWORD)}")
     load_knowledge_base()
