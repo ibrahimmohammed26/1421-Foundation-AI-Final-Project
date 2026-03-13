@@ -69,43 +69,47 @@ SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 NOTIFY_EMAIL  = os.getenv("NOTIFY_EMAIL", "")
 
 def send_feedback_email(name: str, email: str, feedback_type: str, message: str):
-    """Send feedback notification email via Gmail SMTP."""
+    """Send feedback notification email via Gmail SMTP — runs in background thread."""
     if not SMTP_EMAIL or not SMTP_PASSWORD:
-        print("WARNING: SMTP not configured — skipping email")
+        print("WARNING: SMTP_EMAIL or SMTP_PASSWORD not set — skipping email")
         return
     try:
         msg = MIMEMultipart("alternative")
         msg["Subject"] = f"[1421 Foundation] New Feedback: {feedback_type}"
         msg["From"]    = SMTP_EMAIL
-        msg["To"]      = NOTIFY_EMAIL or SMTP_EMAIL  # send to Ian, fallback to self
+        msg["To"]      = NOTIFY_EMAIL or SMTP_EMAIL
 
-        body = f"""
-New feedback submitted via the 1421 Foundation Research System.
+        body = f"""New feedback submitted via the 1421 Foundation Research System.
 
-Name:    {name or 'Anonymous'}
-Email:   {email}
-Type:    {feedback_type}
-Date:    {datetime.now().strftime('%d %b %Y %H:%M')}
+Name:     {name}
+Email:    {email}
+Type:     {feedback_type}
+Date:     {datetime.now().strftime("%d %b %Y %H:%M")}
 
 Message:
 {message}
 
 ---
-1421 Foundation Research System
-        """.strip()
+1421 Foundation Research System""".strip()
 
         msg.attach(MIMEText(body, "plain"))
 
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        # 10 second timeout — won't hang the server
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465,
+                               context=None,
+                               timeout=10) as server:
             server.login(SMTP_EMAIL, SMTP_PASSWORD)
             recipients = [SMTP_EMAIL]
             if NOTIFY_EMAIL and NOTIFY_EMAIL != SMTP_EMAIL:
                 recipients.append(NOTIFY_EMAIL)
             server.sendmail(SMTP_EMAIL, recipients, msg.as_string())
-
-        print(f"Feedback email sent to {recipients}")
+        print(f"OK: Feedback email sent to {recipients}")
+    except smtplib.SMTPAuthenticationError:
+        print("ERROR: Gmail authentication failed — check SMTP_EMAIL and SMTP_PASSWORD (use App Password, not your main password)")
+    except smtplib.SMTPException as e:
+        print(f"ERROR: SMTP error sending feedback email: {e}")
     except Exception as e:
-        print(f"Email send error: {e}")
+        print(f"ERROR: Unexpected error sending feedback email: {e}")
 
 # ── LLM ──────────────────────────────────────────────────────────────
 
@@ -549,8 +553,10 @@ async def debug_rag(q: str = "Zheng He voyages"):
     }
 
 @app.post("/api/feedback")
-def submit_feedback(req: FeedbackRequest):
-    # Save to file
+async def submit_feedback(req: FeedbackRequest):
+    import asyncio
+
+    # Save to file first (fast, don't block on this)
     feedback_path = DATA_DIR / "feedback.json"
     try:
         existing = []
@@ -569,14 +575,17 @@ def submit_feedback(req: FeedbackRequest):
     except Exception as e:
         print(f"Feedback store error: {e}")
 
-    # Send email
-    send_feedback_email(
-        name=req.name or "Anonymous",
-        email=req.email,
-        feedback_type=req.feedback_type,
-        message=req.message,
+    # Send email in background — does NOT block the response
+    asyncio.get_event_loop().run_in_executor(
+        None,
+        send_feedback_email,
+        req.name or "Anonymous",
+        req.email,
+        req.feedback_type,
+        req.message,
     )
 
+    # Return immediately — don't wait for email
     return {"status": "ok", "message": "Feedback received"}
 
 @app.get("/api/stats")
