@@ -375,6 +375,19 @@ def get_relevant_context(query: str, top_k: int = 5) -> tuple:
             if d["id"] not in seen_ids:
                 docs.append(d)
                 seen_ids.add(d["id"])
+    # Deduplicate by normalised title (strips leading numbers, case-insensitive)
+    import re as _re
+    seen_titles: set = set()
+    unique_docs = []
+    for d in docs:
+        t = d.get("title", "").strip().lower()
+        t_norm = _re.sub(r"^\d+\s+", "", t).strip()
+        key = t_norm or t
+        if key and key not in seen_titles:
+            seen_titles.add(key)
+            unique_docs.append(d)
+    docs = unique_docs
+
     if not docs:
         return "", []
     context = "Relevant documents from the 1421 Foundation knowledge base:\n\n"

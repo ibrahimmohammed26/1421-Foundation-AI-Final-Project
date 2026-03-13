@@ -3,7 +3,7 @@ import {
   Send, Copy, Check, FileText, Trash2,
   ChevronDown, ChevronUp, Square,
 } from "lucide-react";
-import { streamChat, sendChatMessage } from "@/lib/api";
+import { streamChat } from "@/lib/api";
 
 interface Message {
   role: "user" | "assistant";
@@ -51,8 +51,30 @@ const chatStore = {
   notify() { this.listeners.forEach((fn) => fn()); },
   setMessages(msgs: Message[]) { this.messages = msgs; persistMessages(msgs); this.notify(); },
   setIsTyping(v: boolean) { this.isTyping = v; this.notify(); },
-  clear() { this.messages = []; this.isTyping = false; sessionStorage.removeItem(STORAGE_KEY); this.notify(); },
+  clear() {
+    this.messages = [];
+    this.isTyping = false;
+    sessionStorage.removeItem(STORAGE_KEY);
+    this.notify();
+  },
 };
+
+// Listen for clear events from Settings page
+window.addEventListener("storage", () => {
+  if (!sessionStorage.getItem(STORAGE_KEY)) {
+    chatStore.clear();
+  }
+});
+
+function deduplicateSources(sources: Source[]): Source[] {
+  const seen = new Set<string>();
+  return (sources || []).filter((s) => {
+    const key = s.title?.trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 
 function smartSpace(text: string): string {
   return text
@@ -79,11 +101,11 @@ function MessageContent({ content }: { content: string }) {
 }
 
 export default function Chat() {
-  const [messages, setMessagesLocal] = useState<Message[]>(() => chatStore.messages);
-  const [isTyping, setIsTypingLocal] = useState(() => chatStore.isTyping);
-  const [input, setInput]            = useState("");
-  const [copiedIdx, setCopiedIdx]    = useState<number | null>(null);
-  const [copiedAll, setCopiedAll]    = useState(false);
+  const [messages, setMessagesLocal]   = useState<Message[]>(() => chatStore.messages);
+  const [isTyping, setIsTypingLocal]   = useState(() => chatStore.isTyping);
+  const [input, setInput]              = useState("");
+  const [copiedIdx, setCopiedIdx]      = useState<number | null>(null);
+  const [copiedAll, setCopiedAll]      = useState(false);
   const [expandedSources, setExpandedSources] = useState<Set<number>>(new Set());
   const [showClearConfirm, setShowClearConfirm] = useState(false);
 
@@ -102,7 +124,6 @@ export default function Chat() {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Auto-grow textarea
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
@@ -112,7 +133,6 @@ export default function Chat() {
     el.style.overflowY = el.scrollHeight > maxH ? "auto" : "hidden";
   }, [input]);
 
-  // Stop generation
   const handleStop = useCallback(() => {
     chatStore.setIsTyping(false);
     const msgs = chatStore.messages;
@@ -143,22 +163,15 @@ export default function Chat() {
         content += chunk;
         chatStore.setMessages([...newMsgs, { role: "assistant", content, streaming: true }]);
       },
-      async () => {
+      // onDone — receives deduplicated sources directly from streamChat
+      (streamSources) => {
         if (!chatStore.isTyping) return;
         chatStore.setIsTyping(false);
-        try {
-          const full = await sendChatMessage(
-            newMsgs.map((m) => ({ role: m.role, content: m.content })),
-            undefined,
-            true
-          );
-          chatStore.setMessages([
-            ...newMsgs,
-            { role: "assistant", content, sources: full.sources || [], streaming: false },
-          ]);
-        } catch {
-          chatStore.setMessages([...newMsgs, { role: "assistant", content, streaming: false }]);
-        }
+        const uniqueSources = deduplicateSources(streamSources || []);
+        chatStore.setMessages([
+          ...newMsgs,
+          { role: "assistant", content, sources: uniqueSources, streaming: false },
+        ]);
       },
       (err) => {
         if (!chatStore.isTyping) return;
@@ -178,7 +191,9 @@ export default function Chat() {
   };
 
   const handleCopyAll = () => {
-    const full = messages.map((m) => `${m.role === "user" ? "You" : "1421 AI"}: ${m.content}`).join("\n\n");
+    const full = messages
+      .map((m) => `${m.role === "user" ? "You" : "1421 AI"}: ${m.content}`)
+      .join("\n\n");
     navigator.clipboard.writeText(full);
     setCopiedAll(true);
     setTimeout(() => setCopiedAll(false), 2000);
@@ -214,14 +229,18 @@ export default function Chat() {
       <div className="border-b border-gray-200 px-6 py-4 bg-white shadow-sm flex-shrink-0 flex items-center justify-between">
         <div>
           <h1 className="text-xl font-display font-bold text-black">1421 AI Chat</h1>
-          <p className="text-xs text-black mt-0.5">Ask about Chinese exploration &amp; the 1421 theory</p>
+          <p className="text-xs text-gray-500 mt-0.5">Ask about Chinese exploration &amp; the 1421 theory</p>
         </div>
         {hasMessages && (
           <div className="flex items-center gap-2">
-            <button onClick={handleCopyAll} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-medium text-black hover:border-gold hover:text-gold transition-colors bg-white">
-              {copiedAll ? <><Check className="h-3.5 w-3.5 text-emerald-600" /><span className="text-emerald-600">Copied</span></> : <><Copy className="h-3.5 w-3.5" /> Copy all</>}
+            <button onClick={handleCopyAll}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-medium text-gray-700 hover:border-gold hover:text-gold transition-colors bg-white">
+              {copiedAll
+                ? <><Check className="h-3.5 w-3.5 text-emerald-600" /><span className="text-emerald-600">Copied</span></>
+                : <><Copy className="h-3.5 w-3.5" /> Copy all</>}
             </button>
-            <button onClick={() => setShowClearConfirm(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-medium text-red-600 hover:border-red-400 hover:bg-red-50 transition-colors bg-white">
+            <button onClick={() => setShowClearConfirm(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-medium text-red-600 hover:border-red-400 hover:bg-red-50 transition-colors bg-white">
               <Trash2 className="h-3.5 w-3.5" /> Clear chat
             </button>
           </div>
@@ -233,13 +252,14 @@ export default function Chat() {
         {!hasMessages && (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <div className="w-20 h-20 rounded-2xl bg-gold flex items-center justify-center mb-5 shadow-md">
-              <span className="text-xl font-display font-bold text-white tracking-tight leading-none">1421</span>
+              <span className="text-xl font-display font-bold text-white tracking-tight">1421</span>
             </div>
             <h2 className="text-2xl font-display font-bold text-black mb-2">Welcome to 1421 AI</h2>
-            <p className="text-black max-w-md mb-6">Ask any question about Chinese maritime exploration.</p>
+            <p className="text-gray-600 max-w-md mb-6">Ask any question about Chinese maritime exploration.</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg w-full">
               {STARTERS.map((q) => (
-                <button key={q} onClick={() => handleSend(q)} className="text-left rounded-xl border border-gray-200 bg-white p-3 text-sm text-black hover:border-gold hover:bg-red-50 transition-all shadow-sm">
+                <button key={q} onClick={() => handleSend(q)}
+                  className="text-left rounded-xl border border-gray-200 bg-white p-3 text-sm text-gray-700 hover:border-gold hover:bg-red-50 transition-all shadow-sm">
                   {q}
                 </button>
               ))}
@@ -252,54 +272,82 @@ export default function Chat() {
           const hasContent  = msg.content.trim().length > 0;
           const showDots    = isStreaming && !hasContent;
           const showSources = expandedSources.has(idx);
-          const sourceCount = msg.sources?.length ?? 0;
+          // Always deduplicate before rendering
+          const sources     = deduplicateSources(msg.sources || []);
+          const sourceCount = sources.length;
 
           return (
             <div key={idx} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-              <div className={`max-w-[78%] rounded-2xl px-5 py-4 ${msg.role === "user" ? "bg-gold text-white rounded-br-md shadow-sm" : "bg-white border border-gray-200 text-black rounded-bl-md shadow-sm"}`}>
+              <div className={`max-w-[78%] rounded-2xl px-5 py-4 ${
+                msg.role === "user"
+                  ? "bg-gold text-white rounded-br-md shadow-sm"
+                  : "bg-white border border-gray-200 text-black rounded-bl-md shadow-sm"
+              }`}>
                 {showDots && (
                   <div className="flex items-center gap-1.5 py-1">
-                    <div className="h-2 w-2 rounded-full bg-gold animate-bounce" style={{ animationDelay: "0ms" }} />
-                    <div className="h-2 w-2 rounded-full bg-gold animate-bounce" style={{ animationDelay: "150ms" }} />
-                    <div className="h-2 w-2 rounded-full bg-gold animate-bounce" style={{ animationDelay: "300ms" }} />
+                    {[0, 150, 300].map((delay) => (
+                      <div key={delay} className="h-2 w-2 rounded-full bg-gold animate-bounce"
+                        style={{ animationDelay: `${delay}ms` }} />
+                    ))}
                   </div>
                 )}
-                {hasContent && (msg.role === "assistant" ? <MessageContent content={msg.content} /> : <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>)}
+
+                {hasContent && (
+                  msg.role === "assistant"
+                    ? <MessageContent content={msg.content} />
+                    : <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                )}
 
                 {msg.role === "assistant" && !isStreaming && hasContent && (
                   <>
                     <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-3 flex-wrap">
-                      <button onClick={() => handleCopy(msg.content, idx)} className="flex items-center gap-1.5 text-xs font-medium text-black hover:text-gold transition-colors">
-                        {copiedIdx === idx ? <><Check className="h-3.5 w-3.5 text-emerald-600" /><span className="text-emerald-600">Copied</span></> : <><Copy className="h-3.5 w-3.5" /> Copy</>}
+                      <button onClick={() => handleCopy(msg.content, idx)}
+                        className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gold transition-colors">
+                        {copiedIdx === idx
+                          ? <><Check className="h-3.5 w-3.5 text-emerald-600" /><span className="text-emerald-600">Copied</span></>
+                          : <><Copy className="h-3.5 w-3.5" /> Copy</>}
                       </button>
                       {sourceCount > 0 && (
-                        <button onClick={() => toggleSources(idx)} className="flex items-center gap-1.5 text-xs font-medium text-black hover:text-gold transition-colors">
-                          {showSources ? <><ChevronUp className="h-3.5 w-3.5" /> Hide sources</> : <><ChevronDown className="h-3.5 w-3.5" /> {sourceCount} source{sourceCount > 1 ? "s" : ""}</>}
+                        <button onClick={() => toggleSources(idx)}
+                          className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gold transition-colors">
+                          {showSources
+                            ? <><ChevronUp className="h-3.5 w-3.5" /> Hide sources</>
+                            : <><ChevronDown className="h-3.5 w-3.5" /> {sourceCount} source{sourceCount > 1 ? "s" : ""}</>}
                         </button>
                       )}
-                      <a href="/documents" className="flex items-center gap-1.5 text-xs font-medium text-gold border border-gold/30 rounded-lg px-2.5 py-1 bg-red-50 hover:bg-red-100 transition-colors">
+                      <a href="/documents"
+                        className="flex items-center gap-1.5 text-xs font-medium text-gold border border-gold/30 rounded-lg px-2.5 py-1 bg-red-50 hover:bg-red-100 transition-colors">
                         <FileText className="h-3.5 w-3.5" /> View documents
                       </a>
                     </div>
+
                     {showSources && sourceCount > 0 && (
                       <div className="mt-3 space-y-2">
-                        {msg.sources!.map((src, sIdx) => (
+                        {sources.map((src, sIdx) => (
                           <div key={sIdx} className="bg-gray-50 rounded-lg border border-gray-200 px-3 py-2">
                             <div className="flex items-start justify-between gap-2">
                               <div className="flex items-center gap-2 min-w-0">
                                 <FileText className="h-3.5 w-3.5 text-gold flex-shrink-0 mt-0.5" />
                                 <div className="min-w-0">
-                                  <p className="text-xs font-semibold text-black truncate">{src.title}</p>
-                                  <p className="text-xs text-black mt-0.5">{[src.author !== "Unknown" && src.author, src.year > 0 && src.year, src.type && src.type !== "unknown" && src.type].filter(Boolean).join(" · ")}</p>
+                                  <p className="text-xs font-semibold text-gray-900 truncate">{src.title}</p>
+                                  <p className="text-xs text-gray-500 mt-0.5">
+                                    {[
+                                      src.author !== "Unknown" && src.author,
+                                      src.year > 0 && src.year,
+                                      src.type && src.type !== "unknown" && src.type,
+                                    ].filter(Boolean).join(" · ")}
+                                  </p>
                                 </div>
                               </div>
                               {src.similarity != null && (
-                                <span className="text-xs font-semibold text-gold flex-shrink-0 bg-red-50 px-1.5 py-0.5 rounded border border-gold/20">{Math.round(src.similarity * 100)}%</span>
+                                <span className="text-xs font-semibold text-gold flex-shrink-0 bg-red-50 px-1.5 py-0.5 rounded border border-gold/20">
+                                  {Math.round(src.similarity * 100)}%
+                                </span>
                               )}
                             </div>
                           </div>
                         ))}
-                        <p className="text-xs text-black">These documents were retrieved from the knowledge base to inform this response.</p>
+                        <p className="text-xs text-gray-400">These documents were retrieved from the knowledge base to inform this response.</p>
                       </div>
                     )}
                   </>
@@ -322,35 +370,28 @@ export default function Chat() {
               onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
               placeholder="Ask a question…"
               rows={1}
-              className="w-full resize-none rounded-xl border border-gray-300 bg-white px-4 py-3 pr-16 text-sm text-black placeholder:text-black focus:outline-none focus:ring-2 focus:ring-gold/40 focus:border-gold"
+              className="w-full resize-none rounded-xl border border-gray-300 bg-white px-4 py-3 pr-16 text-sm text-black placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gold/40 focus:border-gold"
               style={{ minHeight: "48px", maxHeight: "200px", overflowY: "hidden" }}
             />
             {input.length > 0 && (
-              <span className="absolute bottom-3 right-3 text-xs text-black pointer-events-none">{input.length}</span>
+              <span className="absolute bottom-3 right-3 text-xs text-gray-400 pointer-events-none">{input.length}</span>
             )}
           </div>
-
-          {/* Send / Stop toggle */}
           {isTyping ? (
-            <button
-              onClick={handleStop}
+            <button onClick={handleStop}
               className="h-11 w-11 rounded-xl bg-gray-800 text-white hover:bg-gray-900 transition flex items-center justify-center flex-shrink-0 shadow-sm"
-              title="Stop generating"
-            >
+              title="Stop generating">
               <Square className="h-4 w-4 fill-white" />
             </button>
           ) : (
-            <button
-              onClick={() => handleSend()}
-              disabled={!input.trim()}
+            <button onClick={() => handleSend()} disabled={!input.trim()}
               className="h-11 w-11 rounded-xl bg-gold text-white disabled:opacity-40 hover:bg-gold-light transition flex items-center justify-center flex-shrink-0 shadow-sm"
-              title="Send message"
-            >
+              title="Send message">
               <Send className="h-4 w-4" />
             </button>
           )}
         </div>
-        <p className="text-xs text-black text-center mt-2">Press Enter to send · Shift+Enter for new line</p>
+        <p className="text-xs text-gray-400 text-center mt-2">Press Enter to send · Shift+Enter for new line</p>
       </div>
 
       {/* Clear Chat Modal */}
@@ -363,12 +404,19 @@ export default function Chat() {
               </div>
               <h3 className="text-base font-display font-bold text-gray-900">Clear Chat?</h3>
             </div>
-            <p className="text-sm text-gray-500 mb-1 leading-relaxed">This will permanently delete all messages in this conversation.</p>
+            <p className="text-sm text-gray-500 mb-4 leading-relaxed">
+              This will permanently delete all messages in this conversation.
+            </p>
             {isTyping && <p className="text-sm text-amber-600 font-medium mb-4">The current response will also be stopped.</p>}
-            {!isTyping && <div className="mb-4" />}
             <div className="flex gap-3 justify-end">
-              <button onClick={() => setShowClearConfirm(false)} className="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition-colors">Cancel</button>
-              <button onClick={handleClearConfirmed} className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700 transition-colors">Clear all</button>
+              <button onClick={() => setShowClearConfirm(false)}
+                className="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition-colors">
+                Cancel
+              </button>
+              <button onClick={handleClearConfirmed}
+                className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700 transition-colors">
+                Clear all
+              </button>
             </div>
           </div>
         </div>

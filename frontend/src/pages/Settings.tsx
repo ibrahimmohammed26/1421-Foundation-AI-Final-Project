@@ -5,19 +5,25 @@ import {
 } from "lucide-react";
 import { fetchStats } from "@/lib/api";
 
+// Import the same chatStore key used in Chat.tsx
+const STORAGE_KEY = "1421_chat_messages";
+
 export default function Settings() {
   const [showConfirmClear, setShowConfirmClear] = useState(false);
-  const [clearSuccess, setClearSuccess] = useState(false);
-  const [reindexing, setReindexing] = useState(false);
-  const [showSuccess, setShowSuccess] = useState(false);
-  const [docCount, setDocCount] = useState<number | null>(null);
+  const [clearSuccess, setClearSuccess]         = useState(false);
+  const [reindexing, setReindexing]             = useState(false);
+  const [showSuccess, setShowSuccess]           = useState(false);
+  const [docCount, setDocCount]                 = useState<number | null>(null);
 
   useEffect(() => {
     fetchStats().then((s) => setDocCount(s.documents_count)).catch(() => {});
   }, []);
 
+  // Clears the same sessionStorage key that Chat.tsx uses
   const handleClearChat = () => {
-    localStorage.removeItem("chatHistory");
+    sessionStorage.removeItem(STORAGE_KEY);
+    // Also dispatch a storage event so Chat.tsx reacts if open in same tab
+    window.dispatchEvent(new Event("storage"));
     setShowConfirmClear(false);
     setClearSuccess(true);
     setTimeout(() => setClearSuccess(false), 3000);
@@ -26,7 +32,7 @@ export default function Settings() {
   const handleReindexDocuments = async () => {
     setReindexing(true);
     try {
-      const res = await fetch("http://localhost:8000/api/documents/reindex", { method: "POST" });
+      const res = await fetch("/api/documents/reindex", { method: "POST" });
       if (res.ok) {
         setShowSuccess(true);
         setTimeout(() => setShowSuccess(false), 3000);
@@ -38,28 +44,25 @@ export default function Settings() {
     }
   };
 
+  // Export reads from sessionStorage using the correct key
   const handleExportData = () => {
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    const chatHistory = raw ? JSON.parse(raw) : [];
     const data = {
-      chatHistory: JSON.parse(localStorage.getItem("chatHistory") || "[]"),
+      chatHistory,
       exportDate: new Date().toISOString(),
+      totalMessages: chatHistory.length,
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `1421-data-${new Date().toISOString().split("T")[0]}.json`;
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href     = url;
+    a.download = `1421-chat-export-${new Date().toISOString().split("T")[0]}.json`;
     a.click();
+    URL.revokeObjectURL(url);
   };
 
-  const StatusRow = ({
-    icon: Icon,
-    label,
-    sub,
-  }: {
-    icon: React.ElementType;
-    label: string;
-    sub: string;
-  }) => (
+  const StatusRow = ({ icon: Icon, label, sub }: { icon: React.ElementType; label: string; sub: string }) => (
     <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-100">
       <div className="flex items-center gap-3">
         <Icon className="h-4 w-4 text-gray-400" />
@@ -82,7 +85,6 @@ export default function Settings() {
         <p className="text-xs text-gray-400 mt-0.5">Manage your data and system settings</p>
       </div>
 
-      {/* Centered content */}
       <div className="flex-1 overflow-y-auto flex items-start justify-center px-6 py-6">
         <div className="w-full max-w-2xl space-y-6">
 
@@ -93,29 +95,15 @@ export default function Settings() {
               Document Status
             </h3>
             <div className="space-y-3">
-              <StatusRow
-                icon={FileText}
-                label="Knowledge Base"
-                sub={docCount !== null ? `${docCount} documents indexed` : "Loading…"}
-              />
-              <StatusRow
-                icon={Database}
-                label="Vector Store (FAISS)"
-                sub="Semantic search index"
-              />
-              <StatusRow
-                icon={MessageSquare}
-                label="AI Language Model"
-                sub="GPT-4o-mini via OpenAI API"
-              />
+              <StatusRow icon={FileText}   label="Knowledge Base"          sub={docCount !== null ? `${docCount} documents indexed` : "Loading…"} />
+              <StatusRow icon={Database}   label="Vector Store (FAISS)"    sub="Semantic search index" />
+              <StatusRow icon={MessageSquare} label="AI Language Model"    sub="GPT-4o-mini via OpenAI API" />
             </div>
           </div>
 
           {/* Document Database */}
           <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-            <h3 className="text-lg font-display font-bold text-gray-900 mb-4">
-              Document Database
-            </h3>
+            <h3 className="text-lg font-display font-bold text-gray-900 mb-4">Document Database</h3>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <Database className="h-4 w-4 text-gray-400" />
@@ -124,11 +112,8 @@ export default function Settings() {
                   <p className="text-xs text-gray-400">Update the database with new or changed documents</p>
                 </div>
               </div>
-              <button
-                onClick={handleReindexDocuments}
-                disabled={reindexing}
-                className="px-4 py-2 bg-red-50 text-gold border border-gold/30 rounded-lg text-sm hover:bg-red-100 transition-colors disabled:opacity-50 flex items-center gap-2"
-              >
+              <button onClick={handleReindexDocuments} disabled={reindexing}
+                className="px-4 py-2 bg-red-50 text-gold border border-gold/30 rounded-lg text-sm hover:bg-red-100 transition-colors disabled:opacity-50 flex items-center gap-2">
                 <RefreshCw className={`h-4 w-4 ${reindexing ? "animate-spin" : ""}`} />
                 {reindexing ? "Reindexing…" : "Reindex"}
               </button>
@@ -147,10 +132,8 @@ export default function Settings() {
                     <p className="text-xs text-gray-400">Delete all your conversations</p>
                   </div>
                 </div>
-                <button
-                  onClick={() => setShowConfirmClear(true)}
-                  className="px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg text-sm hover:bg-red-100 transition-colors"
-                >
+                <button onClick={() => setShowConfirmClear(true)}
+                  className="px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg text-sm hover:bg-red-100 transition-colors">
                   Clear
                 </button>
               </div>
@@ -158,14 +141,12 @@ export default function Settings() {
                 <div className="flex items-center gap-3">
                   <Download className="h-4 w-4 text-gray-400" />
                   <div>
-                    <span className="text-sm text-gray-800">Export data</span>
+                    <span className="text-sm text-gray-800">Export chat history</span>
                     <p className="text-xs text-gray-400">Download your conversations as JSON</p>
                   </div>
                 </div>
-                <button
-                  onClick={handleExportData}
-                  className="px-4 py-2 bg-red-50 text-gold border border-gold/30 rounded-lg text-sm hover:bg-red-100 transition-colors"
-                >
+                <button onClick={handleExportData}
+                  className="px-4 py-2 bg-red-50 text-gold border border-gold/30 rounded-lg text-sm hover:bg-red-100 transition-colors">
                   Export
                 </button>
               </div>
@@ -177,32 +158,18 @@ export default function Settings() {
             <h3 className="text-lg font-display font-bold text-gray-900 mb-4">About</h3>
             <div className="space-y-3">
               <p className="text-sm text-gray-700">1421 Foundation Research System v1.0.0</p>
-              <p className="text-sm text-gray-500">
-                A platform for exploring Chinese maritime history using vector databases and AI.
-              </p>
+              <p className="text-sm text-gray-500">A platform for exploring Chinese maritime history using vector databases and AI.</p>
               <div className="flex flex-col gap-2 pt-1">
-                <a
-                  href="https://www.1421foundation.org/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 text-gold hover:text-gold-dark transition-colors text-sm"
-                >
-                  <ExternalLink className="h-4 w-4 flex-shrink-0" />
-                  1421 Foundation Website
+                <a href="https://www.1421foundation.org/" target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 text-gold hover:text-gold-dark transition-colors text-sm">
+                  <ExternalLink className="h-4 w-4 flex-shrink-0" /> 1421 Foundation Website
                 </a>
-                <a
-                  href="https://www.gavinmenzies.net/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 text-gold hover:text-gold-dark transition-colors text-sm"
-                >
-                  <ExternalLink className="h-4 w-4 flex-shrink-0" />
-                  Gavin Menzies Official Website
+                <a href="https://www.gavinmenzies.net/" target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 text-gold hover:text-gold-dark transition-colors text-sm">
+                  <ExternalLink className="h-4 w-4 flex-shrink-0" /> Gavin Menzies Official Website
                 </a>
               </div>
-              <div className="pt-3 text-xs text-gray-400">
-                © 2026 1421 Foundation. All rights reserved.
-              </div>
+              <div className="pt-3 text-xs text-gray-400">© 2026 1421 Foundation. All rights reserved.</div>
             </div>
           </div>
         </div>
@@ -213,22 +180,10 @@ export default function Settings() {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl border border-gray-200 p-6 max-w-md shadow-xl">
             <h3 className="text-lg font-display font-bold text-gray-900 mb-3">Clear Chat History?</h3>
-            <p className="text-sm text-gray-600 mb-6">
-              This will permanently delete all your conversations. This action cannot be undone.
-            </p>
+            <p className="text-sm text-gray-600 mb-6">This will permanently delete all conversations. This cannot be undone.</p>
             <div className="flex gap-3 justify-end">
-              <button
-                onClick={() => setShowConfirmClear(false)}
-                className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleClearChat}
-                className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 transition-colors"
-              >
-                Clear All
-              </button>
+              <button onClick={() => setShowConfirmClear(false)} className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700">Cancel</button>
+              <button onClick={handleClearChat} className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700">Clear All</button>
             </div>
           </div>
         </div>
@@ -236,14 +191,12 @@ export default function Settings() {
 
       {clearSuccess && (
         <div className="fixed bottom-6 right-6 bg-emerald-600 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2">
-          <Check className="h-4 w-4" />
-          <span className="text-sm">Chat history cleared</span>
+          <Check className="h-4 w-4" /><span className="text-sm">Chat history cleared</span>
         </div>
       )}
       {showSuccess && (
         <div className="fixed bottom-6 right-6 bg-emerald-600 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2">
-          <Check className="h-4 w-4" />
-          <span className="text-sm">Reindexing started</span>
+          <Check className="h-4 w-4" /><span className="text-sm">Reindexing started</span>
         </div>
       )}
     </div>

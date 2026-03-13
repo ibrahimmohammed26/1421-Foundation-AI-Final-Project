@@ -23,7 +23,7 @@ export default function App() {
     <div className="flex h-screen bg-gray-100">
       <aside className={`bg-white border-r border-gray-200 flex flex-col flex-shrink-0 shadow-sm transition-all duration-300 ${collapsed ? "w-20" : "w-72"}`}>
 
-        {/* Logo — fills entire top header */}
+        {/* Logo header — no text overlay, just image + collapse button */}
         <div className="relative border-b border-gray-200 flex-shrink-0 overflow-hidden" style={{ height: "80px" }}>
           {!logoError ? (
             <img
@@ -38,25 +38,10 @@ export default function App() {
             </div>
           )}
 
-          {/* Subtle overlay */}
-          <div className="absolute inset-0 bg-black/25" />
-
-          {/* Text over logo — hidden when collapsed */}
-          {!collapsed && (
-            <div className="absolute bottom-2 left-3 z-10">
-              <p className="text-sm font-bold text-white leading-none" style={{ textShadow: "0 1px 3px rgba(0,0,0,0.6)" }}>
-                Foundation
-              </p>
-              <p className="text-xs text-white/75 mt-0.5" style={{ textShadow: "0 1px 3px rgba(0,0,0,0.6)" }}>
-                Research System
-              </p>
-            </div>
-          )}
-
-          {/* Collapse button on top of logo */}
+          {/* Collapse button only — no text */}
           <button
             onClick={() => setCollapsed((c) => !c)}
-            className="absolute top-2 right-2 z-10 w-7 h-7 rounded-lg flex items-center justify-center text-white/80 hover:text-white hover:bg-white/20 transition-colors"
+            className="absolute top-2 right-2 z-10 w-7 h-7 rounded-lg flex items-center justify-center bg-black/30 text-white hover:bg-black/50 transition-colors"
             title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
             {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
