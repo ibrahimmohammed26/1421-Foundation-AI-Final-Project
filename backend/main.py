@@ -404,7 +404,7 @@ def get_locations(max_year: int = 1421):
     return [loc for loc in VOYAGE_LOCATIONS if loc["year"] <= max_year]
 
 @app.get("/api/documents")
-async def get_documents(limit: int = Query(default=50, le=500), offset: int = 0):
+async def get_documents(limit: int = Query(default=500, le=10000), offset: int = 0):
     if not _docs_store:
         return {"documents": [], "total": 0, "limit": limit, "offset": offset}
     total = len(_docs_store)

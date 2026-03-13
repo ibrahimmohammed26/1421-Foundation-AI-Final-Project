@@ -23,50 +23,40 @@ export default function App() {
     <div className="flex h-screen bg-gray-100">
       <aside className={`bg-white border-r border-gray-200 flex flex-col flex-shrink-0 shadow-sm transition-all duration-300 ${collapsed ? "w-20" : "w-72"}`}>
 
-        {/* Logo + collapse button */}
-        <div className="px-4 py-4 border-b border-gray-200 flex items-center justify-between bg-gray-50">
+        {/* Logo — fills entire top header */}
+        <div className="relative border-b border-gray-200 flex-shrink-0 overflow-hidden" style={{ height: "80px" }}>
+          {!logoError ? (
+            <img
+              src="/logo.jpeg"
+              alt="1421 Foundation"
+              className="absolute inset-0 w-full h-full object-cover"
+              onError={() => setLogoError(true)}
+            />
+          ) : (
+            <div className="absolute inset-0 bg-gold flex items-center justify-center">
+              <span className="text-xl font-bold text-white">1421</span>
+            </div>
+          )}
 
+          {/* Subtle overlay */}
+          <div className="absolute inset-0 bg-black/25" />
+
+          {/* Text over logo — hidden when collapsed */}
           {!collapsed && (
-            <div className="flex-1 flex items-center gap-3 px-1">
-              {!logoError ? (
-                <img
-                  src="/logo.jpeg"
-                  alt="1421 Foundation"
-                  className="w-11 h-11 rounded-xl object-cover flex-shrink-0"
-                  onError={() => setLogoError(true)}
-                />
-              ) : (
-                <div className="w-11 h-11 rounded-xl bg-gold flex items-center justify-center flex-shrink-0">
-                  <span className="text-sm font-bold text-white tracking-tight">1421</span>
-                </div>
-              )}
-              <div>
-                <p className="text-base font-bold text-gray-900 leading-none">Foundation</p>
-                <p className="text-xs text-gray-400 mt-0.5">Research System</p>
-              </div>
+            <div className="absolute bottom-2 left-3 z-10">
+              <p className="text-sm font-bold text-white leading-none" style={{ textShadow: "0 1px 3px rgba(0,0,0,0.6)" }}>
+                Foundation
+              </p>
+              <p className="text-xs text-white/75 mt-0.5" style={{ textShadow: "0 1px 3px rgba(0,0,0,0.6)" }}>
+                Research System
+              </p>
             </div>
           )}
 
-          {collapsed && (
-            <div className="flex-1 flex items-center justify-center">
-              {!logoError ? (
-                <img
-                  src="/logo.jpeg"
-                  alt="1421"
-                  className="w-10 h-10 rounded-xl object-cover"
-                  onError={() => setLogoError(true)}
-                />
-              ) : (
-                <div className="w-10 h-10 rounded-xl bg-gold flex items-center justify-center">
-                  <span className="text-xs font-bold text-white tracking-tight">1421</span>
-                </div>
-              )}
-            </div>
-          )}
-
+          {/* Collapse button on top of logo */}
           <button
             onClick={() => setCollapsed((c) => !c)}
-            className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-200 transition-colors flex-shrink-0"
+            className="absolute top-2 right-2 z-10 w-7 h-7 rounded-lg flex items-center justify-center text-white/80 hover:text-white hover:bg-white/20 transition-colors"
             title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
             {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
