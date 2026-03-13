@@ -14,6 +14,7 @@ export default function Settings() {
   const [reindexing, setReindexing]             = useState(false);
   const [showSuccess, setShowSuccess]           = useState(false);
   const [docCount, setDocCount]                 = useState<number | null>(null);
+  const [exportingDocs, setExportingDocs]       = useState(false);
 
   useEffect(() => {
     fetchStats().then((s) => setDocCount(s.documents_count)).catch(() => {});
@@ -41,6 +42,38 @@ export default function Settings() {
       console.error(e);
     } finally {
       setReindexing(false);
+    }
+  };
+
+  const handleExportDocuments = async () => {
+    setExportingDocs(true);
+    try {
+      // Fetch all documents in batches of 500
+      const allDocs: object[] = [];
+      let offset = 0;
+      const batchSize = 500;
+      while (true) {
+        const res = await fetch(`/api/documents?limit=${batchSize}&offset=${offset}`);
+        if (!res.ok) break;
+        const data = await res.json();
+        allDocs.push(...data.documents);
+        if (allDocs.length >= data.total || data.documents.length < batchSize) break;
+        offset += batchSize;
+      }
+      const blob = new Blob(
+        [JSON.stringify({ documents: allDocs, total: allDocs.length, exportDate: new Date().toISOString() }, null, 2)],
+        { type: "application/json" }
+      );
+      const url = URL.createObjectURL(blob);
+      const a   = document.createElement("a");
+      a.href     = url;
+      a.download = `1421-knowledge-base-${new Date().toISOString().split("T")[0]}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error("Export documents failed", e);
+    } finally {
+      setExportingDocs(false);
     }
   };
 
@@ -148,6 +181,21 @@ export default function Settings() {
                 <button onClick={handleExportData}
                   className="px-4 py-2 bg-red-50 text-gold border border-gold/30 rounded-lg text-sm hover:bg-red-100 transition-colors">
                   Export
+                </button>
+              </div>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <FileText className="h-4 w-4 text-gray-400" />
+                  <div>
+                    <span className="text-sm text-gray-800">Export knowledge base</span>
+                    <p className="text-xs text-gray-400">Download all {docCount ?? "…"} documents as JSON</p>
+                  </div>
+                </div>
+                <button onClick={handleExportDocuments} disabled={exportingDocs}
+                  className="px-4 py-2 bg-red-50 text-gold border border-gold/30 rounded-lg text-sm hover:bg-red-100 transition-colors disabled:opacity-50 flex items-center gap-2">
+                  {exportingDocs
+                    ? <><RefreshCw className="h-3.5 w-3.5 animate-spin" /> Exporting…</>
+                    : <><Download className="h-3.5 w-3.5" /> Export</>}
                 </button>
               </div>
             </div>

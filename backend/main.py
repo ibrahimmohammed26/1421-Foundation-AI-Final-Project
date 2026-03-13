@@ -554,9 +554,9 @@ async def debug_rag(q: str = "Zheng He voyages"):
 
 @app.post("/api/feedback")
 async def submit_feedback(req: FeedbackRequest):
-    import asyncio
+    import asyncio, concurrent.futures
 
-    # Save to file first (fast, don't block on this)
+    # Save to file
     feedback_path = DATA_DIR / "feedback.json"
     try:
         existing = []
@@ -572,20 +572,29 @@ async def submit_feedback(req: FeedbackRequest):
         })
         with open(feedback_path, "w") as f:
             json.dump(existing, f, indent=2)
+        print(f"Feedback saved to file OK")
     except Exception as e:
         print(f"Feedback store error: {e}")
 
-    # Send email in background — does NOT block the response
-    asyncio.get_event_loop().run_in_executor(
-        None,
-        send_feedback_email,
-        req.name or "Anonymous",
-        req.email,
-        req.feedback_type,
-        req.message,
-    )
+    # Log env var status so we can diagnose
+    print(f"SMTP_EMAIL set: {bool(SMTP_EMAIL)}")
+    print(f"SMTP_PASSWORD set: {bool(SMTP_PASSWORD)}")
+    print(f"NOTIFY_EMAIL set: {bool(NOTIFY_EMAIL)}")
+    print(f"SMTP_EMAIL value starts: {SMTP_EMAIL[:5] if SMTP_EMAIL else 'EMPTY'}")
+    print(f"NOTIFY_EMAIL value: {NOTIFY_EMAIL if NOTIFY_EMAIL else 'EMPTY'}")
 
-    # Return immediately — don't wait for email
+    # Send email in thread pool — non-blocking, with full error logging
+    loop = asyncio.get_event_loop()
+    with concurrent.futures.ThreadPoolExecutor() as pool:
+        loop.run_in_executor(
+            pool,
+            send_feedback_email,
+            req.name or "Anonymous",
+            req.email,
+            req.feedback_type,
+            req.message,
+        )
+
     return {"status": "ok", "message": "Feedback received"}
 
 @app.get("/api/stats")
