@@ -96,8 +96,16 @@ export default function VoyageMap() {
     setDocsLoading(true);
     setRelatedDocs([]);
     try {
-      const res = await searchDocuments(`${loc.name} ${loc.event} Zheng He`, 5);
-      setRelatedDocs(res.results as RelatedDoc[]);
+      const res = await searchDocuments(`${loc.name} ${loc.event} Zheng He`, 10);
+      // Deduplicate by normalised title
+      const seen = new Set<string>();
+      const unique = (res.results as RelatedDoc[]).filter((doc) => {
+        const key = doc.title.trim().toLowerCase().replace(/^[\d\s"']+/, "");
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      setRelatedDocs(unique.slice(0, 5));
     } catch {
       setRelatedDocs([]);
     } finally {
