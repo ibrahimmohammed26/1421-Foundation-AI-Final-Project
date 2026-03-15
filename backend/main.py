@@ -4,10 +4,8 @@
 
 import os
 import pickle
-import smtplib
+import resend
 import json
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 from typing import Optional, List
 from pathlib import Path
@@ -61,64 +59,49 @@ FAISS_DIR = DATA_DIR / "vector_databases" / "main_index"
 
 # ── Email config ──────────────────────────────────────────────────────
 # Set these in Render environment variables:
-# SMTP_EMAIL    = your Gmail address (e.g. yourname@gmail.com)
-# SMTP_PASSWORD = your Gmail app password (16-char, not your main password)
-# NOTIFY_EMAIL  = Ian's email address
-SMTP_EMAIL    = os.getenv("SMTP_EMAIL", "")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
-NOTIFY_EMAIL  = os.getenv("NOTIFY_EMAIL", "")
+# RESEND_API_KEY = your Resend API key (from resend.com)
+# NOTIFY_EMAIL   = email address to receive feedback (e.g. Ian's email)
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+NOTIFY_EMAIL   = os.getenv("NOTIFY_EMAIL",  "")
 
 def send_feedback_email(name: str, email: str, feedback_type: str, message: str):
-    """Send feedback notification email via Gmail SMTP — runs in background thread."""
-    if not SMTP_EMAIL or not SMTP_PASSWORD:
-        print("WARNING: SMTP_EMAIL or SMTP_PASSWORD not set — skipping email")
+    """Send feedback email via Resend HTTP API — works on Render free tier."""
+    if not RESEND_API_KEY:
+        print("WARNING: RESEND_API_KEY not set — skipping email")
         return
     try:
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = f"[1421 Foundation] New Feedback: {feedback_type}"
-        msg["From"]    = SMTP_EMAIL
-        msg["To"]      = NOTIFY_EMAIL or SMTP_EMAIL
-
-        body = f"""New feedback submitted via the 1421 Foundation Research System.
-
-Name:     {name}
-Email:    {email}
-Type:     {feedback_type}
-Date:     {datetime.now().strftime("%d %b %Y %H:%M")}
-
-Message:
-{message}
-
----
-1421 Foundation Research System""".strip()
-
-        msg.attach(MIMEText(body, "plain"))
-
-        # 10 second timeout — won't hang the server
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465,
-                               context=None,
-                               timeout=10) as server:
-            server.login(SMTP_EMAIL, SMTP_PASSWORD)
-            recipients = [SMTP_EMAIL]
-            if NOTIFY_EMAIL and NOTIFY_EMAIL != SMTP_EMAIL:
-                recipients.append(NOTIFY_EMAIL)
-            server.sendmail(SMTP_EMAIL, recipients, msg.as_string())
-        print(f"OK: Feedback email sent to {recipients}")
-    except smtplib.SMTPAuthenticationError:
-        print("ERROR: Gmail authentication failed — check SMTP_EMAIL and SMTP_PASSWORD (use App Password, not your main password)")
-    except smtplib.SMTPException as e:
-        print(f"ERROR: SMTP error sending feedback email: {e}")
+        resend.api_key = RESEND_API_KEY
+        to_addr = NOTIFY_EMAIL if NOTIFY_EMAIL else "ibrahimalim2605@gmail.com"
+        r = resend.Emails.send({
+            "from": "onboarding@resend.dev",
+            "to": to_addr,
+            "subject": f"[1421 Foundation] New Feedback: {feedback_type}",
+            "html": f"""
+                <h2 style="color:#8B0000;">New Feedback - 1421 Foundation Research System</h2>
+                <table style="font-family:Arial,sans-serif;font-size:14px;border-collapse:collapse;">
+                    <tr><td style="padding:6px 12px;font-weight:bold;">Name</td><td style="padding:6px 12px;">{name}</td></tr>
+                    <tr><td style="padding:6px 12px;font-weight:bold;">Email</td><td style="padding:6px 12px;">{email}</td></tr>
+                    <tr><td style="padding:6px 12px;font-weight:bold;">Type</td><td style="padding:6px 12px;">{feedback_type}</td></tr>
+                    <tr><td style="padding:6px 12px;font-weight:bold;">Date</td><td style="padding:6px 12px;">{datetime.now().strftime("%d %b %Y %H:%M")}</td></tr>
+                </table>
+                <h3 style="color:#8B0000;">Message</h3>
+                <p style="font-family:Arial,sans-serif;font-size:14px;background:#f9f9f9;padding:12px;border-left:4px solid #8B0000;">{message}</p>
+                <hr/>
+                <p style="font-size:12px;color:#999;">Sent from 1421 Foundation Research System</p>
+            """
+        })
+        print(f"OK: Feedback email sent via Resend, id={r.get('id', '?')}")
     except Exception as e:
-        print(f"ERROR: Unexpected error sending feedback email: {e}")
+        print(f"ERROR: Resend email failed: {e}")
 
 # ── LLM ──────────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """You are a professional historian and research assistant for the 1421 Foundation,
-specialising in Chinese maritime exploration during the Ming dynasty (1368–1644), particularly
+specialising in Chinese maritime exploration during the Ming dynasty (1368-1644), particularly
 the voyages of Admiral Zheng He and the controversial 1421 hypothesis by Gavin Menzies.
 
 You have access to the 1421 Foundation's full research knowledge base. When a user asks about
-an article, document, or piece of research — whether they mention its title, topic, or author —
+an article, document, or piece of research - whether they mention its title, topic, or author -
 you must find and summarise the relevant document(s) from the context provided. Always reference
 documents by name and number e.g. [Document 1], and include key details such as the author,
 year, and main findings or arguments.
@@ -129,7 +112,7 @@ balanced when presenting contested theories. Structure responses with clear para
 
 IMPORTANT: You must ALWAYS ground your answers in the provided documents. If the user asks
 about a specific article or document title, locate it in the context and report its full content.
-Never say you cannot access the documents — they are provided to you in this prompt."""
+Never say you cannot access the documents - they are provided to you in this prompt."""
 
 
 def get_llm():
@@ -379,7 +362,6 @@ def get_relevant_context(query: str, top_k: int = 5) -> tuple:
             if d["id"] not in seen_ids:
                 docs.append(d)
                 seen_ids.add(d["id"])
-    # Deduplicate by normalised title (strips leading numbers, case-insensitive)
     import re as _re
     seen_titles: set = set()
     unique_docs = []
@@ -468,7 +450,7 @@ def _build_system(context: str) -> str:
     if context:
         s += context
     else:
-        s += "(No specific documents matched this query — answer from general historical knowledge.)\n\n"
+        s += "(No specific documents matched this query - answer from general historical knowledge.)\n\n"
     s += (
         "\nWhen answering:\n"
         "1. Cite documents using [Document X] references\n"
@@ -572,18 +554,15 @@ async def submit_feedback(req: FeedbackRequest):
         })
         with open(feedback_path, "w") as f:
             json.dump(existing, f, indent=2)
-        print(f"Feedback saved to file OK")
+        print("Feedback saved to file OK")
     except Exception as e:
         print(f"Feedback store error: {e}")
 
-    # Log env var status so we can diagnose
-    print(f"SMTP_EMAIL set: {bool(SMTP_EMAIL)}")
-    print(f"SMTP_PASSWORD set: {bool(SMTP_PASSWORD)}")
-    print(f"NOTIFY_EMAIL set: {bool(NOTIFY_EMAIL)}")
-    print(f"SMTP_EMAIL value starts: {SMTP_EMAIL[:5] if SMTP_EMAIL else 'EMPTY'}")
-    print(f"NOTIFY_EMAIL value: {NOTIFY_EMAIL if NOTIFY_EMAIL else 'EMPTY'}")
+    # Log env var status
+    print(f"RESEND_API_KEY set: {bool(RESEND_API_KEY)}")
+    print(f"NOTIFY_EMAIL set: {bool(NOTIFY_EMAIL)}, value: {NOTIFY_EMAIL or 'EMPTY'}")
 
-    # Send email in thread pool — non-blocking, with full error logging
+    # Send email in background thread - does NOT block the response
     loop = asyncio.get_event_loop()
     with concurrent.futures.ThreadPoolExecutor() as pool:
         loop.run_in_executor(
@@ -627,5 +606,5 @@ async def test_db():
 def init_app():
     print(f"BASE_DIR : {BASE_DIR}")
     print(f"DATA_DIR : {DATA_DIR}  (exists={DATA_DIR.exists()})")
-    print(f"Email configured: {bool(SMTP_EMAIL and SMTP_PASSWORD)}")
+    print(f"Email configured: {bool(RESEND_API_KEY)}")
     load_knowledge_base()
