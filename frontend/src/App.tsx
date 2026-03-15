@@ -27,7 +27,7 @@ export default function App() {
         <div className="relative border-b border-gray-200 flex-shrink-0 overflow-hidden" style={{ height: "80px" }}>
           {!logoError ? (
             <img
-              src="/logo.jpeg"
+              src="/logo.JPG"
               alt="1421 Foundation"
               className="absolute inset-0 w-full h-full object-cover"
               onError={() => setLogoError(true)}

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import {
-  MessageSquare, Download, Database, RefreshCw,
+  MessageSquare, Download, Database, RefreshCw, Trash2,
   Check, ExternalLink, FileText, Activity,
 } from "lucide-react";
 import { fetchStats } from "@/lib/api";
@@ -166,8 +166,8 @@ export default function Settings() {
                   </div>
                 </div>
                 <button onClick={() => setShowConfirmClear(true)}
-                  className="px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg text-sm hover:bg-red-100 transition-colors">
-                  Clear
+                  className="px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg text-sm hover:bg-red-100 transition-colors flex items-center gap-2">
+                  <Trash2 className="h-3.5 w-3.5" /> Clear
                 </button>
               </div>
               <div className="flex items-center justify-between">
@@ -179,8 +179,8 @@ export default function Settings() {
                   </div>
                 </div>
                 <button onClick={handleExportData}
-                  className="px-4 py-2 bg-red-50 text-gold border border-gold/30 rounded-lg text-sm hover:bg-red-100 transition-colors">
-                  Export
+                  className="px-4 py-2 bg-red-50 text-gold border border-gold/30 rounded-lg text-sm hover:bg-red-100 transition-colors flex items-center gap-2">
+                  <Download className="h-3.5 w-3.5" /> Export
                 </button>
               </div>
               <div className="flex items-center justify-between">
@@ -215,6 +215,10 @@ export default function Settings() {
                 <a href="https://www.gavinmenzies.net/" target="_blank" rel="noopener noreferrer"
                   className="inline-flex items-center gap-2 text-gold hover:text-gold-dark transition-colors text-sm">
                   <ExternalLink className="h-4 w-4 flex-shrink-0" /> Gavin Menzies Official Website
+                </a>
+                <a href="https://www.facebook.com/1421foundation/" target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 text-gold hover:text-gold-dark transition-colors text-sm">
+                  <ExternalLink className="h-4 w-4 flex-shrink-0" /> 1421 Foundation Facebook
                 </a>
               </div>
               <div className="pt-3 text-xs text-gray-400">© 2026 1421 Foundation. All rights reserved.</div>
