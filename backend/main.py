@@ -236,7 +236,7 @@ def _meta_to_doc(idx: int, text: str, meta: dict, doc_id) -> dict:
         "type":             meta.get("source_type", meta.get("type", "document")) or "document",
         "description":      clean,
         "tags":             meta.get("tags", []) or [],
-        "content_preview":  clean[:300] + ("..." if len(clean) > 300 else ""),
+        "content_preview":  clean,
         "content_full":     clean,
         "source_file":      meta.get("source", meta.get("source_type", "")) or "",
         "page_number":      meta.get("page", None),
@@ -386,7 +386,7 @@ def get_relevant_context(query: str, top_k: int = 5) -> tuple:
         context += f"\nType: {doc['type']}\n"
         full = doc.get("content_full", doc.get("content_preview", ""))
         if full:
-            context += f"{full[:1200]}\n"
+            context += f"{full[:2000]}\n"
         if doc.get("tags"):
             context += f"Tags: {', '.join(doc['tags'])}\n"
         context += "\n"
