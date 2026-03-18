@@ -10,10 +10,19 @@ import {
 
 const PAGE_SIZE = 50;
 
-// Strip any leading "Content:" prefix that may come from the backend
 function cleanDescription(text: string | undefined): string {
   if (!text) return "";
   return text.replace(/^content:\s*/i, "").trim();
+}
+
+// Sort documents by numeric ID ascending (1, 2, 3...)
+function sortByIdAsc(docs: Document[]): Document[] {
+  return [...docs].sort((a, b) => {
+    const aNum = parseInt(a.id, 10);
+    const bNum = parseInt(b.id, 10);
+    if (!isNaN(aNum) && !isNaN(bNum)) return aNum - bNum;
+    return a.id.localeCompare(b.id);
+  });
 }
 
 function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void }) {
@@ -24,14 +33,8 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
   }, [onClose]);
 
   const MetaRow = ({
-    icon: Icon,
-    label,
-    value,
-  }: {
-    icon: React.ElementType;
-    label: string;
-    value: React.ReactNode;
-  }) => (
+    icon: Icon, label, value,
+  }: { icon: React.ElementType; label: string; value: React.ReactNode }) => (
     <div className="flex items-start gap-3 py-2.5 border-b border-gray-100 last:border-0">
       <div className="flex items-center gap-2 w-28 flex-shrink-0">
         <Icon className="h-3.5 w-3.5 text-gray-400" />
@@ -41,7 +44,6 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
     </div>
   );
 
-  // Modal always shows full description; fall back to content_preview only if description missing
   const description = cleanDescription(doc.description) || cleanDescription(doc.content_preview);
 
   return (
@@ -51,11 +53,11 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
     >
       <div className="bg-white border border-gray-200 rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl">
 
-        {/* Modal header */}
+        {/* Header */}
         <div className="flex items-start justify-between gap-4 px-6 py-5 border-b border-gray-100">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-9 h-9 rounded-lg bg-gold flex items-center justify-center flex-shrink-0">
-              <FileText className="h-4 w-4 text-white" />
+              <span className="text-white text-xs font-bold">#{doc.id}</span>
             </div>
             <div className="min-w-0">
               <h2 className="text-base font-display font-bold text-gray-900 leading-snug break-words">
@@ -74,10 +76,9 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
           </button>
         </div>
 
-        {/* Modal body */}
+        {/* Body */}
         <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-6">
 
-          {/* Status badges */}
           <div className="flex items-center gap-2 flex-wrap">
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-medium text-emerald-700">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
@@ -95,8 +96,8 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
             )}
           </div>
 
-          {/* Metadata */}
           <div className="bg-gray-50 rounded-xl border border-gray-100 px-4 py-1">
+            <MetaRow icon={Hash} label="Doc No." value={<span className="font-mono font-bold text-gray-700">#{doc.id}</span>} />
             {doc.author && doc.author !== "Unknown" && (
               <MetaRow icon={User} label="Author" value={doc.author} />
             )}
@@ -104,60 +105,37 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
               <MetaRow icon={Calendar} label="Year" value={doc.year} />
             )}
             {doc.type && doc.type !== "unknown" && (
-              <MetaRow
-                icon={Layers}
-                label="Type"
-                value={<span className="capitalize">{doc.type}</span>}
-              />
+              <MetaRow icon={Layers} label="Type" value={<span className="capitalize">{doc.type}</span>} />
             )}
             {doc.source_file && doc.source_file !== "Unknown" && (
               <MetaRow
                 icon={ExternalLink}
                 label="Source"
-                value={
-                  <span className="font-mono text-xs text-gray-600 break-all">
-                    {doc.source_file}
-                  </span>
-                }
+                value={<span className="font-mono text-xs text-gray-600 break-all">{doc.source_file}</span>}
               />
             )}
             {doc.page_number != null && (
               <MetaRow icon={Hash} label="Page" value={`p. ${doc.page_number}`} />
             )}
-            <MetaRow
-              icon={Hash}
-              label="Doc ID"
-              value={<span className="font-mono text-xs text-gray-400">{doc.id}</span>}
-            />
           </div>
 
-          {/* Full content — scrollable box */}
           {description && (
             <div>
-              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
-                Content
-              </h3>
+              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Content</h3>
               <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 max-h-72 overflow-y-auto">
-                <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
-                  {description}
-                </p>
+                <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{description}</p>
               </div>
             </div>
           )}
 
-          {/* Tags */}
           {doc.tags && doc.tags.length > 0 && (
             <div>
               <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-2">
-                <Tag className="h-3.5 w-3.5" />
-                Tags
+                <Tag className="h-3.5 w-3.5" /> Tags
               </h3>
               <div className="flex flex-wrap gap-2">
                 {doc.tags.map((tag, idx) => (
-                  <span
-                    key={idx}
-                    className="px-2.5 py-1 bg-gray-100 border border-gray-200 rounded-lg text-xs text-gray-600"
-                  >
+                  <span key={idx} className="px-2.5 py-1 bg-gray-100 border border-gray-200 rounded-lg text-xs text-gray-600">
                     {tag}
                   </span>
                 ))}
@@ -166,7 +144,7 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
           )}
         </div>
 
-        {/* Modal footer */}
+        {/* Footer */}
         <div className="px-6 py-4 border-t border-gray-100 flex justify-end">
           <button
             onClick={onClose}
@@ -181,22 +159,22 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
 }
 
 export default function Documents() {
-  const [documents, setDocuments] = useState<Document[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searching, setSearching] = useState(false);
-  const [isSearchMode, setIsSearchMode] = useState(false);
+  const [documents, setDocuments]         = useState<Document[]>([]);
+  const [loading, setLoading]             = useState(true);
+  const [searchQuery, setSearchQuery]     = useState("");
+  const [searching, setSearching]         = useState(false);
+  const [isSearchMode, setIsSearchMode]   = useState(false);
 
-  const [types, setTypes] = useState<string[]>([]);
-  const [years, setYears] = useState<number[]>([]);
-  const [selectedType, setSelectedType] = useState<string>("all");
-  const [selectedYear, setSelectedYear] = useState<number | "all">("all");
-  const [showFilters, setShowFilters] = useState(false);
+  const [types, setTypes]                 = useState<string[]>([]);
+  const [years, setYears]                 = useState<number[]>([]);
+  const [selectedType, setSelectedType]   = useState<string>("all");
+  const [selectedYear, setSelectedYear]   = useState<number | "all">("all");
+  const [showFilters, setShowFilters]     = useState(false);
 
   const [totalDocuments, setTotalDocuments] = useState(0);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [error, setError] = useState<string | null>(null);
-  const [selectedDoc, setSelectedDoc] = useState<Document | null>(null);
+  const [currentPage, setCurrentPage]     = useState(1);
+  const [error, setError]                 = useState<string | null>(null);
+  const [selectedDoc, setSelectedDoc]     = useState<Document | null>(null);
 
   useEffect(() => {
     getDocumentTypes().then(setTypes).catch(() => {});
@@ -208,9 +186,10 @@ export default function Documents() {
     setIsSearchMode(false);
     try {
       const data = await getAllDocuments(PAGE_SIZE, (page - 1) * PAGE_SIZE);
-      setDocuments(data.documents ?? []);
+      // Sort by numeric ID ascending: 1, 2, 3...
+      setDocuments(sortByIdAsc(data.documents ?? []));
       setTotalDocuments(data.total ?? 0);
-    } catch (err) {
+    } catch {
       setError("Failed to load documents. Is the backend running?");
     } finally {
       setLoading(false);
@@ -225,6 +204,7 @@ export default function Documents() {
     setIsSearchMode(true);
     try {
       const data = await searchDocuments(searchQuery, 200);
+      // Search results sorted by relevance, not ID — keep as-is
       setDocuments(data.results || []);
       setTotalDocuments(data.results?.length || 0);
     } catch (err) {
@@ -341,7 +321,7 @@ export default function Documents() {
           <span>
             {isSearchMode
               ? `${filteredDocuments.length} result${filteredDocuments.length !== 1 ? "s" : ""} for "${searchQuery}"`
-              : `Showing ${(currentPage - 1) * PAGE_SIZE + 1}–${Math.min(currentPage * PAGE_SIZE, totalDocuments)} of ${totalDocuments} documents`}
+              : `Showing docs #${(currentPage - 1) * PAGE_SIZE + 1}–#${Math.min(currentPage * PAGE_SIZE, totalDocuments)} of ${totalDocuments}`}
           </span>
           {!isSearchMode && totalPages > 1 && (
             <div className="flex items-center gap-2">
@@ -395,7 +375,10 @@ export default function Documents() {
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-3 mb-2">
-                        <FileText className="h-5 w-5 text-gold flex-shrink-0" />
+                        {/* Sequential number badge */}
+                        <div className="w-8 h-8 rounded-lg bg-gold/10 border border-gold/30 flex items-center justify-center flex-shrink-0">
+                          <span className="text-gold text-xs font-bold">#{doc.id}</span>
+                        </div>
                         <h3 className="text-base font-display font-semibold text-gray-900 leading-snug">
                           {doc.title}
                         </h3>
