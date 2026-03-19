@@ -57,7 +57,7 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
         <div className="flex items-start justify-between gap-4 px-6 py-5 border-b border-gray-100">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-9 h-9 rounded-lg bg-gold flex items-center justify-center flex-shrink-0">
-              <span className="text-white text-xs font-bold">#{doc.id}</span>
+              <span className="text-white text-xs font-bold">{doc.id}</span>
             </div>
             <div className="min-w-0">
               <h2 className="text-base font-display font-bold text-gray-900 leading-snug break-words">
@@ -97,7 +97,7 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
           </div>
 
           <div className="bg-gray-50 rounded-xl border border-gray-100 px-4 py-1">
-            <MetaRow icon={Hash} label="Doc No." value={<span className="font-mono font-bold text-gray-700">#{doc.id}</span>} />
+            <MetaRow icon={Hash} label="Doc No." value={<span className="font-mono font-bold text-gray-700">{doc.id}</span>} />
             {doc.author && doc.author !== "Unknown" && (
               <MetaRow icon={User} label="Author" value={doc.author} />
             )}
@@ -186,7 +186,6 @@ export default function Documents() {
     setIsSearchMode(false);
     try {
       const data = await getAllDocuments(PAGE_SIZE, (page - 1) * PAGE_SIZE);
-      // Sort by numeric ID ascending: 1, 2, 3...
       setDocuments(sortByIdAsc(data.documents ?? []));
       setTotalDocuments(data.total ?? 0);
     } catch {
@@ -204,7 +203,6 @@ export default function Documents() {
     setIsSearchMode(true);
     try {
       const data = await searchDocuments(searchQuery, 200);
-      // Search results sorted by relevance, not ID — keep as-is
       setDocuments(data.results || []);
       setTotalDocuments(data.results?.length || 0);
     } catch (err) {
@@ -321,7 +319,7 @@ export default function Documents() {
           <span>
             {isSearchMode
               ? `${filteredDocuments.length} result${filteredDocuments.length !== 1 ? "s" : ""} for "${searchQuery}"`
-              : `Showing docs #${(currentPage - 1) * PAGE_SIZE + 1}–#${Math.min(currentPage * PAGE_SIZE, totalDocuments)} of ${totalDocuments}`}
+              : `Showing docs ${(currentPage - 1) * PAGE_SIZE + 1}–${Math.min(currentPage * PAGE_SIZE, totalDocuments)} of ${totalDocuments}`}
           </span>
           {!isSearchMode && totalPages > 1 && (
             <div className="flex items-center gap-2">
@@ -377,7 +375,7 @@ export default function Documents() {
                       <div className="flex items-center gap-3 mb-2">
                         {/* Sequential number badge */}
                         <div className="w-8 h-8 rounded-lg bg-gold/10 border border-gold/30 flex items-center justify-center flex-shrink-0">
-                          <span className="text-gold text-xs font-bold">#{doc.id}</span>
+                          <span className="text-gold text-xs font-bold">{doc.id}</span>
                         </div>
                         <h3 className="text-base font-display font-semibold text-gray-900 leading-snug">
                           {doc.title}
