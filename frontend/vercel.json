@@ -1,8 +1,8 @@
 {
   "rewrites": [
     {
-      "source": "/api/(.*)",
-      "destination": "https://one421-foundation-ai-final-project.onrender.com/api/$1"
+      "source": "/api/:path*",
+      "destination": "https://meaningful-joane-1421foundation-9bf6435b.koyeb.app/api/:path*"
     }
   ]
 }
