@@ -6,6 +6,7 @@ import os
 import pickle
 import resend
 import json
+import subprocess
 from datetime import datetime
 from typing import Optional, List
 from pathlib import Path
@@ -604,6 +605,15 @@ async def test_db():
 
 @app.on_event("startup")
 def init_app():
+    result = subprocess.run(
+        ["find", "/", "-name", "faiss_metadata.pkl", "-type", "f"],
+        capture_output=True, text=True
+    )
+    print("FOUND PICKLE AT:", result.stdout)
+    print(f"BASE_DIR : {BASE_DIR}")
+    print(f"DATA_DIR : {DATA_DIR}  (exists={DATA_DIR.exists()})")
+    print(f"Email configured: {bool(RESEND_API_KEY)}")
+    load_knowledge_base()
     print(f"BASE_DIR : {BASE_DIR}")
     print(f"DATA_DIR : {DATA_DIR}  (exists={DATA_DIR.exists()})")
     print(f"Email configured: {bool(RESEND_API_KEY)}")
