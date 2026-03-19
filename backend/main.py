@@ -55,7 +55,7 @@ class CORSEverythingMiddleware(BaseHTTPMiddleware):
 app.add_middleware(CORSEverythingMiddleware)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR  = Path(os.getenv("DATA_DIR", str(BASE_DIR / "data"))) 
+DATA_DIR  = BASE_DIR / "data"
 FAISS_DIR = DATA_DIR / "vector_databases" / "main_index"
 
 # ── Email config ──────────────────────────────────────────────────────
