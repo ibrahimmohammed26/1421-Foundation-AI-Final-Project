@@ -22,7 +22,7 @@ export default function Dashboard() {
   const [stats, setStats] = useState<Stats>({
     feedback_count: 0,
     locations_count: 14,
-    documents_count: 344,
+    documents_count: 299,
   });
   const [loading, setLoading] = useState(true);
 
