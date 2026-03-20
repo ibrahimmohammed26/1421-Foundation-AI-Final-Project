@@ -52,22 +52,22 @@ function MapController({ center, zoom }: { center: [number, number]; zoom: numbe
 export default function VoyageMap() {
   const navigate = useNavigate();
 
-  const [locations, setLocations]           = useState<Location[]>([]);
-  const [loading, setLoading]               = useState(true);
-  const [currentYear, setCurrentYear]       = useState(1368);
-  const [isPlaying, setIsPlaying]           = useState(false);
-  const [speed, setSpeed]                   = useState(1);
+  const [locations, setLocations]               = useState<Location[]>([]);
+  const [loading, setLoading]                   = useState(true);
+  const [currentYear, setCurrentYear]           = useState(1403);
+  const [isPlaying, setIsPlaying]               = useState(false);
+  const [speed, setSpeed]                       = useState(1);
   const [selectedLocation, setSelectedLocation] = useState<Location | null>(null);
-  const [relatedDocs, setRelatedDocs]       = useState<RelatedDoc[]>([]);
-  const [docsLoading, setDocsLoading]       = useState(false);
-  const [showDocsPanel, setShowDocsPanel]   = useState(false);
-  const [mapCenter, setMapCenter]           = useState<[number, number]>([20, 100]);
-  const [mapZoom, setMapZoom]               = useState(4);
+  const [relatedDocs, setRelatedDocs]           = useState<RelatedDoc[]>([]);
+  const [docsLoading, setDocsLoading]           = useState(false);
+  const [showDocsPanel, setShowDocsPanel]       = useState(false);
+  const [mapCenter, setMapCenter]               = useState<[number, number]>([20, 100]);
+  const [mapZoom, setMapZoom]                   = useState(4);
   const animationRef  = useRef<number>();
   const lastUpdateRef = useRef<number>(Date.now());
 
-  const MIN_YEAR = 1368;
-  const MAX_YEAR = 1421;
+  const MIN_YEAR = 1403;
+  const MAX_YEAR = 1433;
 
   useEffect(() => {
     fetchLocations(MAX_YEAR).then((d) => { setLocations(d); setLoading(false); });
@@ -135,6 +135,7 @@ export default function VoyageMap() {
   }
 
   const progress = ((currentYear - MIN_YEAR) / (MAX_YEAR - MIN_YEAR)) * 100;
+
   const handleReset = () => {
     setIsPlaying(false);
     setCurrentYear(MIN_YEAR);
@@ -161,7 +162,7 @@ export default function VoyageMap() {
       <div className="border-b border-gray-200 px-6 py-4 bg-white shadow-sm flex-shrink-0">
         <h1 className="text-xl font-display font-bold text-gray-900">Voyage Map</h1>
         <p className="text-xs text-gray-400 mt-0.5">
-          Explore Zheng He's treasure fleet routes ({MIN_YEAR}–{MAX_YEAR}) — click a location to view related documents
+          Explore Zheng He's voyage routes ({MIN_YEAR}–{MAX_YEAR}) — click a location to view related documents
         </p>
       </div>
 
@@ -281,7 +282,6 @@ export default function VoyageMap() {
                   {doc.content_preview && (
                     <p className="text-xs text-gray-600 mt-1.5 leading-relaxed line-clamp-3">{doc.content_preview}</p>
                   )}
-                  {/* Navigate to documents page searching by document ID */}
                   <button
                     onClick={() => navigate(`/documents?search=${encodeURIComponent(doc.id)}`)}
                     className="mt-2 text-xs text-gold font-semibold flex items-center gap-1 hover:underline"

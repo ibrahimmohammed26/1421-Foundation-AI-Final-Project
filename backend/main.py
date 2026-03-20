@@ -166,22 +166,28 @@ class Document(BaseModel):
 
 # ── Voyage locations ──────────────────────────────────────────────────
 
+# Replace VOYAGE_LOCATIONS in main.py with this:
+
 VOYAGE_LOCATIONS = [
-    {"name": "Nanjing",   "lat": 32.06, "lon": 118.80, "year": 1368, "event": "Early Ming capital established"},
-    {"name": "Beijing",   "lat": 39.90, "lon": 116.41, "year": 1403, "event": "Capital moved to Beijing"},
-    {"name": "Champa",    "lat": 10.82, "lon": 106.63, "year": 1405, "event": "Southeast Asian ally"},
-    {"name": "Calicut",   "lat": 11.26, "lon":  75.78, "year": 1406, "event": "Zheng He fleet first arrived"},
-    {"name": "Sumatra",   "lat": -0.59, "lon": 101.34, "year": 1407, "event": "Strategic trading post established"},
-    {"name": "Java",      "lat": -7.61, "lon": 110.71, "year": 1407, "event": "Diplomatic missions conducted"},
-    {"name": "Siam",      "lat": 13.74, "lon": 100.52, "year": 1408, "event": "Diplomatic relations established"},
-    {"name": "Malacca",   "lat":  2.19, "lon": 102.25, "year": 1409, "event": "Strategic port established"},
-    {"name": "Sri Lanka", "lat":  7.87, "lon":  80.77, "year": 1409, "event": "Trilingual inscription erected"},
-    {"name": "Hormuz",    "lat": 27.16, "lon":  56.28, "year": 1414, "event": "Persian Gulf trade route opened"},
-    {"name": "Aden",      "lat": 12.79, "lon":  45.02, "year": 1417, "event": "Arabian Peninsula contact made"},
-    {"name": "Mombasa",   "lat": -4.04, "lon":  39.67, "year": 1418, "event": "East African trade commenced"},
-    {"name": "Mogadishu", "lat":  2.05, "lon":  45.32, "year": 1418, "event": "Somali coast exploration"},
-    {"name": "Zanzibar",  "lat": -6.17, "lon":  39.20, "year": 1419, "event": "Trade agreements established"},
+    {"name": "Nanjing",    "lat": 32.06,  "lon": 118.80, "year": 1403, "event": "Yongle Emperor commissions the treasure fleet from Nanjing"},
+    {"name": "Nanjing",    "lat": 32.06,  "lon": 118.80, "year": 1405, "event": "First voyage departs — 317 ships and 28,000 men set sail"},
+    {"name": "Champa",     "lat": 10.82,  "lon": 106.63, "year": 1405, "event": "First stop on Voyage 1 — Southeast Asian ally (modern Vietnam)"},
+    {"name": "Java",       "lat": -7.61,  "lon": 110.71, "year": 1406, "event": "Voyage 1 — diplomatic missions conducted on Java"},
+    {"name": "Sumatra",    "lat": -0.59,  "lon": 101.34, "year": 1406, "event": "Voyage 1 — strategic trading post established at Palembang"},
+    {"name": "Malacca",    "lat":  2.19,  "lon": 102.25, "year": 1406, "event": "Voyage 1 — key port established, local piracy suppressed"},
+    {"name": "Calicut",    "lat": 11.26,  "lon":  75.78, "year": 1407, "event": "Voyage 1 — primary destination on the Malabar Coast, India"},
+    {"name": "Siam",       "lat": 13.74,  "lon": 100.52, "year": 1408, "event": "Voyage 2 — diplomatic relations established (modern Thailand)"},
+    {"name": "Sri Lanka",  "lat":  7.87,  "lon":  80.77, "year": 1409, "event": "Voyage 2 — trilingual inscription erected at Galle"},
+    {"name": "Hormuz",     "lat": 27.16,  "lon":  56.28, "year": 1414, "event": "Voyage 4 — Persian Gulf reached for first time, 18 states sent tribute"},
+    {"name": "Aden",       "lat": 12.79,  "lon":  45.02, "year": 1417, "event": "Voyage 5 — Arabian Peninsula reached, gifts of zebras and lions received"},
+    {"name": "Mogadishu",  "lat":  2.05,  "lon":  45.32, "year": 1418, "event": "Voyage 5 — Somali coast, first Chinese fleet to reach East Africa"},
+    {"name": "Malindi",    "lat": -3.22,  "lon":  40.12, "year": 1418, "event": "Voyage 5 — Kenya coast, famous giraffe gifted to the Yongle Emperor"},
+    {"name": "Mombasa",    "lat": -4.04,  "lon":  39.67, "year": 1419, "event": "Voyage 5 — East African trade firmly established"},
+    {"name": "Zanzibar",   "lat": -6.17,  "lon":  39.20, "year": 1421, "event": "Voyage 6 — southernmost point of the treasure fleet voyages"},
+    {"name": "Jidda",      "lat": 21.49,  "lon":  39.19, "year": 1432, "event": "Voyage 7 — Red Sea reached, auxiliary fleet sent towards Mecca"},
+    {"name": "Calicut",    "lat": 11.26,  "lon":  75.78, "year": 1433, "event": "Voyage 7 — Zheng He dies here on the return journey, ending the voyages"},
 ]
+
 
 # ── Document store ────────────────────────────────────────────────────
 
@@ -403,7 +409,7 @@ def root():
     return {"status": "ok", "service": "1421 Foundation API", "docs_loaded": len(_docs_store)}
 
 @app.get("/api/locations")
-def get_locations(max_year: int = 1421):
+def get_locations(max_year: int = 1433):
     return [loc for loc in VOYAGE_LOCATIONS if loc["year"] <= max_year]
 
 @app.get("/api/documents")
