@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   MapContainer, TileLayer, Marker, Popup, Polyline, useMap,
 } from "react-leaflet";
@@ -49,6 +50,8 @@ function MapController({ center, zoom }: { center: [number, number]; zoom: numbe
 }
 
 export default function VoyageMap() {
+  const navigate = useNavigate();
+
   const [locations, setLocations]           = useState<Location[]>([]);
   const [loading, setLoading]               = useState(true);
   const [currentYear, setCurrentYear]       = useState(1368);
@@ -97,7 +100,6 @@ export default function VoyageMap() {
     setRelatedDocs([]);
     try {
       const res = await searchDocuments(`${loc.name} ${loc.event} Zheng He`, 10);
-      // Deduplicate by normalised title
       const seen = new Set<string>();
       const unique = (res.results as RelatedDoc[]).filter((doc) => {
         const key = doc.title.trim().toLowerCase().replace(/^[\d\s"']+/, "");
@@ -279,12 +281,13 @@ export default function VoyageMap() {
                   {doc.content_preview && (
                     <p className="text-xs text-gray-600 mt-1.5 leading-relaxed line-clamp-3">{doc.content_preview}</p>
                   )}
-                  <a
-                    href="/documents"
+                  {/* Navigate to documents page searching by document ID */}
+                  <button
+                    onClick={() => navigate(`/documents?search=${encodeURIComponent(doc.id)}`)}
                     className="mt-2 text-xs text-gold font-semibold flex items-center gap-1 hover:underline"
                   >
                     <FileText className="h-3 w-3" /> View in Documents
-                  </a>
+                  </button>
                 </div>
               ))}
             </div>

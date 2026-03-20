@@ -415,8 +415,38 @@ async def get_documents(limit: int = Query(default=500, le=10000), offset: int =
     safe  = [{k: v for k, v in d.items() if k != "content_full"} for d in paged]
     return {"documents": safe, "total": total, "limit": limit, "offset": offset}
 
+# Replace the existing search_documents_endpoint in main.py with this:
+
 @app.get("/api/documents/search")
 async def search_documents_endpoint(q: str, limit: int = 50):
+    results = []
+    seen = set()
+
+    # If query is a number, find exact ID match first
+    if q.strip().isdigit():
+        target_id = q.strip()
+        for d in _docs_store:
+            if d["id"] == target_id:
+                exact = dict(d)
+                exact["similarity_score"] = 1.0
+                results.append(exact)
+                seen.add(d["id"])
+                break
+
+    for d in search_by_title(q, 5):
+        if d["id"] not in seen:
+            results.append(d)
+            seen.add(d["id"])
+    for d in search_semantic(q, min(limit, 10)):
+        if d["id"] not in seen:
+            results.append(d)
+            seen.add(d["id"])
+    for d in search_keyword(q, limit):
+        if d["id"] not in seen:
+            results.append(d)
+            seen.add(d["id"])
+    final = [{k: v for k, v in d.items() if k != "content_full"} for d in results[:limit]]
+    return {"results": final, "total": len(final), "query": q}
     results = []
     seen = set()
     for d in search_by_title(q, 5):

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Search, FileText, Filter, X, ChevronLeft, ChevronRight,
   ExternalLink, Tag, User, Calendar, Layers, Hash, Eye,
@@ -15,7 +16,6 @@ function cleanDescription(text: string | undefined): string {
   return text.replace(/^content:\s*/i, "").trim();
 }
 
-// Sort documents by numeric ID ascending (1, 2, 3...)
 function sortByIdAsc(docs: Document[]): Document[] {
   return [...docs].sort((a, b) => {
     const aNum = parseInt(a.id, 10);
@@ -159,6 +159,8 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
 }
 
 export default function Documents() {
+  const [searchParams] = useSearchParams();
+
   const [documents, setDocuments]         = useState<Document[]>([]);
   const [loading, setLoading]             = useState(true);
   const [searchQuery, setSearchQuery]     = useState("");
@@ -195,7 +197,38 @@ export default function Documents() {
     }
   }, []);
 
-  useEffect(() => { loadDocuments(currentPage); }, [currentPage, loadDocuments]);
+  // Read ?search= query param on mount and auto-search
+  useEffect(() => {
+    const q = searchParams.get("search");
+    if (q) {
+      setSearchQuery(q);
+      setSearching(true);
+      setIsSearchMode(true);
+      searchDocuments(q, 200)
+        .then((data) => {
+          setDocuments(data.results || []);
+          setTotalDocuments(data.results?.length || 0);
+          // If exactly one result, open the modal automatically
+          if (data.results?.length === 1) {
+            setSelectedDoc(data.results[0]);
+          }
+        })
+        .catch(console.error)
+        .finally(() => {
+          setSearching(false);
+          setLoading(false);
+        });
+    } else {
+      loadDocuments(1);
+    }
+  }, []);
+
+  useEffect(() => {
+    const q = searchParams.get("search");
+    if (!q) {
+      loadDocuments(currentPage);
+    }
+  }, [currentPage]);
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) { setCurrentPage(1); loadDocuments(1); return; }
@@ -247,7 +280,7 @@ export default function Documents() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
                 type="text"
-                placeholder="Search by title, author, or content…"
+                placeholder="Search by title, author, content, or ID…"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleSearch()}
@@ -373,7 +406,6 @@ export default function Documents() {
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-3 mb-2">
-                        {/* Sequential number badge */}
                         <div className="w-8 h-8 rounded-lg bg-gold/10 border border-gold/30 flex items-center justify-center flex-shrink-0">
                           <span className="text-gold text-xs font-bold">{doc.id}</span>
                         </div>
@@ -381,7 +413,6 @@ export default function Documents() {
                           {doc.title}
                         </h3>
                       </div>
-                      {/* Metadata row */}
                       <div className="flex items-center gap-2 text-xs text-gray-400 mb-2 flex-wrap">
                         {doc.author && doc.author !== "Unknown" && <span>By {doc.author}</span>}
                         {doc.year > 0 && <><span>•</span><span>{doc.year}</span></>}
@@ -403,7 +434,6 @@ export default function Documents() {
                           Active
                         </span>
                       </div>
-                      {/* Content Preview */}
                       {doc.content_preview && (
                         <div className="mb-3 mt-4">
                           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Send, Copy, Check, FileText, Trash2,
   ChevronDown, ChevronUp, Square,
@@ -59,7 +60,6 @@ const chatStore = {
   },
 };
 
-// Listen for clear events from Settings page
 window.addEventListener("storage", () => {
   if (!sessionStorage.getItem(STORAGE_KEY)) {
     chatStore.clear();
@@ -101,6 +101,8 @@ function MessageContent({ content }: { content: string }) {
 }
 
 export default function Chat() {
+  const navigate = useNavigate();
+
   const [messages, setMessagesLocal]   = useState<Message[]>(() => chatStore.messages);
   const [isTyping, setIsTypingLocal]   = useState(() => chatStore.isTyping);
   const [input, setInput]              = useState("");
@@ -163,7 +165,6 @@ export default function Chat() {
         content += chunk;
         chatStore.setMessages([...newMsgs, { role: "assistant", content, streaming: true }]);
       },
-      // onDone — receives deduplicated sources directly from streamChat
       (streamSources) => {
         if (!chatStore.isTyping) return;
         chatStore.setIsTyping(false);
@@ -272,7 +273,6 @@ export default function Chat() {
           const hasContent  = msg.content.trim().length > 0;
           const showDots    = isStreaming && !hasContent;
           const showSources = expandedSources.has(idx);
-          // Always deduplicate before rendering
           const sources     = deduplicateSources(msg.sources || []);
           const sourceCount = sources.length;
 
@@ -315,10 +315,11 @@ export default function Chat() {
                             : <><ChevronDown className="h-3.5 w-3.5" /> {sourceCount} source{sourceCount > 1 ? "s" : ""}</>}
                         </button>
                       )}
-                      <a href="/documents"
+                      <button
+                        onClick={() => navigate("/documents")}
                         className="flex items-center gap-1.5 text-xs font-medium text-gold border border-gold/30 rounded-lg px-2.5 py-1 bg-red-50 hover:bg-red-100 transition-colors">
                         <FileText className="h-3.5 w-3.5" /> View documents
-                      </a>
+                      </button>
                     </div>
 
                     {showSources && sourceCount > 0 && (
@@ -345,6 +346,13 @@ export default function Chat() {
                                 </span>
                               )}
                             </div>
+                            {/* Navigate to documents page searching by title */}
+                            <button
+                              onClick={() => navigate(`/documents?search=${encodeURIComponent(src.title)}`)}
+                              className="mt-2 text-xs text-gold font-semibold flex items-center gap-1 hover:underline"
+                            >
+                              <FileText className="h-3 w-3" /> View in Documents
+                            </button>
                           </div>
                         ))}
                         <p className="text-xs text-gray-400">These documents were retrieved from the knowledge base to inform this response.</p>
