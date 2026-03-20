@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const STORAGE_KEY = "1421_chat_messages";
 
 interface Stats {
   feedback_count: number;
@@ -18,13 +19,26 @@ interface Stats {
   documents_count: number;
 }
 
+function getConversationCount(): number {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    if (!raw) return 0;
+    const messages = JSON.parse(raw);
+    // Count only user messages as "conversations"
+    return messages.filter((m: { role: string }) => m.role === "user").length;
+  } catch {
+    return 0;
+  }
+}
+
 export default function Dashboard() {
   const [stats, setStats] = useState<Stats>({
     feedback_count: 0,
-    locations_count: 14,
+    locations_count: 17,
     documents_count: 299,
   });
   const [loading, setLoading] = useState(true);
+  const [conversationCount, setConversationCount] = useState(getConversationCount);
 
   useEffect(() => {
     fetch(`${API_URL}/api/stats`)
@@ -32,6 +46,14 @@ export default function Dashboard() {
       .then((data) => setStats(data))
       .catch(console.error)
       .finally(() => setLoading(false));
+  }, []);
+
+  // Poll sessionStorage every second to pick up new messages from Chat page
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setConversationCount(getConversationCount());
+    }, 1000);
+    return () => clearInterval(interval);
   }, []);
 
   const steps = [
@@ -47,7 +69,7 @@ export default function Dashboard() {
       title: "Explore the Voyage Map",
       description:
         "View animated routes of the treasure fleet expeditions. Click play to see the voyages unfold chronologically.",
-      example: "Watch the fleet's journey from 1368 to 1421",
+      example: "Watch the fleet's journey from 1403 to 1433",
     },
     {
       icon: FileText,
@@ -80,10 +102,30 @@ export default function Dashboard() {
   ];
 
   const statCards = [
-    { label: "AI Conversations", value: "0",    sub: "Start a new chat",    icon: MessageSquare },
-    { label: "Voyage Locations", value: String(stats.locations_count), sub: "Across 3 continents", icon: Map },
-    { label: "Documents",        value: loading ? "…" : String(stats.documents_count), sub: "In vector database", icon: FileText },
-    { label: "Feedback",         value: String(stats.feedback_count), sub: "User submissions",   icon: Send },
+    {
+      label: "AI Conversations",
+      value: String(conversationCount),
+      sub: conversationCount === 0 ? "Start a new chat" : `${conversationCount} question${conversationCount !== 1 ? "s" : ""} asked`,
+      icon: MessageSquare,
+    },
+    {
+      label: "Voyage Locations",
+      value: String(stats.locations_count),
+      sub: "Across 3 continents",
+      icon: Map,
+    },
+    {
+      label: "Documents",
+      value: loading ? "…" : String(stats.documents_count),
+      sub: "In vector database",
+      icon: FileText,
+    },
+    {
+      label: "Feedback",
+      value: String(stats.feedback_count),
+      sub: "User submissions",
+      icon: Send,
+    },
   ];
 
   return (
