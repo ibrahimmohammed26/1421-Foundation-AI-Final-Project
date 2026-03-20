@@ -261,9 +261,9 @@ def load_knowledge_base():
     document_ids = data.get("document_ids", list(range(len(documents))))
     _docs_store = []
     for i in range(len(documents)):
-        text = documents[i]    if i < len(documents)    else ""
-        meta = metadatas[i]    if i < len(metadatas)    else {}
-        did  = document_ids[i] if i < len(document_ids) else i
+        text = documents[i] if i < len(documents) else ""
+        meta = metadatas[i] if i < len(metadatas) else {}
+        did  = i + 1  # Force sequential IDs starting from 1
         _docs_store.append(_meta_to_doc(i, text, meta, did))
     print(f"OK: Loaded {len(_docs_store)} documents from pickle")
     if index_path.exists():
