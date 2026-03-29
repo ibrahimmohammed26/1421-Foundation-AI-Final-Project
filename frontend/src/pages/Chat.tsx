@@ -315,11 +315,6 @@ export default function Chat() {
                             : <><ChevronDown className="h-3.5 w-3.5" /> {sourceCount} source{sourceCount > 1 ? "s" : ""}</>}
                         </button>
                       )}
-                      <button
-                        onClick={() => navigate("/documents")}
-                        className="flex items-center gap-1.5 text-xs font-medium text-gold border border-gold/30 rounded-lg px-2.5 py-1 bg-red-50 hover:bg-red-100 transition-colors">
-                        <FileText className="h-3.5 w-3.5" /> View documents
-                      </button>
                     </div>
 
                     {showSources && sourceCount > 0 && (
@@ -346,7 +341,6 @@ export default function Chat() {
                                 </span>
                               )}
                             </div>
-                            {/* Navigate to documents page searching by title */}
                             <button
                               onClick={() => navigate(`/documents?search=${encodeURIComponent(src.title)}`)}
                               className="mt-2 text-xs text-gold font-semibold flex items-center gap-1 hover:underline"

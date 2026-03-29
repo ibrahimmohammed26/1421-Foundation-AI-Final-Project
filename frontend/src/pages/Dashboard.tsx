@@ -24,7 +24,6 @@ function getConversationCount(): number {
     const raw = sessionStorage.getItem(STORAGE_KEY);
     if (!raw) return 0;
     const messages = JSON.parse(raw);
-    // Count only user messages as "conversations"
     return messages.filter((m: { role: string }) => m.role === "user").length;
   } catch {
     return 0;
@@ -48,7 +47,6 @@ export default function Dashboard() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Poll sessionStorage every second to pick up new messages from Chat page
   useEffect(() => {
     const interval = setInterval(() => {
       setConversationCount(getConversationCount());
@@ -66,10 +64,10 @@ export default function Dashboard() {
     },
     {
       icon: Map,
-      title: "Explore the Voyage Map",
+      title: "Explore the Data Map",
       description:
-        "View animated routes of the treasure fleet expeditions. Click play to see the voyages unfold chronologically.",
-      example: "Watch the fleet's journey from 1403 to 1433",
+        "View key locations from Zheng He's treasure fleet expeditions on an interactive map. Click any marker to see related research documents.",
+      example: "Click a location to explore related documents from the knowledge base",
     },
     {
       icon: FileText,
@@ -109,7 +107,7 @@ export default function Dashboard() {
       icon: MessageSquare,
     },
     {
-      label: "Voyage Locations",
+      label: "Map Locations",
       value: String(stats.locations_count),
       sub: "Across 3 continents",
       icon: Map,

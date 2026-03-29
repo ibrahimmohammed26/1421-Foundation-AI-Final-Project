@@ -6,7 +6,6 @@ import os
 import pickle
 import resend
 import json
-import subprocess
 from datetime import datetime
 from typing import Optional, List
 from pathlib import Path
@@ -58,18 +57,13 @@ BASE_DIR = Path(__file__).resolve().parent
 if str(BASE_DIR) == "/":
     BASE_DIR = Path("/workspace/backend")
 DATA_DIR = Path(os.getenv("DATA_DIR", str(BASE_DIR.parent / "data")))
-
 FAISS_DIR = DATA_DIR / "vector_databases" / "main_index"
 
 # ── Email config ──────────────────────────────────────────────────────
-# Set these in Render environment variables:
-# RESEND_API_KEY = your Resend API key (from resend.com)
-# NOTIFY_EMAIL   = email address to receive feedback (e.g. Ian's email)
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 NOTIFY_EMAIL   = os.getenv("NOTIFY_EMAIL",  "")
 
 def send_feedback_email(name: str, email: str, feedback_type: str, message: str):
-    """Send feedback email via Resend HTTP API — works on Render free tier."""
     if not RESEND_API_KEY:
         print("WARNING: RESEND_API_KEY not set — skipping email")
         return
@@ -161,12 +155,11 @@ class Document(BaseModel):
     tags: List[str] = []
     content_preview: str = ""
     source_file: str = ""
+    url: str = ""
     page_number: Optional[int] = None
     similarity_score: Optional[float] = None
 
 # ── Voyage locations ──────────────────────────────────────────────────
-
-# Replace VOYAGE_LOCATIONS in main.py with this:
 
 VOYAGE_LOCATIONS = [
     {"name": "Nanjing",    "lat": 32.06,  "lon": 118.80, "year": 1403, "event": "Yongle Emperor commissions the treasure fleet from Nanjing"},
@@ -187,7 +180,6 @@ VOYAGE_LOCATIONS = [
     {"name": "Jidda",      "lat": 21.49,  "lon":  39.19, "year": 1432, "event": "Voyage 7 — Red Sea reached, auxiliary fleet sent towards Mecca"},
     {"name": "Calicut",    "lat": 11.26,  "lon":  75.78, "year": 1433, "event": "Voyage 7 — Zheng He dies here on the return journey, ending the voyages"},
 ]
-
 
 # ── Document store ────────────────────────────────────────────────────
 
@@ -248,7 +240,8 @@ def _meta_to_doc(idx: int, text: str, meta: dict, doc_id) -> dict:
         "tags":             meta.get("tags", []) or [],
         "content_preview":  clean,
         "content_full":     clean,
-        "source_file":      meta.get("source", meta.get("source_type", "")) or "",
+        "source_file":      meta.get("source_file", meta.get("source", meta.get("source_type", ""))) or "",
+        "url":              meta.get("url", "") or "",
         "page_number":      meta.get("page", None),
         "similarity_score": None,
     }
@@ -264,12 +257,11 @@ def load_knowledge_base():
         data = pickle.load(f)
     documents    = data.get("documents",    [])
     metadatas    = data.get("metadatas",    [])
-    document_ids = data.get("document_ids", list(range(len(documents))))
     _docs_store = []
     for i in range(len(documents)):
         text = documents[i] if i < len(documents) else ""
         meta = metadatas[i] if i < len(metadatas) else {}
-        did  = i + 1  # Force sequential IDs starting from 1
+        did  = i + 1  # Sequential IDs starting from 1
         _docs_store.append(_meta_to_doc(i, text, meta, did))
     print(f"OK: Loaded {len(_docs_store)} documents from pickle")
     if index_path.exists():
@@ -383,7 +375,6 @@ def get_relevant_context(query: str, top_k: int = 5) -> tuple:
             seen_titles.add(key)
             unique_docs.append(d)
     docs = unique_docs
-
     if not docs:
         return "", []
     context = "Relevant documents from the 1421 Foundation knowledge base:\n\n"
@@ -421,14 +412,11 @@ async def get_documents(limit: int = Query(default=500, le=10000), offset: int =
     safe  = [{k: v for k, v in d.items() if k != "content_full"} for d in paged]
     return {"documents": safe, "total": total, "limit": limit, "offset": offset}
 
-# Replace the existing search_documents_endpoint in main.py with this:
-
 @app.get("/api/documents/search")
 async def search_documents_endpoint(q: str, limit: int = 50):
     results = []
     seen = set()
-
-    # If query is a number, find exact ID match first
+    # Exact ID match first if query is a number
     if q.strip().isdigit():
         target_id = q.strip()
         for d in _docs_store:
@@ -438,23 +426,6 @@ async def search_documents_endpoint(q: str, limit: int = 50):
                 results.append(exact)
                 seen.add(d["id"])
                 break
-
-    for d in search_by_title(q, 5):
-        if d["id"] not in seen:
-            results.append(d)
-            seen.add(d["id"])
-    for d in search_semantic(q, min(limit, 10)):
-        if d["id"] not in seen:
-            results.append(d)
-            seen.add(d["id"])
-    for d in search_keyword(q, limit):
-        if d["id"] not in seen:
-            results.append(d)
-            seen.add(d["id"])
-    final = [{k: v for k, v in d.items() if k != "content_full"} for d in results[:limit]]
-    return {"results": final, "total": len(final), "query": q}
-    results = []
-    seen = set()
     for d in search_by_title(q, 5):
         if d["id"] not in seen:
             results.append(d)
@@ -577,8 +548,6 @@ async def debug_rag(q: str = "Zheng He voyages"):
 @app.post("/api/feedback")
 async def submit_feedback(req: FeedbackRequest):
     import asyncio, concurrent.futures
-
-    # Save to file
     feedback_path = DATA_DIR / "feedback.json"
     try:
         existing = []
@@ -597,23 +566,11 @@ async def submit_feedback(req: FeedbackRequest):
         print("Feedback saved to file OK")
     except Exception as e:
         print(f"Feedback store error: {e}")
-
-    # Log env var status
     print(f"RESEND_API_KEY set: {bool(RESEND_API_KEY)}")
     print(f"NOTIFY_EMAIL set: {bool(NOTIFY_EMAIL)}, value: {NOTIFY_EMAIL or 'EMPTY'}")
-
-    # Send email in background thread - does NOT block the response
     loop = asyncio.get_event_loop()
     with concurrent.futures.ThreadPoolExecutor() as pool:
-        loop.run_in_executor(
-            pool,
-            send_feedback_email,
-            req.name or "Anonymous",
-            req.email,
-            req.feedback_type,
-            req.message,
-        )
-
+        loop.run_in_executor(pool, send_feedback_email, req.name or "Anonymous", req.email, req.feedback_type, req.message)
     return {"status": "ok", "message": "Feedback received"}
 
 @app.get("/api/stats")
@@ -644,15 +601,6 @@ async def test_db():
 
 @app.on_event("startup")
 def init_app():
-    result = subprocess.run(
-        ["find", "/", "-name", "faiss_metadata.pkl", "-type", "f"],
-        capture_output=True, text=True
-    )
-    print("FOUND PICKLE AT:", result.stdout)
-    print(f"BASE_DIR : {BASE_DIR}")
-    print(f"DATA_DIR : {DATA_DIR}  (exists={DATA_DIR.exists()})")
-    print(f"Email configured: {bool(RESEND_API_KEY)}")
-    load_knowledge_base()
     print(f"BASE_DIR : {BASE_DIR}")
     print(f"DATA_DIR : {DATA_DIR}  (exists={DATA_DIR.exists()})")
     print(f"Email configured: {bool(RESEND_API_KEY)}")

@@ -11,11 +11,6 @@ import {
 
 const PAGE_SIZE = 50;
 
-function cleanDescription(text: string | undefined): string {
-  if (!text) return "";
-  return text.replace(/^content:\s*/i, "").trim();
-}
-
 function sortByIdAsc(docs: Document[]): Document[] {
   return [...docs].sort((a, b) => {
     const aNum = parseInt(a.id, 10);
@@ -43,8 +38,6 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
       <div className="flex-1 text-sm text-gray-800">{value}</div>
     </div>
   );
-
-  const description = cleanDescription(doc.description) || cleanDescription(doc.content_preview);
 
   return (
     <div
@@ -107,26 +100,28 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
             {doc.type && doc.type !== "unknown" && (
               <MetaRow icon={Layers} label="Type" value={<span className="capitalize">{doc.type}</span>} />
             )}
-            {doc.source_file && doc.source_file !== "Unknown" && (
-              <MetaRow
-                icon={ExternalLink}
-                label="Source"
-                value={<span className="font-mono text-xs text-gray-600 break-all">{doc.source_file}</span>}
-              />
-            )}
+            <MetaRow
+              icon={ExternalLink}
+              label="URL"
+              value={
+                doc.url ? (
+                  <a
+                    href={doc.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-gold hover:underline text-xs break-all"
+                  >
+                    {doc.url}
+                  </a>
+                ) : (
+                  <span className="text-gray-400 text-xs">No source available</span>
+                )
+              }
+            />
             {doc.page_number != null && (
               <MetaRow icon={Hash} label="Page" value={`p. ${doc.page_number}`} />
             )}
           </div>
-
-          {description && (
-            <div>
-              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Content</h3>
-              <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 max-h-72 overflow-y-auto">
-                <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{description}</p>
-              </div>
-            </div>
-          )}
 
           {doc.tags && doc.tags.length > 0 && (
             <div>
@@ -145,7 +140,17 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-gray-100 flex justify-end">
+        <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3">
+          {doc.url && (
+            <a
+              href={doc.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-5 py-2 rounded-lg bg-gold text-white text-sm font-medium hover:bg-gold-light transition-colors flex items-center gap-2"
+            >
+              <ExternalLink className="h-3.5 w-3.5" /> Open Source
+            </a>
+          )}
           <button
             onClick={onClose}
             className="px-5 py-2 rounded-lg bg-gray-100 border border-gray-200 text-sm text-gray-700 hover:bg-gray-200 transition-colors"
@@ -197,7 +202,6 @@ export default function Documents() {
     }
   }, []);
 
-  // Read ?search= query param on mount and auto-search
   useEffect(() => {
     const q = searchParams.get("search");
     if (q) {
@@ -208,7 +212,6 @@ export default function Documents() {
         .then((data) => {
           setDocuments(data.results || []);
           setTotalDocuments(data.results?.length || 0);
-          // If exactly one result, open the modal automatically
           if (data.results?.length === 1) {
             setSelectedDoc(data.results[0]);
           }
@@ -280,7 +283,7 @@ export default function Documents() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
                 type="text"
-                placeholder="Search by title, author, content, or ID…"
+                placeholder="Search by title, author, or ID…"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleSearch()}
@@ -413,41 +416,33 @@ export default function Documents() {
                           {doc.title}
                         </h3>
                       </div>
-                      <div className="flex items-center gap-2 text-xs text-gray-400 mb-2 flex-wrap">
+                      <div className="flex items-center gap-2 text-xs text-gray-400 flex-wrap">
                         {doc.author && doc.author !== "Unknown" && <span>By {doc.author}</span>}
                         {doc.year > 0 && <><span>•</span><span>{doc.year}</span></>}
                         {doc.type && doc.type !== "unknown" && (
                           <><span>•</span><span className="capitalize">{doc.type}</span></>
                         )}
-                        {doc.source_file && doc.source_file !== "Unknown" && (
+                        {doc.url && (
                           <><span>•</span>
-                          <span className="font-mono truncate max-w-[200px]">
-                            {doc.source_file.split("/").pop()}
-                          </span></>
+                          <a
+                            href={doc.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-gold hover:underline truncate max-w-[200px]"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            View source ↗
+                          </a></>
                         )}
-                        {doc.page_number != null && (
-                          <><span>•</span><span>p. {doc.page_number}</span></>
-                        )}
+                        {!doc.url && <><span>•</span><span className="text-gray-300">No source</span></>}
                         <span>•</span>
                         <span className="inline-flex items-center gap-1 text-emerald-600">
                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
                           Active
                         </span>
                       </div>
-                      {doc.content_preview && (
-                        <div className="mb-3 mt-4">
-                          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
-                            Content Preview
-                          </p>
-                          <div className="bg-gray-50 border border-gray-200 rounded-xl p-3">
-                            <p className="text-sm text-gray-600 line-clamp-3">
-                              {cleanDescription(doc.content_preview)}
-                            </p>
-                          </div>
-                        </div>
-                      )}
                       {doc.tags && doc.tags.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5">
+                        <div className="flex flex-wrap gap-1.5 mt-3">
                           {doc.tags.slice(0, 8).map((tag, idx) => (
                             <span key={idx} className="px-2 py-0.5 bg-gray-100 rounded text-xs text-gray-500">
                               {tag}

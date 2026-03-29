@@ -22,7 +22,7 @@ export default function Analytics() {
     "Southeast Asia": locations.filter(l => l.lon > 95  && l.lon < 120 && l.lat < 20 && l.lat > -10),
     "South Asia":     locations.filter(l => l.lon > 65  && l.lon < 95  && l.lat > 5  && l.lat < 30),
     "Middle East":    locations.filter(l => l.lon > 45  && l.lon < 65  && l.lat > 10),
-    "East Africa":    locations.filter(l => l.lon > 35  && l.lon < 55  && l.lat < 0),
+    "East Africa":    locations.filter(l => l.lon > 35  && l.lon < 55  && l.lat < 5),
   };
 
   const voyagesByYear = locations.reduce((acc, loc) => {
@@ -31,13 +31,13 @@ export default function Analytics() {
   const maxVoyages = Math.max(...Object.values(voyagesByYear), 1);
 
   const periods = {
-    "First Voyage (1405–1407)":   locations.filter(l => l.year >= 1405 && l.year <= 1407).length,
-    "Second Voyage (1407–1409)":  locations.filter(l => l.year >= 1407 && l.year <= 1409).length,
-    "Third Voyage (1409–1411)":   locations.filter(l => l.year >= 1409 && l.year <= 1411).length,
-    "Fourth Voyage (1413–1415)":  locations.filter(l => l.year >= 1413 && l.year <= 1415).length,
-    "Fifth Voyage (1417–1419)":   locations.filter(l => l.year >= 1417 && l.year <= 1419).length,
-    "Sixth Voyage (1421–1422)":   locations.filter(l => l.year >= 1421 && l.year <= 1422).length,
-    "Seventh Voyage (1431–1433)": locations.filter(l => l.year >= 1431 && l.year <= 1433).length,
+    "First Voyage (1405–1407)":    locations.filter(l => l.year >= 1405 && l.year <= 1407).length,
+    "Second Voyage (1407–1409)":   locations.filter(l => l.year >= 1407 && l.year <= 1409).length,
+    "Third Voyage (1409–1411)":    locations.filter(l => l.year >= 1409 && l.year <= 1411).length,
+    "Fourth Voyage (1413–1415)":   locations.filter(l => l.year >= 1413 && l.year <= 1415).length,
+    "Fifth Voyage (1417–1419)":    locations.filter(l => l.year >= 1417 && l.year <= 1419).length,
+    "Sixth Voyage (1421–1422)":    locations.filter(l => l.year >= 1421 && l.year <= 1422).length,
+    "Seventh Voyage (1431–1433)":  locations.filter(l => l.year >= 1431 && l.year <= 1433).length,
   };
   const maxPeriod = Math.max(...Object.values(periods), 1);
 
@@ -70,8 +70,8 @@ export default function Analytics() {
         {[
           { label: "Total Voyages",     icon: Ship,    value: "7",               sub: "Between 1405–1433" },
           { label: "Locations Visited", icon: Globe,   value: locations.length,  sub: "Across 3 continents" },
-          { label: "Years Active",      icon: Calendar,value: years.length,      sub: "Peak in 1418–1421" },
-          { label: "Farthest Point",    icon: Compass, value: "Mombasa",         sub: "East Africa" },
+          { label: "Years Span",        icon: Calendar, value: `${1433 - 1403}`, sub: "From 1403 to 1433" },
+          { label: "Farthest Point",    icon: Compass, value: "Zanzibar",        sub: "East Africa, 1421" },
         ].map(({ label, icon: Icon, value, sub }) => (
           <div key={label} className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
             <div className="flex items-center justify-between mb-2">
@@ -134,7 +134,7 @@ export default function Analytics() {
                     <span className="text-xs font-semibold text-gold">{locs.length} locations</span>
                   </div>
                   <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                    <div className="h-full bg-gold rounded-full" style={{ width: `${(locs.length / locations.length) * 100}%` }} />
+                    <div className="h-full bg-gold rounded-full" style={{ width: `${locations.length > 0 ? (locs.length / locations.length) * 100 : 0}%` }} />
                   </div>
                   <p className="mt-2 text-xs text-gray-500">
                     {locs.slice(0, 3).map(l => l.name).join(", ")}
@@ -170,10 +170,11 @@ export default function Analytics() {
                 <Anchor className="h-4 w-4 text-gold" /> Key Insights
               </h4>
               <ul className="space-y-2 text-sm text-gray-700">
-                <li>• The voyages reached their peak during the 1421 expedition</li>
-                <li>• Southeast Asia had the highest concentration of stops ({regions["Southeast Asia"].length} locations)</li>
+                <li>• The voyages spanned 30 years from 1403 to 1433</li>
+                <li>• Southeast Asia had the highest concentration of stops</li>
                 <li>• The fleet travelled over 50,000 km across three oceans</li>
-                <li>• East Africa was the farthest point reached (Mombasa, 1418)</li>
+                <li>• Zanzibar was the southernmost point reached (East Africa, 1421)</li>
+                <li>• Zheng He died at Calicut on the return leg of the seventh voyage in 1433</li>
               </ul>
             </div>
           </div>

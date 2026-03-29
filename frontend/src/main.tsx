@@ -4,7 +4,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import App from "./App";
 import Dashboard from "./pages/Dashboard";
 import Chat from "./pages/Chat";
-import VoyageMap from "./pages/VoyageMap";
+import DataMap from "./pages/DataMap";
 import Analytics from "./pages/Analytics";
 import Documents from "./pages/Documents";
 import Feedback from "./pages/Feedback";
@@ -19,7 +19,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Route index element={<Dashboard />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="chat" element={<Chat />} />
-          <Route path="map" element={<VoyageMap />} />
+          <Route path="map" element={<DataMap />} />
           <Route path="documents" element={<Documents />} />
           <Route path="analytics" element={<Analytics />} />
           <Route path="feedback" element={<Feedback />} />

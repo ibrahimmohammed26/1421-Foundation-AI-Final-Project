@@ -11,6 +11,7 @@ export interface Stats {
   feedback_count: number; locations_count: number; documents_count: number;
 }
 export interface Document {
+  url: any;
   id: string; title: string; author: string; year: number; type: string;
   description: string; tags: string[]; content_preview: string;
   source_file: string; page_number?: number; similarity_score?: number;
