@@ -59,36 +59,35 @@ export default function Dashboard() {
       icon: MessageSquare,
       title: "Chat with AI Historian",
       description:
-        "Ask questions about Zheng He's voyages, Ming dynasty history, or the 1421 Foundation research. The AI searches both its training data and our document database.",
+        "Ask questions about Zheng He's voyages, Ming dynasty history, or the 1421 Foundation research. The AI searches only the 1421 Foundation knowledge base — not the web. Every answer is grounded in the indexed documents, with inline citations you can click.",
       example: "Try: 'What was the significance of Zheng He's voyages?'",
     },
     {
       icon: Map,
       title: "Explore the Data Map",
       description:
-        "View key locations from Zheng He's treasure fleet expeditions on an interactive map. Click any marker to see related research documents.",
-      example: "Click a location to explore related documents from the knowledge base",
+        "View key locations from Zheng He's treasure fleet expeditions on an interactive map. Click any marker to see related research documents from the knowledge base.",
+      example: "Click a location marker to explore related documents",
     },
     {
       icon: FileText,
       title: "Browse Research Documents",
-      description: `Access historical documents, academic papers, and books from our vector database. Currently ${stats.documents_count} documents available.`,
-      example: "Search for 'Ming dynasty shipbuilding techniques'",
+      description: `Access the full knowledge base of ${stats.documents_count} documents from the 1421 Foundation, Gavin Menzies' research site, and related sources. Each document links directly to its original source.`,
+      example: "Search by title, author, or document number",
     },
     {
       icon: Database,
-      title: "Vector Database Integration",
+      title: "Document-Only Search",
       description:
-        "The system uses FAISS vector search to find relevant documents and knowledge base entries for more accurate responses.",
+        "The system uses FAISS vector search to find semantically relevant documents from the knowledge base. It does not use web search or external data sources — all answers come exclusively from indexed documents.",
       example: `${stats.documents_count} documents indexed and searchable`,
     },
     {
       icon: Globe,
-      title: "Web + Document Hybrid Search",
+      title: "Inline Document Citations",
       description:
-        "AI combines its training data with our local document database to provide comprehensive, accurate answers.",
-      example:
-        "Get responses grounded in both general knowledge and specific research documents",
+        "Every AI response cites its sources inline using [Document X] badges. Click any badge to jump directly to that document. If no relevant documents are found, the system will say so rather than guessing.",
+      example: "Click [Document 1] badges in chat responses to view sources",
     },
     {
       icon: Send,
@@ -115,7 +114,7 @@ export default function Dashboard() {
     {
       label: "Documents",
       value: loading ? "…" : String(stats.documents_count),
-      sub: "In vector database",
+      sub: "In knowledge base",
       icon: FileText,
     },
     {
@@ -164,13 +163,10 @@ export default function Dashboard() {
               </div>
               <div>
                 <h2 className="text-lg font-display font-bold text-gray-900 mb-2">
-                  Welcome to the 1421 Foundation
+                  Welcome to the 1421 Foundation Research System
                 </h2>
                 <p className="text-gray-600 text-sm leading-relaxed">
-                  This research platform combines a vector database of historical documents with AI
-                  to provide accurate information about Chinese maritime exploration during the Ming
-                  dynasty (1368–1644), particularly the voyages of Admiral Zheng He and the 1421
-                  Foundation.
+                  This platform provides AI-assisted access to the 1421 Foundation's knowledge base, covering Chinese maritime exploration during the Ming dynasty (1368–1644), the voyages of Admiral Zheng He, and the research of Gavin Menzies. All AI responses are sourced exclusively from indexed documents — the system does not search the web or rely on external knowledge.
                 </p>
               </div>
             </div>

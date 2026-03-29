@@ -11,10 +11,9 @@ export interface Stats {
   feedback_count: number; locations_count: number; documents_count: number;
 }
 export interface Document {
-  url: any;
   id: string; title: string; author: string; year: number; type: string;
   description: string; tags: string[]; content_preview: string;
-  source_file: string; page_number?: number; similarity_score?: number;
+  source_file: string; url?: string; page_number?: number; similarity_score?: number;
 }
 export interface DocumentsResponse {
   documents: Document[]; total: number; limit: number; offset: number;
@@ -56,7 +55,7 @@ export async function getDocumentAuthors(): Promise<string[]> {
 
 // ── Locations / Stats ─────────────────────────────────────────────────
 
-export async function fetchLocations(maxYear = 1421): Promise<Location[]> {
+export async function fetchLocations(maxYear = 1433): Promise<Location[]> {
   const res = await fetch(`${API}/api/locations?max_year=${maxYear}`);
   if (!res.ok) throw new Error("Failed to fetch locations");
   return res.json();
@@ -123,7 +122,7 @@ export async function streamChat(
   }
 }
 
-// ── Feedback — through Vercel proxy (same origin, no CORS issues) ─────
+// ── Feedback ──────────────────────────────────────────────────────────
 
 export async function submitFeedback(data: {
   name?: string;

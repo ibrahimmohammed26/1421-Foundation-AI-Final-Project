@@ -5,7 +5,6 @@ import {
 } from "lucide-react";
 import { fetchStats } from "@/lib/api";
 
-// Import the same chatStore key used in Chat.tsx
 const STORAGE_KEY = "1421_chat_messages";
 
 export default function Settings() {
@@ -20,10 +19,8 @@ export default function Settings() {
     fetchStats().then((s) => setDocCount(s.documents_count)).catch(() => {});
   }, []);
 
-  // Clears the same sessionStorage key that Chat.tsx uses
   const handleClearChat = () => {
     sessionStorage.removeItem(STORAGE_KEY);
-    // Also dispatch a storage event so Chat.tsx reacts if open in same tab
     window.dispatchEvent(new Event("storage"));
     setShowConfirmClear(false);
     setClearSuccess(true);
@@ -48,7 +45,6 @@ export default function Settings() {
   const handleExportDocuments = async () => {
     setExportingDocs(true);
     try {
-      // Fetch all documents in batches of 500
       const allDocs: object[] = [];
       let offset = 0;
       const batchSize = 500;
@@ -77,7 +73,6 @@ export default function Settings() {
     }
   };
 
-  // Export reads from sessionStorage using the correct key
   const handleExportData = () => {
     const raw = sessionStorage.getItem(STORAGE_KEY);
     const chatHistory = raw ? JSON.parse(raw) : [];
@@ -121,16 +116,28 @@ export default function Settings() {
       <div className="flex-1 overflow-y-auto flex items-start justify-center px-6 py-6">
         <div className="w-full max-w-2xl space-y-6">
 
-          {/* Document Status */}
+          {/* System Status */}
           <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
             <h3 className="text-lg font-display font-bold text-gray-900 mb-4 flex items-center gap-2">
               <Activity className="h-5 w-5 text-gold" />
-              Document Status
+              System Status
             </h3>
             <div className="space-y-3">
-              <StatusRow icon={FileText}   label="Knowledge Base"          sub={docCount !== null ? `${docCount} documents indexed` : "Loading…"} />
-              <StatusRow icon={Database}   label="Vector Store (FAISS)"    sub="Semantic search index" />
-              <StatusRow icon={MessageSquare} label="AI Language Model"    sub="GPT-4o-mini via OpenAI API" />
+              <StatusRow
+                icon={FileText}
+                label="Knowledge Base"
+                sub={docCount !== null ? `${docCount} documents indexed` : "Loading…"}
+              />
+              <StatusRow
+                icon={Database}
+                label="Vector Store (FAISS)"
+                sub="Semantic document search — knowledge base only, no web search"
+              />
+              <StatusRow
+                icon={MessageSquare}
+                label="AI Language Model"
+                sub="GPT-4o-mini — answers grounded in indexed documents only"
+              />
             </div>
           </div>
 
@@ -162,7 +169,7 @@ export default function Settings() {
                   <MessageSquare className="h-4 w-4 text-gray-400" />
                   <div>
                     <span className="text-sm text-gray-800">Clear chat history</span>
-                    <p className="text-xs text-gray-400">Delete all your conversations</p>
+                    <p className="text-xs text-gray-400">Delete all your conversations from this session</p>
                   </div>
                 </div>
                 <button onClick={() => setShowConfirmClear(true)}
@@ -206,7 +213,9 @@ export default function Settings() {
             <h3 className="text-lg font-display font-bold text-gray-900 mb-4">About</h3>
             <div className="space-y-3">
               <p className="text-sm text-gray-700">1421 Foundation Research System v1.0.0</p>
-              <p className="text-sm text-gray-500">A platform for exploring Chinese maritime history using vector databases and AI.</p>
+              <p className="text-sm text-gray-500">
+                A document-grounded research platform for exploring Chinese maritime history. All AI responses are sourced exclusively from the 1421 Foundation knowledge base — the system does not use web search or external data.
+              </p>
               <div className="flex flex-col gap-2 pt-1">
                 <a href="https://www.1421foundation.org/" target="_blank" rel="noopener noreferrer"
                   className="inline-flex items-center gap-2 text-gold hover:text-gold-dark transition-colors text-sm">
@@ -232,7 +241,7 @@ export default function Settings() {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl border border-gray-200 p-6 max-w-md shadow-xl">
             <h3 className="text-lg font-display font-bold text-gray-900 mb-3">Clear Chat History?</h3>
-            <p className="text-sm text-gray-600 mb-6">This will permanently delete all conversations. This cannot be undone.</p>
+            <p className="text-sm text-gray-600 mb-6">This will permanently delete all conversations from this session. This cannot be undone.</p>
             <div className="flex gap-3 justify-end">
               <button onClick={() => setShowConfirmClear(false)} className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700">Cancel</button>
               <button onClick={handleClearChat} className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700">Clear All</button>

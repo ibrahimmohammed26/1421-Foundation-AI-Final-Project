@@ -94,23 +94,16 @@ def send_feedback_email(name: str, email: str, feedback_type: str, message: str)
 
 # ── LLM ──────────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """You are a professional historian and research assistant for the 1421 Foundation,
-specialising in Chinese maritime exploration during the Ming dynasty (1368-1644), particularly
-the voyages of Admiral Zheng He and the controversial 1421 hypothesis by Gavin Menzies.
+SYSTEM_PROMPT = """You are a research assistant for the 1421 Foundation, specialising in Chinese maritime exploration during the Ming dynasty (1368–1644), particularly the voyages of Admiral Zheng He and the 1421 hypothesis by Gavin Menzies.
 
-You have access to the 1421 Foundation's full research knowledge base. When a user asks about
-an article, document, or piece of research - whether they mention its title, topic, or author -
-you must find and summarise the relevant document(s) from the context provided. Always reference
-documents by name and number e.g. [Document 1], and include key details such as the author,
-year, and main findings or arguments.
-
-Write in clear, engaging, academic UK English. Provide comprehensive, well-structured answers
-that synthesise information across sources. Use proper historical terminology. Be objective and
-balanced when presenting contested theories. Structure responses with clear paragraphs.
-
-IMPORTANT: You must ALWAYS ground your answers in the provided documents. If the user asks
-about a specific article or document title, locate it in the context and report its full content.
-Never say you cannot access the documents - they are provided to you in this prompt."""
+IMPORTANT RULES — READ CAREFULLY:
+1. You ONLY answer from the documents provided to you in this prompt. You do NOT use external knowledge, web searches, or your general training data to answer questions.
+2. Every claim or piece of historical evidence you state MUST be supported by a specific document from the provided context. Reference it inline using [Document X] immediately after the relevant sentence or point.
+3. If the provided documents do not contain relevant information to answer the question, you MUST respond with: "No data source found in the 1421 Foundation knowledge base for this query. Please try a different search term or browse the Documents section directly."
+4. Do NOT make up facts, infer beyond what the documents say, or supplement with general historical knowledge.
+5. Write in clear, academic UK English. Structure your response in clear paragraphs. Each paragraph or point of evidence must cite its document source inline using [Document X].
+6. When multiple documents support a point, cite all relevant ones: [Document 1][Document 3].
+7. Be objective and balanced when presenting contested theories — reflect what the documents say, not your own assessment."""
 
 
 def get_llm():
@@ -118,7 +111,7 @@ def get_llm():
         model="gpt-4o-mini",
         api_key=os.getenv("OPENAI_API_KEY"),
         streaming=True,
-        temperature=0.7,
+        temperature=0.3,
     )
 
 def get_embeddings_fn():
@@ -255,13 +248,13 @@ def load_knowledge_base():
         return
     with open(meta_path, "rb") as f:
         data = pickle.load(f)
-    documents    = data.get("documents",    [])
-    metadatas    = data.get("metadatas",    [])
+    documents = data.get("documents", [])
+    metadatas = data.get("metadatas", [])
     _docs_store = []
     for i in range(len(documents)):
         text = documents[i] if i < len(documents) else ""
         meta = metadatas[i] if i < len(metadatas) else {}
-        did  = i + 1  # Sequential IDs starting from 1
+        did  = i + 1
         _docs_store.append(_meta_to_doc(i, text, meta, did))
     print(f"OK: Loaded {len(_docs_store)} documents from pickle")
     if index_path.exists():
@@ -335,7 +328,7 @@ def search_by_title(title_query: str, limit: int = 5) -> List[dict]:
     results.sort(key=lambda x: len(x["title"]))
     return results[:limit]
 
-def get_relevant_context(query: str, top_k: int = 5) -> tuple:
+def get_relevant_context(query: str, top_k: int = 8) -> tuple:
     docs = []
     seen_ids = set()
     import re
@@ -416,7 +409,6 @@ async def get_documents(limit: int = Query(default=500, le=10000), offset: int =
 async def search_documents_endpoint(q: str, limit: int = 50):
     results = []
     seen = set()
-    # Exact ID match first if query is a number
     if q.strip().isdigit():
         target_id = q.strip()
         for d in _docs_store:
@@ -457,19 +449,26 @@ async def get_document_authors():
     return {"authors": authors}
 
 def _build_system(context: str) -> str:
-    s  = SYSTEM_PROMPT + "\n\n"
+    s = SYSTEM_PROMPT + "\n\n"
     if context:
+        s += "DOCUMENTS PROVIDED FOR THIS QUERY:\n\n"
         s += context
+        s += (
+            "\nINSTRUCTIONS FOR YOUR RESPONSE:\n"
+            "- Answer ONLY from the documents above. Do not use outside knowledge.\n"
+            "- After every sentence or point of evidence, add [Document X] inline.\n"
+            "- If multiple documents support a point, cite all: [Document 1][Document 2].\n"
+            "- Structure your answer in clear paragraphs.\n"
+            "- If the documents do not contain enough information to answer, say so explicitly.\n"
+        )
     else:
-        s += "(No specific documents matched this query - answer from general historical knowledge.)\n\n"
-    s += (
-        "\nWhen answering:\n"
-        "1. Cite documents using [Document X] references\n"
-        "2. If asked about a specific article or document, summarise its full content and key arguments\n"
-        "3. Combine information from multiple sources when relevant\n"
-        "4. Be clear about what comes from the documents vs general knowledge\n"
-        "5. Write in academic UK English with clear paragraph structure"
-    )
+        s += (
+            "NO DOCUMENTS FOUND FOR THIS QUERY.\n\n"
+            "You must respond with exactly this message:\n"
+            "'No data source found in the 1421 Foundation knowledge base for this query. "
+            "Please try a different search term or browse the Documents section directly.'\n"
+            "Do not add anything else."
+        )
     return s
 
 def _to_lc(system: str, messages: list) -> list:
