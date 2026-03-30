@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  MapContainer, TileLayer, Marker, Popup,
+  MapContainer, TileLayer, Marker, Popup, ZoomControl,
 } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -111,7 +111,7 @@ export default function DataMap() {
       <div className="border-b border-gray-200 px-6 py-4 bg-white shadow-sm flex-shrink-0">
         <h1 className="text-xl font-display font-bold text-gray-900">Data Map</h1>
         <p className="text-xs text-gray-400 mt-0.5">
-          Explore Zheng He's voyage locations (1403–1433) — click a marker to find related documents in the knowledge base
+          Explore Zheng He's voyage locations (1403–1433) and the 1421 Theory — click a marker to find related documents in the knowledge base
         </p>
       </div>
 
@@ -122,8 +122,9 @@ export default function DataMap() {
             center={[20, 80]}
             zoom={3}
             style={{ height: "100%", width: "100%" }}
-            zoomControl={true}
+            zoomControl={false}
           >
+            <ZoomControl position="topright" />
             <TileLayer
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -152,15 +153,15 @@ export default function DataMap() {
             ))}
           </MapContainer>
 
-          {/* Stats overlay */}
-          <div className="absolute top-4 left-4 bg-white/95 backdrop-blur-sm rounded-lg border border-gray-200 px-4 py-2 z-[1000] shadow-sm">
+          {/* Stats overlay - moved to top-right to avoid zoom controls */}
+          <div className="absolute top-4 right-14 bg-white/95 backdrop-blur-sm rounded-lg border border-gray-200 px-4 py-2 z-[1000] shadow-sm">
             <p className="text-xs text-gray-400 uppercase tracking-wider">Locations</p>
             <p className="text-2xl font-display font-bold text-gold leading-none mt-0.5">{uniqueLocations.length}</p>
             <p className="text-xs text-gray-400 mt-0.5">Across 3 continents</p>
           </div>
 
-          {/* Legend */}
-          <div className="absolute top-4 right-4 bg-white/95 backdrop-blur-sm rounded-lg border border-gray-200 p-3 z-[1000] shadow-sm">
+          {/* Legend - moved to bottom right */}
+          <div className="absolute bottom-4 right-4 bg-white/95 backdrop-blur-sm rounded-lg border border-gray-200 p-3 z-[1000] shadow-sm">
             <p className="text-xs font-semibold text-gray-700 mb-2">Legend</p>
             <div className="flex items-center gap-2">
               <span className="w-3 h-3 rounded-full bg-red-500 inline-block" />
