@@ -420,6 +420,236 @@ def get_relevant_context(query: str, top_k: int = 10) -> tuple:
         
         # Technical term expansions for naval/military topics
         topic_expansions = {
+            "naval technology": [
+                "shipbuilding", "naval architecture", "marine engineering", "warship design", 
+                "treasure ship", "junk ship", "ming ship", "chinese vessel", "bao chuan",
+                "compass", "rudder", "sail", "navigation", "seaworthiness", "hull design"
+            ],
+            "ming dynasty": ["ming", "ming china", "chinese empire", "ming period", "ming court"],
+            "naval": ["navy", "maritime", "sea", "ocean", "fleet", "armada", "naval force"],
+            "technology": ["technique", "innovation", "invention", "method", "design", "engineering", "craftsmanship"],
+            "ship": ["vessel", "boat", "junk", "craft", "treasure ship", "bao chuan", "warship"],
+            "weapon": ["cannon", "gunpowder", "armament", "military", "weaponry", "firearm"],
+            "navigation": ["compass", "chart", "star chart", "sextant", "dead reckoning", "celestial navigation", "star map"],
+            "construction": ["building", "building techniques", "shipyard", "dry dock", "timber", "woodworking"],
+            "zheng he": ["zheng he", "admiral", "cheng ho", "treasure fleet commander"],
+        }
+        
+        # Add expansions for topic keywords found in query
+        for topic, expansions_list in topic_expansions.items():
+            if topic in q_lower or any(word in q_lower for word in topic.split()):
+                for exp in expansions_list:
+                    expansions.append(exp)
+        
+        # Add keyword variations (singular/plural)
+        words = q_lower.split()
+        for word in words[:5]:
+            if len(word) > 3:
+                # Add common variations
+                if word.endswith('s'):
+                    expansions.append(word[:-1])  # Remove plural
+                else:
+                    expansions.append(word + 's')  # Add plural
+                expansions.append(word + 'ing')  # Add -ing form
+        
+        # Add bigrams from query
+        if len(words) > 1:
+            for i in range(len(words)-1):
+                bigram = f"{words[i]} {words[i+1]}"
+                if bigram not in expansions and len(bigram) > 4:
+                    expansions.append(bigram)
+        
+        return list(set(expansions))  # Remove duplicates
+    
+    # Try multiple search strategies with expanded queries
+    expanded_queries = expand_query(query)
+    print(f"Expanded '{query}' to {len(expanded_queries)} search variations")
+    
+    # Strategy 1: Semantic search with each expanded query
+    for sq in expanded_queries[:8]:  # Try up to 8 variations
+        try:
+            semantic_results = search_semantic(sq, top_k)
+            for d in semantic_results:
+                if d["id"] not in seen_ids:
+                    docs.append(d)
+                    seen_ids.add(d["id"])
+        except Exception as e:
+            print(f"Semantic search error for '{sq}': {e}")
+    
+    # Strategy 2: Keyword search (good for technical terms)
+    keyword_results = search_keyword(query, top_k * 2)
+    for d in keyword_results:
+        if d["id"] not in seen_ids:
+            docs.append(d)
+            seen_ids.add(d["id"])
+    
+    # Strategy 3: Search for each important keyword separately
+    if len(docs) < 5:
+        important_keywords = [w for w in query.lower().split() if len(w) > 4 and w not in ['describe', 'explain', 'tell', 'about']]
+        for kw in important_keywords[:5]:
+            kw_results = search_keyword(kw, top_k)
+            for d in kw_results:
+                if d["id"] not in seen_ids:
+                    docs.append(d)
+                    seen_ids.add(d["id"])
+    
+    # Strategy 4: Title-based search for specific document references
+    title_patterns = [
+        r'(?:article|document|paper|report|piece|post|about|called|titled|named|on)\s+["\']?(.+?)["\']?$',
+        r'(?:describe|explain|tell me about|what is|what are)\s+["\'](.+?)["\']',
+        r'["\'](.+?)["\']',
+    ]
+    title_hit = None
+    for pattern in title_patterns:
+        match = re.search(pattern, query, re.IGNORECASE)
+        if match:
+            title_hit = match.group(1).strip()
+            break
+    if title_hit and len(title_hit) > 3:
+        for d in search_by_title(title_hit):
+            if d["id"] not in seen_ids:
+                docs.append(d)
+                seen_ids.add(d["id"])
+    
+    # Deduplicate by title to avoid showing the same document multiple times
+    seen_titles: set = set()
+    unique_docs = []
+    for d in docs:
+        t = d.get("title", "").strip().lower()
+        # Remove document number prefixes for better deduplication
+        t_clean = re.sub(r'^\d+\s+', '', t)
+        key = t_clean or t
+        if key and key not in seen_titles:
+            seen_titles.add(key)
+            unique_docs.append(d)
+    
+    docs = unique_docs
+    
+    # Log what was found for debugging
+    print(f"Query: '{query}' -> Found {len(docs)} documents")
+    if docs:
+        print(f"Top docs: {[(d['title'][:60], d.get('type', 'unknown')) for d in docs[:5]]}")
+    else:
+        print(f"WARNING: No documents found for '{query}'")
+        # Last resort: try searching with just the first 3 words
+        first_words = ' '.join(query.split()[:3])
+        if len(first_words) > 5:
+            print(f"Trying fallback search with: '{first_words}'")
+            fallback_results = search_keyword(first_words, top_k)
+            for d in fallback_results:
+                if d["id"] not in seen_ids:
+                    docs.append(d)
+                    seen_ids.add(d["id"])
+    
+    if not docs:
+        return "", []
+    
+    # Build context with more content from each document
+    context = "Relevant documents from the 1421 Foundation knowledge base:\n\n"
+    for i, doc in enumerate(docs[:top_k], 1):
+        context += f"[Document {i}] {doc['title']}"
+        if doc.get("year") and doc["year"] > 0:
+            context += f" ({doc['year']})"
+        if doc.get("author") and doc["author"] != "Unknown":
+            context += f" by {doc['author']}"
+        context += f"\nType: {doc['type']}\n"
+        
+        # Use full content if available, otherwise preview
+        full = doc.get("content_full", doc.get("content_preview", ""))
+        if full:
+            # Use more content for better context (4000 characters)
+            context += f"{full[:4000]}\n"
+        
+        if doc.get("tags"):
+            context += f"Tags: {', '.join(doc['tags'])}\n"
+        context += "\n"
+    
+    return context, docs[:top_k]
+
+def get_comparative_context(query: str, top_k: int = 10) -> tuple:
+    """Special handling for comparative questions like 'compare X to Y'"""
+    docs = []
+    seen_ids = set()
+    q_lower = query.lower()
+    
+    # Extract the two things being compared
+    compare_parts = None
+    if "compare" in q_lower:
+        parts = q_lower.split("compare")
+        if len(parts) > 1:
+            rest = parts[1].replace("to", "and").replace("with", "and").replace("versus", "and").replace("vs", "and")
+            compare_parts = [p.strip() for p in rest.split("and") if p.strip() and len(p.strip()) > 3]
+    
+    # Search for each part separately
+    if compare_parts and len(compare_parts) >= 2:
+        print(f"Comparative query detected: {compare_parts[0]} vs {compare_parts[1]}")
+        part1_results = search_semantic(compare_parts[0], top_k // 2)
+        part2_results = search_semantic(compare_parts[1], top_k // 2)
+        
+        for d in part1_results + part2_results:
+            if d["id"] not in seen_ids:
+                docs.append(d)
+                seen_ids.add(d["id"])
+    
+    # Also search the full query
+    full_results = search_semantic(query, top_k)
+    for d in full_results:
+        if d["id"] not in seen_ids:
+            docs.append(d)
+            seen_ids.add(d["id"])
+    
+    # If still not enough, try keyword search
+    if len(docs) < 4:
+        keyword_results = search_keyword(query, top_k)
+        for d in keyword_results:
+            if d["id"] not in seen_ids:
+                docs.append(d)
+                seen_ids.add(d["id"])
+    
+    # Deduplicate
+    seen_titles = set()
+    unique_docs = []
+    for d in docs:
+        t = d.get("title", "").strip().lower()
+        t_clean = re.sub(r'^\d+\s+', '', t)
+        key = t_clean or t
+        if key and key not in seen_titles:
+            seen_titles.add(key)
+            unique_docs.append(d)
+    
+    if not unique_docs:
+        return "", []
+    
+    context = "Relevant documents from the 1421 Foundation knowledge base:\n\n"
+    for i, doc in enumerate(unique_docs[:top_k], 1):
+        context += f"[Document {i}] {doc['title']}"
+        if doc.get("year") and doc["year"] > 0:
+            context += f" ({doc['year']})"
+        if doc.get("author") and doc["author"] != "Unknown":
+            context += f" by {doc['author']}"
+        context += f"\nType: {doc['type']}\n"
+        full = doc.get("content_full", doc.get("content_preview", ""))
+        if full:
+            context += f"{full[:3000]}\n"
+        context += "\n"
+    
+    return context, unique_docs[:top_k]
+    """Enhanced context retrieval with better search for technical/historical queries"""
+    docs = []
+    seen_ids = set()
+    import re
+    
+    # Expand query with related terms for better retrieval
+    def expand_query(q: str) -> List[str]:
+        expansions = [q]
+        q_lower = q.lower()
+        
+        # Remove common question phrases
+        clean_q = re.sub(r'^(describe|explain|tell me about|what is|what are|how did|how do|why did|why do)\s+', '', q_lower)
+        expansions.append(clean_q)
+        
+        # Technical term expansions for naval/military topics
+        topic_expansions = {
             "naval technology": ["shipbuilding", "naval architecture", "marine engineering", "warship design", "treasure ship", "junk ship"],
             "ming dynasty": ["ming", "ming china", "chinese empire", "ming period"],
             "naval": ["navy", "maritime", "sea", "ocean", "fleet", "armada"],
@@ -804,6 +1034,43 @@ def _to_lc(system: str, messages: list) -> list:
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
+    llm  = get_llm()
+    last = next((m["content"] for m in reversed(req.messages) if m["role"] == "user"), "")
+    context, sources = "", []
+    
+    if req.use_documents and last:
+        # Check if this is a comparative question
+        comparative_keywords = ["compare", "versus", "vs", "difference between", "contrast"]
+        is_comparative = any(kw in last.lower() for kw in comparative_keywords)
+        
+        if is_comparative:
+            # Use specialized comparative retrieval
+            context, sources = get_comparative_context(last, top_k=10)
+        else:
+            # Use standard retrieval
+            context, sources = get_relevant_context(last, top_k=8)
+    
+    try:
+        response = llm.invoke(_to_lc(_build_system(context), req.messages))
+        
+        # Clean up sources before sending
+        clean_sources = []
+        for d in sources:
+            clean_source = {
+                "title":  d["title"],
+                "author": d["author"],
+                "year":   d["year"],
+                "type":   d["type"],
+            }
+            clean_sources.append(clean_source)
+        
+        return ChatResponse(
+            content=response.content,
+            session_id=req.session_id or datetime.now().isoformat(),
+            sources=clean_sources if clean_sources else None,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     llm  = get_llm()
     last = next((m["content"] for m in reversed(req.messages) if m["role"] == "user"), "")
     context, sources = "", []
