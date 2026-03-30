@@ -20,6 +20,12 @@ function sortByIdAsc(docs: Document[]): Document[] {
   });
 }
 
+// Don't show 100% similarity scores — only show meaningful partial matches
+function showSimilarity(score: number | null | undefined): boolean {
+  if (score == null) return false;
+  return score < 0.99;
+}
+
 function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void }) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -82,9 +88,9 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
                 {doc.type}
               </span>
             )}
-            {doc.similarity_score != null && (
+            {showSimilarity(doc.similarity_score) && (
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 border border-blue-200 text-xs font-medium text-blue-700">
-                {Math.round(doc.similarity_score * 100)}% match
+                {Math.round(doc.similarity_score! * 100)}% match
               </span>
             )}
           </div>
@@ -379,7 +385,7 @@ export default function Documents() {
         </div>
 
         {/* Document list */}
-        <div className="flex-1 overflow-y-auto px-6 py-4">
+        <div className="flex-1 overflow-y-auto px-6 py-5">
           {error && (
             <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
               {error}
@@ -400,16 +406,16 @@ export default function Documents() {
               )}
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-4">
               {filteredDocuments.map((doc) => (
                 <div
                   key={doc.id}
-                  className="bg-white rounded-xl border border-gray-200 p-5 hover:border-gold/50 hover:shadow-sm transition-all"
+                  className="bg-white rounded-2xl border border-gray-200 px-6 py-5 hover:border-gold/50 hover:shadow-md transition-all"
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-3 mb-2">
-                        <div className="w-8 h-8 rounded-lg bg-gold/10 border border-gold/30 flex items-center justify-center flex-shrink-0">
+                      <div className="flex items-center gap-3 mb-3">
+                        <div className="w-9 h-9 rounded-lg bg-gold/10 border border-gold/30 flex items-center justify-center flex-shrink-0">
                           <span className="text-gold text-xs font-bold">{doc.id}</span>
                         </div>
                         <h3 className="text-base font-display font-semibold text-gray-900 leading-snug">
@@ -422,7 +428,7 @@ export default function Documents() {
                         {doc.type && doc.type !== "unknown" && (
                           <><span>•</span><span className="capitalize">{doc.type}</span></>
                         )}
-                        {doc.url && (
+                        {doc.url ? (
                           <><span>•</span>
                           <a
                             href={doc.url}
@@ -433,8 +439,9 @@ export default function Documents() {
                           >
                             View source ↗
                           </a></>
+                        ) : (
+                          <><span>•</span><span className="text-gray-300">No source</span></>
                         )}
-                        {!doc.url && <><span>•</span><span className="text-gray-300">No source</span></>}
                         <span>•</span>
                         <span className="inline-flex items-center gap-1 text-emerald-600">
                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
@@ -452,9 +459,9 @@ export default function Documents() {
                       )}
                     </div>
                     <div className="flex flex-col items-end gap-3 flex-shrink-0">
-                      {doc.similarity_score != null && (
+                      {showSimilarity(doc.similarity_score) && (
                         <div className="text-xs text-gold font-medium">
-                          {Math.round(doc.similarity_score * 100)}% match
+                          {Math.round(doc.similarity_score! * 100)}% match
                         </div>
                       )}
                       <button
