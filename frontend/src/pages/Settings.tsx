@@ -214,7 +214,7 @@ export default function Settings() {
             <div className="space-y-3">
               <p className="text-sm text-gray-700">1421 Foundation Research System v1.0.0</p>
               <p className="text-sm text-gray-500">
-                A document-grounded research platform for exploring Chinese maritime history. All AI responses are sourced exclusively from the 1421 Foundation knowledge base — the system does not use web search or external data.
+                A document-grounded research platform for exploring Chinese maritime history. All AI responses and Data Map Locations are sourced exclusively from the 1421 Foundation knowledge base.
               </p>
               <div className="flex flex-col gap-2 pt-1">
                 <a href="https://www.1421foundation.org/" target="_blank" rel="noopener noreferrer"

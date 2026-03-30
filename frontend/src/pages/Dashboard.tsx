@@ -166,7 +166,7 @@ export default function Dashboard() {
                   Welcome to the 1421 Foundation Research System
                 </h2>
                 <p className="text-gray-600 text-sm leading-relaxed">
-                  This platform provides AI-assisted access to the 1421 Foundation's knowledge base, covering Chinese maritime exploration during the Ming dynasty (1368–1644), the voyages of Admiral Zheng He, and the research of Gavin Menzies. All AI responses are sourced exclusively from indexed documents — the system does not search the web or rely on external knowledge.
+                  This platform provides AI-assisted access to the 1421 Foundation's knowledge base, covering Chinese maritime exploration during the Ming dynasty (1368–1644), the voyages of Admiral Zheng He, and the research of Gavin Menzies. All AI responses and Data Map Locations are sourced exclusively from indexed documents.
                 </p>
               </div>
             </div>
