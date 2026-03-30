@@ -62,11 +62,13 @@ export async function getDocumentTypes(): Promise<string[]> {
   if (!res.ok) throw new Error("Failed to fetch document types");
   return (await res.json()).types;
 }
+
 export async function getDocumentYears(): Promise<number[]> {
   const res = await fetch(`${API}/api/documents/years`);
   if (!res.ok) throw new Error("Failed to fetch document years");
   return (await res.json()).years;
 }
+
 export async function getDocumentAuthors(): Promise<string[]> {
   const res = await fetch(`${API}/api/documents/authors`);
   if (!res.ok) throw new Error("Failed to fetch document authors");
@@ -75,11 +77,39 @@ export async function getDocumentAuthors(): Promise<string[]> {
 
 // ── Locations / Stats ─────────────────────────────────────────────────
 
-export async function fetchLocations(maxYear = 1433): Promise<Location[]> {
-  const res = await fetch(`${API}/api/locations?max_year=${maxYear}`);
-  if (!res.ok) throw new Error("Failed to fetch locations");
-  return res.json();
+export async function getDocumentById(id: string): Promise<Document | null> {
+  try {
+    // Use the API constant, not API_BASE_URL
+    const response = await fetch(`${API}/api/documents/search?q=${encodeURIComponent(id)}&limit=1`);
+    if (!response.ok) return null;
+    const data = await response.json();
+    const results = data.results || [];
+    if (results.length > 0) {
+      const { similarity_score, ...rest } = results[0];
+      return rest as Document;
+    }
+    return null;
+  } catch (error) {
+    console.error("Error fetching document by ID:", error);
+    return null;
+  }
 }
+
+export async function fetchLocations(maxYear?: number): Promise<Location[]> {
+  try {
+    const url = maxYear 
+      ? `${API}/api/locations?max_year=${maxYear}`
+      : `${API}/api/locations`;
+    const response = await fetch(url);
+    if (!response.ok) return [];
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error("Error fetching locations:", error);
+    return [];
+  }
+}
+
 export async function fetchStats(): Promise<Stats> {
   const res = await fetch(`${API}/api/stats`);
   if (!res.ok) throw new Error("Failed to fetch stats");
@@ -106,7 +136,7 @@ export async function sendChatMessage(
   // Remove similarity from sources if present
   if (data.sources) {
     data.sources = data.sources.map((source: any) => {
-      const { similarity, ...rest } = source;
+      const { similarity, similarity_score, ...rest } = source;
       return rest;
     });
   }
@@ -136,7 +166,7 @@ export async function streamChat(
     
     // Remove similarity from sources
     const cleanSources = (data.sources || []).map((source: any) => {
-      const { similarity, ...rest } = source;
+      const { similarity, similarity_score, ...rest } = source;
       return rest;
     });
     
