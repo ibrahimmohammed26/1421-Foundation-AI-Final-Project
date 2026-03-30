@@ -96,28 +96,23 @@ def send_feedback_email(name: str, email: str, feedback_type: str, message: str)
 SYSTEM_PROMPT = """You are a research assistant for the 1421 Foundation, specialising in Chinese maritime exploration during the Ming dynasty (1368–1644), particularly the voyages of Admiral Zheng He and the 1421 hypothesis by Gavin Menzies.
 
 IMPORTANT RULES — READ CAREFULLY:
-1. You answer based on the documents provided to you in this prompt. You do NOT use external knowledge, web searches, or your general training data.
+1. You answer based on the documents provided to you in this prompt. Do NOT use external knowledge or web searches.
 
-2. **CRITICAL - INFERENCE IS ALLOWED**: You CAN infer, synthesize, and draw conclusions from the provided documents. If you find related information across multiple documents, you can combine them to form a complete answer. You are not required to find an exact match for the question.
+2. **YOU CAN INFER AND SYNTHESIZE**: Use the provided documents to answer questions. If multiple documents contain related information, combine them to form a complete answer. You don't need an exact match.
 
-3. Every claim or piece of historical evidence you state MUST be supported by a specific document from the provided context. Reference it inline using [Document X] immediately after the relevant sentence or point.
+3. For descriptive questions like "Describe X" or "Explain Y":
+   - Look for documents that contain information about the topic
+   - Synthesize information from multiple documents
+   - Organize your answer by key aspects (e.g., ship types, navigation methods, weapons, construction)
 
-4. If you find PARTIAL information across documents, you CAN:
-   - Combine information from multiple documents to answer comparative questions
-   - Infer likely comparisons even if no single document makes the comparison directly
-   - Use related topics to draw reasonable conclusions
+4. Every claim must cite its source using [Document X] inline.
 
-5. Only if the provided documents contain NO relevant information whatsoever to answer the question, you respond with: 
+5. Only if NO documents contain ANY relevant information, respond with:
    "No data source found in the 1421 Foundation knowledge base for this query. Please try a different search term or browse the Documents section directly."
 
-6. Do NOT make up facts that aren't supported by the documents, but you CAN synthesize and infer from what the documents say.
+6. Write in clear, academic UK English. Structure your response with clear headings or paragraphs.
 
-7. Write in clear, academic UK English. Structure your response in clear paragraphs. Each paragraph or point of evidence must cite its document source inline using [Document X].
-
-8. When multiple documents support a point, cite all relevant ones: [Document 1][Document 3].
-
-9. Be objective and balanced when presenting contested theories — reflect what the documents say, not your own assessment."""
-
+7. Be specific and factual. If the documents mention specific ship names, dimensions, or dates, include them."""
 def get_comparative_context(query: str, top_k: int = 10) -> tuple:
     """Special handling for comparative questions"""
     docs = []
@@ -408,7 +403,141 @@ def search_by_title(title_query: str, limit: int = 5) -> List[dict]:
     results.sort(key=lambda x: len(x["title"]))
     return results[:limit]
 
-def get_relevant_context(query: str, top_k: int = 8) -> tuple:
+def get_relevant_context(query: str, top_k: int = 10) -> tuple:
+    """Enhanced context retrieval with better search for technical/historical queries"""
+    docs = []
+    seen_ids = set()
+    import re
+    
+    # Expand query with related terms for better retrieval
+    def expand_query(q: str) -> List[str]:
+        expansions = [q]
+        q_lower = q.lower()
+        
+        # Remove common question phrases
+        clean_q = re.sub(r'^(describe|explain|tell me about|what is|what are|how did|how do|why did|why do)\s+', '', q_lower)
+        expansions.append(clean_q)
+        
+        # Technical term expansions for naval/military topics
+        topic_expansions = {
+            "naval technology": ["shipbuilding", "naval architecture", "marine engineering", "warship design", "treasure ship", "junk ship"],
+            "ming dynasty": ["ming", "ming china", "chinese empire", "ming period"],
+            "naval": ["navy", "maritime", "sea", "ocean", "fleet", "armada"],
+            "technology": ["technique", "innovation", "invention", "method", "design", "engineering"],
+            "ship": ["vessel", "boat", "junk", "craft", "treasure ship", "bao chuan"],
+            "weapon": ["cannon", "gunpowder", "armament", "military"],
+            "navigation": ["compass", "chart", "star chart", "sextant", "dead reckoning", "celestial navigation"],
+            "construction": ["building", "building techniques", "shipyard", "dry dock", "timber"],
+        }
+        
+        # Add expansions for topic keywords found in query
+        for topic, expansions_list in topic_expansions.items():
+            if topic in q_lower or any(word in q_lower for word in topic.split()):
+                for exp in expansions_list:
+                    expansions.append(exp)
+        
+        # Add keyword variations
+        words = q_lower.split()
+        if len(words) > 1:
+            # Add bigrams
+            for i in range(len(words)-1):
+                bigram = f"{words[i]} {words[i+1]}"
+                if bigram not in expansions:
+                    expansions.append(bigram)
+        
+        return list(set(expansions))  # Remove duplicates
+    
+    # Try multiple search strategies with expanded queries
+    expanded_queries = expand_query(query)
+    
+    # Strategy 1: Semantic search with each expanded query
+    for sq in expanded_queries[:5]:  # Try up to 5 variations
+        try:
+            semantic_results = search_semantic(sq, top_k)
+            for d in semantic_results:
+                if d["id"] not in seen_ids:
+                    docs.append(d)
+                    seen_ids.add(d["id"])
+        except Exception as e:
+            print(f"Semantic search error for '{sq}': {e}")
+    
+    # Strategy 2: Keyword search (good for technical terms)
+    keyword_results = search_keyword(query, top_k)
+    for d in keyword_results:
+        if d["id"] not in seen_ids:
+            docs.append(d)
+            seen_ids.add(d["id"])
+    
+    # Strategy 3: If still no results, try searching for individual keywords
+    if len(docs) < 3:
+        keywords = [w for w in query.lower().split() if len(w) > 3]
+        for kw in keywords[:5]:
+            kw_results = search_keyword(kw, top_k)
+            for d in kw_results:
+                if d["id"] not in seen_ids:
+                    docs.append(d)
+                    seen_ids.add(d["id"])
+    
+    # Strategy 4: Title-based search for specific documents
+    title_patterns = [
+        r'(?:article|document|paper|report|piece|post|about|called|titled|named|on)\s+["\']?(.+?)["\']?$',
+        r'(?:describe|explain|tell me about|what is|what are)\s+["\'](.+?)["\']',
+    ]
+    title_hit = None
+    for pattern in title_patterns:
+        match = re.search(pattern, query, re.IGNORECASE)
+        if match:
+            title_hit = match.group(1).strip()
+            break
+    if title_hit:
+        for d in search_by_title(title_hit):
+            if d["id"] not in seen_ids:
+                docs.append(d)
+                seen_ids.add(d["id"])
+    
+    # Deduplicate by title to avoid showing the same document multiple times
+    seen_titles: set = set()
+    unique_docs = []
+    for d in docs:
+        t = d.get("title", "").strip().lower()
+        # Remove document number prefixes for better deduplication
+        t_clean = re.sub(r'^\d+\s+', '', t)
+        key = t_clean or t
+        if key and key not in seen_titles:
+            seen_titles.add(key)
+            unique_docs.append(d)
+    
+    docs = unique_docs
+    
+    # Log what was found for debugging
+    print(f"Query: '{query}' -> Found {len(docs)} documents")
+    if docs:
+        print(f"Top docs: {[d['title'][:50] for d in docs[:3]]}")
+    
+    if not docs:
+        return "", []
+    
+    # Build context with more content from each document
+    context = "Relevant documents from the 1421 Foundation knowledge base:\n\n"
+    for i, doc in enumerate(docs[:top_k], 1):
+        context += f"[Document {i}] {doc['title']}"
+        if doc.get("year") and doc["year"] > 0:
+            context += f" ({doc['year']})"
+        if doc.get("author") and doc["author"] != "Unknown":
+            context += f" by {doc['author']}"
+        context += f"\nType: {doc['type']}\n"
+        
+        # Use full content if available, otherwise preview
+        full = doc.get("content_full", doc.get("content_preview", ""))
+        if full:
+            # Increased from 2000 to 4000 characters for better context
+            context += f"{full[:4000]}\n"
+        
+        if doc.get("tags"):
+            context += f"Tags: {', '.join(doc['tags'])}\n"
+        context += "\n"
+    
+    return context, docs[:top_k]
     docs = []
     seen_ids = set()
     import re
