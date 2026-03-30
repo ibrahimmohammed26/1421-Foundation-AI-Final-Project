@@ -141,25 +141,6 @@ export default function Settings() {
             </div>
           </div>
 
-          {/* Document Database */}
-          <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-            <h3 className="text-lg font-display font-bold text-gray-900 mb-4">Document Database</h3>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <Database className="h-4 w-4 text-gray-400" />
-                <div>
-                  <span className="text-sm text-gray-800">Reindex documents</span>
-                  <p className="text-xs text-gray-400">Update the database with new or changed documents</p>
-                </div>
-              </div>
-              <button onClick={handleReindexDocuments} disabled={reindexing}
-                className="px-4 py-2 bg-red-50 text-gold border border-gold/30 rounded-lg text-sm hover:bg-red-100 transition-colors disabled:opacity-50 flex items-center gap-2">
-                <RefreshCw className={`h-4 w-4 ${reindexing ? "animate-spin" : ""}`} />
-                {reindexing ? "Reindexing…" : "Reindex"}
-              </button>
-            </div>
-          </div>
-
           {/* Data Management */}
           <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
             <h3 className="text-lg font-display font-bold text-gray-900 mb-4">Data Management</h3>

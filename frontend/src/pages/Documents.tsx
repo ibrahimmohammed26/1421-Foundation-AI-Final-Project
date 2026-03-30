@@ -20,10 +20,23 @@ function sortByIdAsc(docs: Document[]): Document[] {
   });
 }
 
-// Don't show 100% similarity scores — only show meaningful partial matches
+// Remove duplicates based on URL (keep first occurrence)
+function removeDuplicatesByUrl(docs: Document[]): Document[] {
+  const seen = new Map<string, Document>();
+  for (const doc of docs) {
+    if (doc.url && !seen.has(doc.url)) {
+      seen.set(doc.url, doc);
+    } else if (!doc.url && !seen.has(doc.id)) {
+      // For documents without URLs, use ID as key
+      seen.set(doc.id, doc);
+    }
+  }
+  return Array.from(seen.values());
+}
+
+// Don't show any similarity scores
 function showSimilarity(score: number | null | undefined): boolean {
-  if (score == null) return false;
-  return score < 0.99;
+  return false; // Never show similarity scores
 }
 
 function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void }) {
@@ -86,11 +99,6 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
             {doc.type && doc.type !== "unknown" && (
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-50 border border-gold/30 text-xs font-medium text-gold capitalize">
                 {doc.type}
-              </span>
-            )}
-            {showSimilarity(doc.similarity_score) && (
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 border border-blue-200 text-xs font-medium text-blue-700">
-                {Math.round(doc.similarity_score! * 100)}% match
               </span>
             )}
           </div>
@@ -199,8 +207,9 @@ export default function Documents() {
     setIsSearchMode(false);
     try {
       const data = await getAllDocuments(PAGE_SIZE, (page - 1) * PAGE_SIZE);
-      setDocuments(sortByIdAsc(data.documents ?? []));
-      setTotalDocuments(data.total ?? 0);
+      const uniqueDocs = removeDuplicatesByUrl(data.documents ?? []);
+      setDocuments(sortByIdAsc(uniqueDocs));
+      setTotalDocuments(uniqueDocs.length);
     } catch {
       setError("Failed to load documents. Is the backend running?");
     } finally {
@@ -216,10 +225,11 @@ export default function Documents() {
       setIsSearchMode(true);
       searchDocuments(q, 200)
         .then((data) => {
-          setDocuments(data.results || []);
-          setTotalDocuments(data.results?.length || 0);
-          if (data.results?.length === 1) {
-            setSelectedDoc(data.results[0]);
+          const uniqueDocs = removeDuplicatesByUrl(data.results || []);
+          setDocuments(uniqueDocs);
+          setTotalDocuments(uniqueDocs.length);
+          if (uniqueDocs.length === 1) {
+            setSelectedDoc(uniqueDocs[0]);
           }
         })
         .catch(console.error)
@@ -245,8 +255,9 @@ export default function Documents() {
     setIsSearchMode(true);
     try {
       const data = await searchDocuments(searchQuery, 200);
-      setDocuments(data.results || []);
-      setTotalDocuments(data.results?.length || 0);
+      const uniqueDocs = removeDuplicatesByUrl(data.results || []);
+      setDocuments(uniqueDocs);
+      setTotalDocuments(uniqueDocs.length);
     } catch (err) {
       console.error("Search error:", err);
     } finally {
@@ -459,11 +470,6 @@ export default function Documents() {
                       )}
                     </div>
                     <div className="flex flex-col items-end gap-3 flex-shrink-0">
-                      {showSimilarity(doc.similarity_score) && (
-                        <div className="text-xs text-gold font-medium">
-                          {Math.round(doc.similarity_score! * 100)}% match
-                        </div>
-                      )}
                       <button
                         onClick={() => setSelectedDoc(doc)}
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-50 border border-gold/30 text-xs font-medium text-gold hover:bg-red-100 transition-colors"

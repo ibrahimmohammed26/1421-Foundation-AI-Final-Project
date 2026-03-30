@@ -375,11 +375,7 @@ export default function Chat() {
                                   </p>
                                 </div>
                               </div>
-                              {src.similarity != null && (
-                                <span className="text-xs font-semibold text-gold flex-shrink-0 bg-red-50 px-1.5 py-0.5 rounded border border-gold/20">
-                                  {Math.round(src.similarity * 100)}%
-                                </span>
-                              )}
+                              {/* Removed similarity score display */}
                             </div>
                             <button
                               onClick={() => navigate(`/documents?search=${encodeURIComponent(src.title)}`)}
