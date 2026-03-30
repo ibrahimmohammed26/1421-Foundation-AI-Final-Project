@@ -13,13 +13,15 @@ export interface Stats {
 export interface Document {
   id: string; title: string; author: string; year: number; type: string;
   description: string; tags: string[]; content_preview: string;
-  source_file: string; url?: string; page_number?: number; similarity_score?: number;
+  source_file: string; url?: string; page_number?: number;
+  // similarity_score removed - we don't want to expose it to the frontend
 }
 export interface DocumentsResponse {
   documents: Document[]; total: number; limit: number; offset: number;
 }
 export interface ChatSource {
-  title: string; author: string; year: number; type: string; similarity?: number;
+  title: string; author: string; year: number; type: string;
+  // similarity removed - don't show percentages
 }
 export interface ChatResponse {
   content: string; session_id: string; sources?: ChatSource[];
@@ -30,13 +32,31 @@ export interface ChatResponse {
 export async function getAllDocuments(limit = 500, offset = 0): Promise<DocumentsResponse> {
   const res = await fetch(`${API}/api/documents?limit=${limit}&offset=${offset}`);
   if (!res.ok) throw new Error("Failed to fetch documents");
-  return res.json();
+  const data = await res.json();
+  // Remove similarity_score from documents if present
+  if (data.documents) {
+    data.documents = data.documents.map((doc: any) => {
+      const { similarity_score, ...rest } = doc;
+      return rest;
+    });
+  }
+  return data;
 }
+
 export async function searchDocuments(query: string, limit = 500) {
   const res = await fetch(`${API}/api/documents/search?q=${encodeURIComponent(query)}&limit=${limit}`);
   if (!res.ok) throw new Error("Failed to search documents");
-  return res.json();
+  const data = await res.json();
+  // Remove similarity_score from results if present
+  if (data.results) {
+    data.results = data.results.map((doc: any) => {
+      const { similarity_score, ...rest } = doc;
+      return rest;
+    });
+  }
+  return data;
 }
+
 export async function getDocumentTypes(): Promise<string[]> {
   const res = await fetch(`${API}/api/documents/types`);
   if (!res.ok) throw new Error("Failed to fetch document types");
@@ -82,7 +102,15 @@ export async function sendChatMessage(
     const error = await res.json().catch(() => ({ detail: "Request failed" }));
     throw new Error(error.detail || `Error ${res.status}`);
   }
-  return res.json();
+  const data = await res.json();
+  // Remove similarity from sources if present
+  if (data.sources) {
+    data.sources = data.sources.map((source: any) => {
+      const { similarity, ...rest } = source;
+      return rest;
+    });
+  }
+  return data;
 }
 
 export async function streamChat(
@@ -105,12 +133,20 @@ export async function streamChat(
     }
     const data: ChatResponse = await res.json();
     const fullText = data.content || "";
+    
+    // Remove similarity from sources
+    const cleanSources = (data.sources || []).map((source: any) => {
+      const { similarity, ...rest } = source;
+      return rest;
+    });
+    
     const seen = new Set<string>();
-    const uniqueSources = (data.sources || []).filter((s) => {
+    const uniqueSources = cleanSources.filter((s) => {
       if (seen.has(s.title)) return false;
       seen.add(s.title);
       return true;
     });
+    
     const words = fullText.split(" ");
     for (let i = 0; i < words.length; i++) {
       await new Promise((resolve) => setTimeout(resolve, 8));

@@ -76,7 +76,7 @@ function deduplicateSources(sources: Source[]): Source[] {
   });
 }
 
-// Renders message content, turning [Document X] into clickable gold badge buttons
+// Renders message content, turning [Document X] into clickable gold links
 function MessageContent({
   content,
   sources,
@@ -86,11 +86,13 @@ function MessageContent({
   sources: Source[];
   onDocClick: (docNum: number) => void;
 }) {
+  // Split on [Document N] or [Document N][Document M] patterns
   const parts = content.split(/(\[Document\s*\d+\](?:\[Document\s*\d+\])*)/gi);
 
   return (
-    <div className="text-sm leading-relaxed whitespace-pre-wrap">
+    <div className="text-sm leading-relaxed whitespace-pre-wrap space-y-0">
       {parts.map((part, i) => {
+        // Check if this part contains document references
         const docRefs = [...part.matchAll(/\[Document\s*(\d+)\]/gi)];
         if (docRefs.length > 0) {
           return (
@@ -187,7 +189,20 @@ export default function Chat() {
       (streamSources) => {
         if (!chatStore.isTyping) return;
         chatStore.setIsTyping(false);
-        const uniqueSources = deduplicateSources(streamSources || []);
+        
+        // Filter out sources that might be from "no data source found" responses
+        let uniqueSources: Source[] = [];
+        
+        // Only include sources if the response actually has content that references them
+        // and if the response isn't a "no data found" message
+        const hasNoDataMessage = content.toLowerCase().includes("no data source found") ||
+                                  content.toLowerCase().includes("no relevant sources") ||
+                                  content.toLowerCase().includes("i don't have enough information");
+        
+        if (!hasNoDataMessage && streamSources && streamSources.length > 0) {
+          uniqueSources = deduplicateSources(streamSources);
+        }
+        
         chatStore.setMessages([
           ...newMsgs,
           { role: "assistant", content, sources: uniqueSources, streaming: false },
@@ -233,6 +248,7 @@ export default function Chat() {
     });
   };
 
+  // When a [Document X] badge is clicked, navigate to that document
   const handleDocClick = (sources: Source[], docNum: number) => {
     const source = sources[docNum - 1];
     if (source) {
@@ -242,12 +258,11 @@ export default function Chat() {
     }
   };
 
-  // Starter questions are grounded in what the knowledge base actually contains
   const STARTERS = [
-    "What does the 1421 Foundation say about Zheng He's voyages?",
-    "What evidence exists for Chinese exploration of the Americas?",
-    "What is the significance of the 1418 map?",
-    "What does the research say about Chinese fleets visiting Africa?",
+    "What was the significance of Zheng He's voyages?",
+    "Describe Ming Dynasty naval technology",
+    "Is there evidence of Chinese ships reaching America?",
+    "How did Chinese navigation compare to European methods?",
   ];
 
   const hasMessages = messages.length > 0;
@@ -259,7 +274,7 @@ export default function Chat() {
       <div className="border-b border-gray-200 px-6 py-4 bg-white shadow-sm flex-shrink-0 flex items-center justify-between">
         <div>
           <h1 className="text-xl font-display font-bold text-black">1421 AI Chat</h1>
-          <p className="text-xs text-gray-500 mt-0.5">Answers sourced exclusively from the 1421 Foundation knowledge base</p>
+          <p className="text-xs text-gray-500 mt-0.5">Ask about Chinese exploration &amp; the 1421 theory — answers sourced from the knowledge base only</p>
         </div>
         {hasMessages && (
           <div className="flex items-center gap-2">
@@ -285,11 +300,8 @@ export default function Chat() {
               <span className="text-xl font-display font-bold text-white tracking-tight">1421</span>
             </div>
             <h2 className="text-2xl font-display font-bold text-black mb-2">Welcome to 1421 AI</h2>
-            <p className="text-gray-600 max-w-md mb-2">Ask questions about Chinese maritime exploration and the 1421 hypothesis.</p>
-            <p className="text-xs text-gray-400 max-w-md mb-6">
-              All answers come exclusively from the 1421 Foundation knowledge base.
-              Click any <span className="inline-flex items-center gap-0.5 px-1 rounded bg-red-50 border border-gold/40 text-gold font-semibold"><FileText className="h-3 w-3" />1</span> badge to view that source document.
-            </p>
+            <p className="text-gray-600 max-w-md mb-2">Ask any question about Chinese maritime exploration.</p>
+            <p className="text-xs text-gray-400 max-w-md mb-6">All answers are sourced exclusively from the 1421 Foundation knowledge base. Click any document badge in responses to view the source.</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg w-full">
               {STARTERS.map((q) => (
                 <button key={q} onClick={() => handleSend(q)}
@@ -308,6 +320,11 @@ export default function Chat() {
           const showSources = expandedSources.has(idx);
           const sources     = deduplicateSources(msg.sources || []);
           const sourceCount = sources.length;
+          
+          // Check if this is a "no data source found" message
+          const isNoDataMessage = msg.content.toLowerCase().includes("no data source found") ||
+                                   msg.content.toLowerCase().includes("no relevant sources") ||
+                                   msg.content.toLowerCase().includes("i don't have enough information");
 
           return (
             <div key={idx} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
@@ -337,7 +354,7 @@ export default function Chat() {
                   )
                 )}
 
-                {msg.role === "assistant" && !isStreaming && hasContent && (
+                {msg.role === "assistant" && !isStreaming && hasContent && !isNoDataMessage && sourceCount > 0 && (
                   <>
                     <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-3 flex-wrap">
                       <button onClick={() => handleCopy(msg.content, idx)}
@@ -360,20 +377,23 @@ export default function Chat() {
                       <div className="mt-3 space-y-2">
                         {sources.map((src, sIdx) => (
                           <div key={sIdx} className="bg-gray-50 rounded-lg border border-gray-200 px-3 py-2">
-                            <div className="flex items-start gap-2 min-w-0">
-                              <span className="w-5 h-5 rounded bg-gold/10 border border-gold/30 flex items-center justify-center text-gold text-xs font-bold flex-shrink-0 mt-0.5">
-                                {sIdx + 1}
-                              </span>
-                              <div className="min-w-0">
-                                <p className="text-xs font-semibold text-gray-900 truncate">{src.title}</p>
-                                <p className="text-xs text-gray-500 mt-0.5">
-                                  {[
-                                    src.author !== "Unknown" && src.author,
-                                    src.year > 0 && src.year,
-                                    src.type && src.type !== "unknown" && src.type,
-                                  ].filter(Boolean).join(" · ")}
-                                </p>
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="w-5 h-5 rounded bg-gold/10 border border-gold/30 flex items-center justify-center text-gold text-xs font-bold flex-shrink-0">
+                                  {sIdx + 1}
+                                </span>
+                                <div className="min-w-0">
+                                  <p className="text-xs font-semibold text-gray-900 truncate">{src.title}</p>
+                                  <p className="text-xs text-gray-500 mt-0.5">
+                                    {[
+                                      src.author !== "Unknown" && src.author,
+                                      src.year > 0 && src.year,
+                                      src.type && src.type !== "unknown" && src.type,
+                                    ].filter(Boolean).join(" · ")}
+                                  </p>
+                                </div>
                               </div>
+                              {/* Percentage completely removed */}
                             </div>
                             <button
                               onClick={() => navigate(`/documents?search=${encodeURIComponent(src.title)}`)}
@@ -383,7 +403,7 @@ export default function Chat() {
                             </button>
                           </div>
                         ))}
-                        <p className="text-xs text-gray-400">Click any <span className="text-gold font-semibold">[Document X]</span> badge above to jump directly to that source.</p>
+                        <p className="text-xs text-gray-400">Click any document badge in the response to jump directly to that source.</p>
                       </div>
                     )}
                   </>
@@ -404,7 +424,7 @@ export default function Chat() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-              placeholder="Ask a question about Zheng He, the 1421 hypothesis, or Chinese maritime exploration…"
+              placeholder="Ask a question…"
               rows={1}
               className="w-full resize-none rounded-xl border border-gray-300 bg-white px-4 py-3 pr-16 text-sm text-black placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gold/40 focus:border-gold"
               style={{ minHeight: "48px", maxHeight: "200px", overflowY: "hidden" }}
@@ -427,7 +447,7 @@ export default function Chat() {
             </button>
           )}
         </div>
-        <p className="text-xs text-gray-400 text-center mt-2">Enter to send · Shift+Enter for new line · Knowledge base only — no web search</p>
+        <p className="text-xs text-gray-400 text-center mt-2">Press Enter to send · Shift+Enter for new line · Answers sourced from knowledge base only</p>
       </div>
 
       {/* Clear Chat Modal */}

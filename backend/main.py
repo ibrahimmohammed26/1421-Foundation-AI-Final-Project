@@ -93,18 +93,98 @@ def send_feedback_email(name: str, email: str, feedback_type: str, message: str)
         print(f"ERROR: Resend email failed: {e}")
 
 # ── LLM ──────────────────────────────────────────────────────────────
-
 SYSTEM_PROMPT = """You are a research assistant for the 1421 Foundation, specialising in Chinese maritime exploration during the Ming dynasty (1368–1644), particularly the voyages of Admiral Zheng He and the 1421 hypothesis by Gavin Menzies.
 
 IMPORTANT RULES — READ CAREFULLY:
-1. You ONLY answer from the documents provided to you in this prompt. You do NOT use external knowledge, web searches, or your general training data to answer questions.
-2. Every claim or piece of historical evidence you state MUST be supported by a specific document from the provided context. Reference it inline using [Document X] immediately after the relevant sentence or point.
-3. If the provided documents do not contain relevant information to answer the question, you MUST respond with: "No data source found in the 1421 Foundation knowledge base for this query. Please try a different search term or browse the Documents section directly."
-4. Do NOT make up facts, infer beyond what the documents say, or supplement with general historical knowledge.
-5. Write in clear, academic UK English. Structure your response in clear paragraphs. Each paragraph or point of evidence must cite its document source inline using [Document X].
-6. When multiple documents support a point, cite all relevant ones: [Document 1][Document 3].
-7. Be objective and balanced when presenting contested theories — reflect what the documents say, not your own assessment."""
+1. You answer based on the documents provided to you in this prompt. You do NOT use external knowledge, web searches, or your general training data.
 
+2. **CRITICAL - INFERENCE IS ALLOWED**: You CAN infer, synthesize, and draw conclusions from the provided documents. If you find related information across multiple documents, you can combine them to form a complete answer. You are not required to find an exact match for the question.
+
+3. Every claim or piece of historical evidence you state MUST be supported by a specific document from the provided context. Reference it inline using [Document X] immediately after the relevant sentence or point.
+
+4. If you find PARTIAL information across documents, you CAN:
+   - Combine information from multiple documents to answer comparative questions
+   - Infer likely comparisons even if no single document makes the comparison directly
+   - Use related topics to draw reasonable conclusions
+
+5. Only if the provided documents contain NO relevant information whatsoever to answer the question, you respond with: 
+   "No data source found in the 1421 Foundation knowledge base for this query. Please try a different search term or browse the Documents section directly."
+
+6. Do NOT make up facts that aren't supported by the documents, but you CAN synthesize and infer from what the documents say.
+
+7. Write in clear, academic UK English. Structure your response in clear paragraphs. Each paragraph or point of evidence must cite its document source inline using [Document X].
+
+8. When multiple documents support a point, cite all relevant ones: [Document 1][Document 3].
+
+9. Be objective and balanced when presenting contested theories — reflect what the documents say, not your own assessment."""
+
+def get_comparative_context(query: str, top_k: int = 10) -> tuple:
+    """Special handling for comparative questions"""
+    docs = []
+    seen_ids = set()
+    
+    # Extract the two things being compared
+    q_lower = query.lower()
+    
+    # For "compare X to Y" queries
+    compare_parts = None
+    if "compare" in q_lower:
+        parts = q_lower.split("compare")
+        if len(parts) > 1:
+            rest = parts[1].replace("to", "and").replace("with", "and").replace("versus", "and").replace("vs", "and")
+            compare_parts = [p.strip() for p in rest.split("and") if p.strip()]
+    
+    # Search for each part separately
+    if compare_parts and len(compare_parts) >= 2:
+        part1_results = search_semantic(compare_parts[0], top_k // 2)
+        part2_results = search_semantic(compare_parts[1], top_k // 2)
+        
+        for d in part1_results + part2_results:
+            if d["id"] not in seen_ids:
+                docs.append(d)
+                seen_ids.add(d["id"])
+    
+    # Also search the full query
+    full_results = search_semantic(query, top_k)
+    for d in full_results:
+        if d["id"] not in seen_ids:
+            docs.append(d)
+            seen_ids.add(d["id"])
+    
+    # If still not enough, try keyword search
+    if len(docs) < 4:
+        keyword_results = search_keyword(query, top_k)
+        for d in keyword_results:
+            if d["id"] not in seen_ids:
+                docs.append(d)
+                seen_ids.add(d["id"])
+    
+    # Deduplicate
+    seen_titles = set()
+    unique_docs = []
+    for d in docs:
+        t = d.get("title", "").strip().lower()
+        if t and t not in seen_titles:
+            seen_titles.add(t)
+            unique_docs.append(d)
+    
+    if not unique_docs:
+        return "", []
+    
+    context = "Relevant documents from the 1421 Foundation knowledge base:\n\n"
+    for i, doc in enumerate(unique_docs[:top_k], 1):
+        context += f"[Document {i}] {doc['title']}"
+        if doc.get("year") and doc["year"] > 0:
+            context += f" ({doc['year']})"
+        if doc.get("author") and doc["author"] != "Unknown":
+            context += f" by {doc['author']}"
+        context += f"\nType: {doc['type']}\n"
+        full = doc.get("content_full", doc.get("content_preview", ""))
+        if full:
+            context += f"{full[:3000]}\n"
+        context += "\n"
+    
+    return context, unique_docs[:top_k]
 
 def get_llm():
     return ChatOpenAI(
@@ -332,6 +412,119 @@ def get_relevant_context(query: str, top_k: int = 8) -> tuple:
     docs = []
     seen_ids = set()
     import re
+    
+    # Expand query with related terms for better retrieval
+    def expand_query(q: str) -> List[str]:
+        expansions = [q]
+        q_lower = q.lower()
+        
+        # Add comparative search terms
+        if "compare" in q_lower or "versus" in q_lower or "vs" in q_lower:
+            expansions.append(q.replace("compare", "difference between"))
+            expansions.append(q.replace("compare", "contrast"))
+        
+        # Add navigation-related expansions
+        if "navigation" in q_lower:
+            expansions.extend([
+                q.replace("navigation", "ship technology"),
+                q.replace("navigation", "seafaring"),
+                q.replace("navigation", "maritime techniques"),
+                q.replace("navigation", "sailing methods")
+            ])
+        
+        # Add Chinese-specific expansions
+        if "chinese" in q_lower:
+            expansions.extend([
+                q.replace("chinese", "Ming dynasty"),
+                q.replace("chinese", "Zheng He"),
+                q.replace("chinese", "Chinese fleet"),
+                q.replace("chinese", "treasure ships")
+            ])
+        
+        # Add European-specific expansions  
+        if "european" in q_lower:
+            expansions.extend([
+                q.replace("european", "Western"),
+                q.replace("european", "Portuguese"),
+                q.replace("european", "Spanish"),
+                q.replace("european", "Columbus")
+            ])
+        
+        return list(set(expansions))  # Remove duplicates
+    
+    # Try multiple search strategies
+    search_queries = expand_query(query)
+    
+    for sq in search_queries[:3]:  # Limit to 3 variations to avoid too many API calls
+        # Semantic search with lower threshold
+        semantic_results = search_semantic(sq, top_k)
+        for d in semantic_results:
+            if d["id"] not in seen_ids:
+                docs.append(d)
+                seen_ids.add(d["id"])
+        
+        # Keyword search as backup
+        keyword_results = search_keyword(sq, top_k)
+        for d in keyword_results:
+            if d["id"] not in seen_ids:
+                docs.append(d)
+                seen_ids.add(d["id"])
+    
+    # Try title-based search if we still don't have enough docs
+    if len(docs) < 3:
+        title_patterns = [
+            r'(?:article|document|paper|report|piece|post)\s+(?:about|called|titled|named|on)\s+["\']?(.+?)["\']?$',
+            r'(?:tell me about|summarise|summarize|what does|what is in|explain)\s+["\'](.+?)["\']',
+            r'["\'](.+?)["\']',
+        ]
+        title_hit = None
+        for pattern in title_patterns:
+            match = re.search(pattern, query, re.IGNORECASE)
+            if match:
+                title_hit = match.group(1).strip()
+                break
+        if title_hit:
+            for d in search_by_title(title_hit):
+                if d["id"] not in seen_ids:
+                    docs.append(d)
+                    seen_ids.add(d["id"])
+    
+    # Deduplicate by title
+    import re as _re
+    seen_titles: set = set()
+    unique_docs = []
+    for d in docs:
+        t = d.get("title", "").strip().lower()
+        t_norm = _re.sub(r"^\d+\s+", "", t).strip()
+        key = t_norm or t
+        if key and key not in seen_titles:
+            seen_titles.add(key)
+            unique_docs.append(d)
+    docs = unique_docs
+    
+    if not docs:
+        return "", []
+    
+    context = "Relevant documents from the 1421 Foundation knowledge base:\n\n"
+    for i, doc in enumerate(docs[:top_k], 1):
+        context += f"[Document {i}] {doc['title']}"
+        if doc.get("year") and doc["year"] > 0:
+            context += f" ({doc['year']})"
+        if doc.get("author") and doc["author"] != "Unknown":
+            context += f" by {doc['author']}"
+        context += f"\nType: {doc['type']}\n"
+        full = doc.get("content_full", doc.get("content_preview", ""))
+        if full:
+            # Include more content for better context
+            context += f"{full[:3000]}\n"  # Increased from 2000 to 3000
+        if doc.get("tags"):
+            context += f"Tags: {', '.join(doc['tags'])}\n"
+        context += "\n"
+    
+    return context, docs[:top_k]
+    docs = []
+    seen_ids = set()
+    import re
     title_patterns = [
         r'(?:article|document|paper|report|piece|post)\s+(?:about|called|titled|named|on)\s+["\']?(.+?)["\']?$',
         r'(?:tell me about|summarise|summarize|what does|what is in|explain)\s+["\'](.+?)["\']',
@@ -482,6 +675,44 @@ def _to_lc(system: str, messages: list) -> list:
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
+    llm  = get_llm()
+    last = next((m["content"] for m in reversed(req.messages) if m["role"] == "user"), "")
+    context, sources = "", []
+    
+    if req.use_documents and last:
+        # Check if this is a comparative question
+        comparative_keywords = ["compare", "versus", "vs", "difference between", "contrast"]
+        is_comparative = any(kw in last.lower() for kw in comparative_keywords)
+        
+        if is_comparative:
+            # Use specialized comparative retrieval
+            context, sources = get_comparative_context(last, top_k=10)
+        else:
+            # Use standard retrieval
+            context, sources = get_relevant_context(last, top_k=8)
+    
+    try:
+        response = llm.invoke(_to_lc(_build_system(context), req.messages))
+        
+        # Clean up similarity scores before sending to frontend
+        clean_sources = []
+        for d in sources:
+            clean_source = {
+                "title":  d["title"],
+                "author": d["author"],
+                "year":   d["year"],
+                "type":   d["type"],
+                # Remove similarity to avoid showing percentages
+            }
+            clean_sources.append(clean_source)
+        
+        return ChatResponse(
+            content=response.content,
+            session_id=req.session_id or datetime.now().isoformat(),
+            sources=clean_sources if clean_sources else None,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     llm  = get_llm()
     last = next((m["content"] for m in reversed(req.messages) if m["role"] == "user"), "")
     context, sources = "", []
