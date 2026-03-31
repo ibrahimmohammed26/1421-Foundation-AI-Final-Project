@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { fetchLocations } from "@/lib/api";
-import { BarChart3, PieChart, TrendingUp, Globe, Calendar, Ship, Anchor, Compass } from "lucide-react";
+import { BarChart3, PieChart, TrendingUp, Globe, Calendar, Ship, Anchor, Compass, Database } from "lucide-react";
 
 interface Location {
   name: string; lat: number; lon: number; year: number; event: string;
@@ -9,7 +9,7 @@ interface Location {
 export default function Analytics() {
   const [locations, setLocations]   = useState<Location[]>([]);
   const [loading, setLoading]       = useState(true);
-  const [activeChart, setActiveChart] = useState<"timeline" | "regions" | "stats">("timeline");
+  const [activeChart, setActiveChart] = useState<"stats" | "timeline" | "regions">("stats");
 
   useEffect(() => {
     fetchLocations(1433).then(data => { setLocations(data); setLoading(false); });
@@ -61,15 +61,15 @@ export default function Analytics() {
 
       {/* Header */}
       <div className="border-b border-gray-200 px-6 py-4 bg-white shadow-sm flex-shrink-0">
-        <h1 className="text-xl font-display font-bold text-gray-900">Analytics</h1>
-        <p className="text-xs text-gray-500 mt-0.5">Voyage statistics and historical insights</p>
+        <h1 className="text-xl font-display font-bold text-gray-900">Data Statistics</h1>
+        <p className="text-xs text-gray-500 mt-0.5">Voyage data and historical insights</p>
       </div>
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 px-6 py-4 flex-shrink-0">
         {[
           { label: "Total Voyages",     icon: Ship,    value: "7",               sub: "Between 1405–1433" },
-          { label: "Locations Visited", icon: Globe,   value: locations.length,  sub: "Across 3 continents" },
+          { label: "Locations",         icon: Globe,   value: locations.length,  sub: "Across 3 continents" },
           { label: "Years Span",        icon: Calendar, value: `${1433 - 1403}`, sub: "From 1403 to 1433" },
           { label: "Farthest Point",    icon: Compass, value: "Zanzibar",        sub: "East Africa, 1421" },
         ].map(({ label, icon: Icon, value, sub }) => (
@@ -87,20 +87,54 @@ export default function Analytics() {
       {/* Tab Navigation */}
       <div className="border-y border-gray-200 px-6 bg-white flex-shrink-0">
         <div className="flex gap-6">
+          <button onClick={() => setActiveChart("stats")} className={tabClass("stats")}>
+            <Database className="h-4 w-4" /> Data Statistics
+          </button>
           <button onClick={() => setActiveChart("timeline")} className={tabClass("timeline")}>
             <BarChart3 className="h-4 w-4" /> Voyage Timeline
           </button>
           <button onClick={() => setActiveChart("regions")} className={tabClass("regions")}>
             <PieChart className="h-4 w-4" /> Regional Distribution
           </button>
-          <button onClick={() => setActiveChart("stats")} className={tabClass("stats")}>
-            <TrendingUp className="h-4 w-4" /> Voyage Statistics
-          </button>
         </div>
       </div>
 
       {/* Chart Area */}
       <div className="flex-1 overflow-y-auto px-6 py-6">
+
+        {activeChart === "stats" && (
+          <div className="space-y-4">
+            <h3 className="text-sm font-semibold text-gray-900">Voyage Period Analysis</h3>
+            <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+              <div className="space-y-4">
+                {Object.entries(periods).map(([period, count]) => (
+                  <div key={period} className="space-y-1">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-800 font-medium">{period}</span>
+                      <span className="text-gold font-semibold">{count} locations</span>
+                    </div>
+                    <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                      <div className="h-full bg-gold rounded-full" style={{ width: `${(count / maxPeriod) * 100}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+              <h4 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                <Anchor className="h-4 w-4 text-gold" /> Key Insights
+              </h4>
+              <ul className="space-y-2 text-sm text-gray-700">
+                <li>• The voyages spanned 30 years from 1403 to 1433</li>
+                <li>• Southeast Asia had the highest concentration of stops</li>
+                <li>• The fleet travelled over 50,000 km across three oceans</li>
+                <li>• Zanzibar was the southernmost point reached (East Africa, 1421)</li>
+                <li>• Zheng He died at Calicut on the return leg of the seventh voyage in 1433</li>
+              </ul>
+            </div>
+          </div>
+        )}
 
         {activeChart === "timeline" && (
           <div className="space-y-4">
@@ -142,40 +176,6 @@ export default function Analytics() {
                   </p>
                 </div>
               ))}
-            </div>
-          </div>
-        )}
-
-        {activeChart === "stats" && (
-          <div className="space-y-4">
-            <h3 className="text-sm font-semibold text-gray-900">Voyage Period Analysis</h3>
-            <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-              <div className="space-y-4">
-                {Object.entries(periods).map(([period, count]) => (
-                  <div key={period} className="space-y-1">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-800 font-medium">{period}</span>
-                      <span className="text-gold font-semibold">{count} locations</span>
-                    </div>
-                    <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-gold rounded-full" style={{ width: `${(count / maxPeriod) * 100}%` }} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-              <h4 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                <Anchor className="h-4 w-4 text-gold" /> Key Insights
-              </h4>
-              <ul className="space-y-2 text-sm text-gray-700">
-                <li>• The voyages spanned 30 years from 1403 to 1433</li>
-                <li>• Southeast Asia had the highest concentration of stops</li>
-                <li>• The fleet travelled over 50,000 km across three oceans</li>
-                <li>• Zanzibar was the southernmost point reached (East Africa, 1421)</li>
-                <li>• Zheng He died at Calicut on the return leg of the seventh voyage in 1433</li>
-              </ul>
             </div>
           </div>
         )}

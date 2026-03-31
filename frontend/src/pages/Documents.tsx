@@ -1,456 +1,438 @@
-import { useState, useEffect, useCallback } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import {
-  Search, FileText, Filter, X, ChevronLeft, ChevronRight,
-  ExternalLink, Tag, User, Calendar, Layers, Hash, Eye,
-} from "lucide-react";
-import {
-  getAllDocuments, searchDocuments, getDocumentTypes, getDocumentYears,
-  Document,
-} from "@/lib/api";
+  MapContainer, TileLayer, Marker, Popup,
+} from "react-leaflet";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+import { fetchLocations, searchDocuments } from "@/lib/api";
+import { FileText, X, CheckCircle } from "lucide-react";
 
-const PAGE_SIZE = 50;
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png",
+  iconUrl:       "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
+  shadowUrl:     "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
+});
 
-function sortByIdAsc(docs: Document[]): Document[] {
-  return [...docs].sort((a, b) => {
-    const aNum = parseInt(a.id, 10);
-    const bNum = parseInt(b.id, 10);
-    if (!isNaN(aNum) && !isNaN(bNum)) return aNum - bNum;
-    return a.id.localeCompare(b.id);
-  });
+const redIcon = new L.Icon({
+  iconUrl:   "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png",
+  shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
+  iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41],
+});
+
+interface Location {
+  name: string;
+  lat: number;
+  lon: number;
+  year: number;
+  event: string;
 }
 
-function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void }) {
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
-
-  const MetaRow = ({
-    icon: Icon, label, value,
-  }: { icon: React.ElementType; label: string; value: React.ReactNode }) => (
-    <div className="flex items-start gap-3 py-2.5 border-b border-gray-100 last:border-0">
-      <div className="flex items-center gap-2 w-28 flex-shrink-0">
-        <Icon className="h-3.5 w-3.5 text-gray-400" />
-        <span className="text-xs text-gray-400 uppercase tracking-wide">{label}</span>
-      </div>
-      <div className="flex-1 text-sm text-gray-800">{value}</div>
-    </div>
-  );
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-    >
-      <div className="bg-white border border-gray-200 rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl">
-
-        {/* Header */}
-        <div className="flex items-start justify-between gap-4 px-6 py-5 border-b border-gray-100">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-9 h-9 rounded-lg bg-gold flex items-center justify-center flex-shrink-0">
-              <span className="text-white text-xs font-bold">{doc.id}</span>
-            </div>
-            <div className="min-w-0">
-              <h2 className="text-base font-display font-bold text-gray-900 leading-snug break-words">
-                {doc.title}
-              </h2>
-              {doc.author && doc.author !== "Unknown" && (
-                <p className="text-xs text-gray-400 mt-0.5">by {doc.author}</p>
-              )}
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors flex-shrink-0"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        {/* Body */}
-        <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-6">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-medium text-emerald-700">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
-              Active
-            </span>
-            {doc.type && doc.type !== "unknown" && (
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-50 border border-gold/30 text-xs font-medium text-gold capitalize">
-                {doc.type}
-              </span>
-            )}
-          </div>
-
-          <div className="bg-gray-50 rounded-xl border border-gray-100 px-4 py-1">
-            <MetaRow icon={Hash} label="Doc No." value={<span className="font-mono font-bold text-gray-700">{doc.id}</span>} />
-            {doc.author && doc.author !== "Unknown" && (
-              <MetaRow icon={User} label="Author" value={doc.author} />
-            )}
-            {doc.year > 0 && (
-              <MetaRow icon={Calendar} label="Year" value={doc.year} />
-            )}
-            {doc.type && doc.type !== "unknown" && (
-              <MetaRow icon={Layers} label="Type" value={<span className="capitalize">{doc.type}</span>} />
-            )}
-            <MetaRow
-              icon={ExternalLink}
-              label="URL"
-              value={
-                doc.url ? (
-                  <a href={doc.url} target="_blank" rel="noopener noreferrer"
-                    className="text-gold hover:underline text-xs break-all">
-                    {doc.url}
-                  </a>
-                ) : (
-                  <span className="text-gray-400 text-xs">No source available</span>
-                )
-              }
-            />
-            {doc.page_number != null && (
-              <MetaRow icon={Hash} label="Page" value={`p. ${doc.page_number}`} />
-            )}
-          </div>
-
-          {doc.tags && doc.tags.length > 0 && (
-            <div>
-              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-2">
-                <Tag className="h-3.5 w-3.5" /> Tags
-              </h3>
-              <div className="flex flex-wrap gap-2">
-                {doc.tags.map((tag, idx) => (
-                  <span key={idx} className="px-2.5 py-1 bg-gray-100 border border-gray-200 rounded-lg text-xs text-gray-600">
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3">
-          {doc.url && (
-            <a href={doc.url} target="_blank" rel="noopener noreferrer"
-              className="px-5 py-2 rounded-lg bg-gold text-white text-sm font-medium hover:bg-gold-light transition-colors flex items-center gap-2">
-              <ExternalLink className="h-3.5 w-3.5" /> Open Source
-            </a>
-          )}
-          <button onClick={onClose}
-            className="px-5 py-2 rounded-lg bg-gray-100 border border-gray-200 text-sm text-gray-700 hover:bg-gray-200 transition-colors">
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+interface RelatedDoc {
+  id: string;
+  title: string;
+  author: string;
+  year: number;
+  type: string;
+  url?: string;
+  similarity_score?: number;
+  content_preview?: string;
+  source_file?: string;
 }
 
-export default function Documents() {
-  const [searchParams] = useSearchParams();
+// Location-specific keywords for relevance
+const locationKeywords: Record<string, { required: string[], optional: string[], exclude: string[] }> = {
+  "Sri Lanka": {
+    required: ["Sri Lanka", "Galle", "Ceylon", "trilingual inscription"],
+    optional: ["Zheng He", "trading", "port", "1409", "tribute"],
+    exclude: ["Gallery", "Minoan", "Atlantis", "fresco", "artist impression", "gallery 1", "gallery 2", "gallery 3"]
+  },
+  "Hormuz": {
+    required: ["Hormuz", "Ormus", "Persian Gulf"],
+    optional: ["Zheng He", "fourth voyage", "1414", "tribute"],
+    exclude: ["Gallery", "Minoan", "Atlantis", "fresco"]
+  },
+  "Malindi": {
+    required: ["Malindi", "Kenya", "East Africa"],
+    optional: ["giraffe", "Zheng He", "fifth voyage", "1418"],
+    exclude: ["Gallery", "Minoan", "Atlantis"]
+  },
+  "Mogadishu": {
+    required: ["Mogadishu", "Somalia", "Somali"],
+    optional: ["Zheng He", "porcelain", "East Africa"],
+    exclude: ["Gallery", "Minoan", "Atlantis"]
+  },
+  "Aden": {
+    required: ["Aden", "Yemen", "Arabia"],
+    optional: ["Zheng He", "fifth voyage", "1417"],
+    exclude: ["Gallery", "Minoan", "Atlantis"]
+  },
+  "Calicut": {
+    required: ["Calicut", "Kozhikode", "Malabar Coast"],
+    optional: ["Zheng He", "first voyage", "1406", "India"],
+    exclude: ["Gallery", "Minoan", "Atlantis"]
+  },
+  "Malacca": {
+    required: ["Malacca", "Melaka", "Strait of Malacca"],
+    optional: ["Zheng He", "port", "Malaysia"],
+    exclude: ["Gallery", "Minoan", "Atlantis"]
+  },
+  "Nanjing": {
+    required: ["Nanjing", "shipyard", "Longjiang"],
+    optional: ["Zheng He", "treasure fleet", "1403"],
+    exclude: ["Gallery", "Minoan", "Atlantis"]
+  }
+};
 
-  // All documents are loaded once; pagination is done client-side
-  const [allDocuments, setAllDocuments]   = useState<Document[]>([]);
-  const [loading, setLoading]             = useState(true);
-  const [searchQuery, setSearchQuery]     = useState("");
-  const [searching, setSearching]         = useState(false);
-  const [isSearchMode, setIsSearchMode]   = useState(false);
-  const [searchResults, setSearchResults] = useState<Document[]>([]);
+const defaultKeywords = {
+  required: [] as string[],
+  optional: [] as string[],
+  exclude: ["Gallery", "Minoan", "Atlantis", "fresco", "artist impression", "gallery 1", "gallery 2", "gallery 3", "image", "photo"]
+};
 
-  const [types, setTypes]                 = useState<string[]>([]);
-  const [years, setYears]                 = useState<number[]>([]);
-  const [selectedType, setSelectedType]   = useState<string>("all");
-  const [selectedYear, setSelectedYear]   = useState<number | "all">("all");
-  const [showFilters, setShowFilters]     = useState(false);
+const calculateRelevanceScore = (doc: RelatedDoc, locationName: string): number => {
+  const title = doc.title?.toLowerCase() || "";
+  const sourceFile = doc.source_file?.toLowerCase() || "";
+  const type = doc.type?.toLowerCase() || "";
+  
+  const keywords = locationKeywords[locationName] || defaultKeywords;
+  let score = 0;
+  
+  for (const excludeWord of keywords.exclude) {
+    if (title.includes(excludeWord.toLowerCase())) {
+      return -100;
+    }
+  }
+  
+  for (const requiredWord of keywords.required) {
+    if (title.includes(requiredWord.toLowerCase())) {
+      score += 20;
+    }
+  }
+  
+  for (const optionalWord of keywords.optional) {
+    if (title.includes(optionalWord.toLowerCase())) {
+      score += 8;
+    }
+  }
+  
+  if (sourceFile.includes("1421") || sourceFile.includes("evidence") || sourceFile.includes("book")) {
+    score += 15;
+  }
+  if (sourceFile.includes("foundation")) {
+    score += 10;
+  }
+  if (type === "gavin_menzies" && !title.includes("gallery")) {
+    score += 5;
+  }
+  if (doc.similarity_score) {
+    score += doc.similarity_score * 10;
+  }
+  
+  return score;
+};
 
-  const [currentPage, setCurrentPage]     = useState(1);
-  const [error, setError]                 = useState<string | null>(null);
-  const [selectedDoc, setSelectedDoc]     = useState<Document | null>(null);
+const isDocumentRelevant = (doc: RelatedDoc, locationName: string): boolean => {
+  const title = doc.title?.toLowerCase() || "";
+  const keywords = locationKeywords[locationName] || defaultKeywords;
+  
+  if (title.includes("gallery") || title.includes("minoan") || title.includes("atlantis") || title.includes("fresco")) {
+    return false;
+  }
+  
+  const allRelevantKeywords = [...keywords.required, ...keywords.optional];
+  for (const keyword of allRelevantKeywords) {
+    if (title.includes(keyword.toLowerCase())) {
+      return true;
+    }
+  }
+  
+  return false;
+};
+
+const getSearchVariations = (loc: Location): string[] => {
+  const variations: string[] = [loc.name];
+  
+  if (loc.name === "Sri Lanka") {
+    variations.push("Galle Sri Lanka", "Zheng He Galle", "trilingual inscription", "Ceylon Zheng He");
+  } else if (loc.name === "Hormuz") {
+    variations.push("Hormuz Persian Gulf", "Zheng He Hormuz", "Ormus", "fourth voyage");
+  } else if (loc.name === "Malindi") {
+    variations.push("Malindi Kenya", "giraffe Malindi", "Zheng He Malindi", "fifth voyage");
+  } else if (loc.name === "Mogadishu") {
+    variations.push("Mogadishu Somalia", "Somali coast", "Zheng He Mogadishu");
+  } else if (loc.name === "Aden") {
+    variations.push("Aden Yemen", "Arabian Peninsula", "Zheng He Aden");
+  } else if (loc.name === "Calicut") {
+    variations.push("Calicut India", "Kozhikode", "Malabar Coast", "Zheng He Calicut");
+  } else if (loc.name === "Malacca") {
+    variations.push("Malacca Malaysia", "Melaka", "Strait of Malacca");
+  } else if (loc.name === "Nanjing") {
+    variations.push("Nanjing shipyard", "treasure fleet Nanjing", "Longjiang shipyard");
+  }
+  
+  return variations;
+};
+
+export default function DataMap() {
+  const navigate = useNavigate();
+
+  const [locations, setLocations]               = useState<Location[]>([]);
+  const [loading, setLoading]                   = useState(true);
+  const [selectedLocation, setSelectedLocation] = useState<Location | null>(null);
+  const [relatedDocs, setRelatedDocs]           = useState<RelatedDoc[]>([]);
+  const [docsLoading, setDocsLoading]           = useState(false);
+  const [showDocsPanel, setShowDocsPanel]       = useState(false);
 
   useEffect(() => {
-    getDocumentTypes().then(setTypes).catch(() => {});
-    getDocumentYears().then(setYears).catch(() => {});
+    fetchLocations(1433)
+      .then((d) => { setLocations(d); setLoading(false); })
+      .catch(() => setLoading(false));
   }, []);
 
-  // Load ALL documents with pagination handling
-  const loadAllDocuments = useCallback(async () => {
-    setLoading(true);
-    setIsSearchMode(false);
+  const fetchRelatedDocs = async (loc: Location) => {
+    setDocsLoading(true);
+    setRelatedDocs([]);
+    
+    const variations = getSearchVariations(loc);
+    
     try {
-      // Try to get a large limit first (10,000)
-      let allDocs: Document[] = [];
-      let page = 0;
-      const limit = 500; // Fetch in chunks of 500
-      let hasMore = true;
+      let allResults: RelatedDoc[] = [];
+      const seenIds = new Set<string>();
       
-      while (hasMore) {
+      for (const term of variations) {
         try {
-          const data = await getAllDocuments(limit, page * limit);
-          const docs = data.documents ?? [];
-          allDocs = [...allDocs, ...docs];
-          
-          // If we got fewer than limit, we've reached the end
-          if (docs.length < limit) {
-            hasMore = false;
-          } else {
-            page++;
+          const res = await searchDocuments(term, 30);
+          const results: RelatedDoc[] = res.results || [];
+          for (const doc of results) {
+            if (!seenIds.has(doc.id)) {
+              seenIds.add(doc.id);
+              allResults.push(doc);
+            }
           }
         } catch (err) {
-          console.error("Error fetching page:", err);
-          hasMore = false;
+          console.error(`Search failed for "${term}":`, err);
         }
       }
       
-      setAllDocuments(sortByIdAsc(allDocs));
-      console.log(`Loaded ${allDocs.length} documents total`);
-    } catch (err) {
-      console.error("Failed to load documents:", err);
-      setError("Failed to load documents. Is the backend running?");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    const q = searchParams.get("search");
-    if (q) {
-      setSearchQuery(q);
-      setSearching(true);
-      setIsSearchMode(true);
-      searchDocuments(q, 500) // Increased limit for search results
-        .then((data) => {
-          setSearchResults(data.results || []);
-          if (data.results?.length === 1) {
-            setSelectedDoc(data.results[0]);
+      try {
+        const res = await searchDocuments(`Zheng He ${loc.name}`, 20);
+        const results: RelatedDoc[] = res.results || [];
+        for (const doc of results) {
+          if (!seenIds.has(doc.id)) {
+            seenIds.add(doc.id);
+            allResults.push(doc);
           }
-        })
-        .catch(console.error)
-        .finally(() => {
-          setSearching(false);
-          setLoading(false);
-        });
-      loadAllDocuments(); // still load all in background
-    } else {
-      loadAllDocuments();
-    }
-  }, [loadAllDocuments, searchParams]);
-
-  const handleSearch = async () => {
-    if (!searchQuery.trim()) {
-      setIsSearchMode(false);
-      setCurrentPage(1);
-      return;
-    }
-    setSearching(true);
-    setIsSearchMode(true);
-    try {
-      const data = await searchDocuments(searchQuery, 500); // Increased limit
-      setSearchResults(data.results || []);
-      setCurrentPage(1);
+        }
+      } catch (err) {
+        console.error(`Search failed for Zheng He ${loc.name}:`, err);
+      }
+      
+      const relevantDocs = allResults.filter(doc => isDocumentRelevant(doc, loc.name));
+      
+      const scoredDocs = relevantDocs.map(doc => ({
+        doc,
+        score: calculateRelevanceScore(doc, loc.name)
+      }));
+      
+      const positiveDocs = scoredDocs.filter(item => item.score > 0);
+      positiveDocs.sort((a, b) => b.score - a.score);
+      
+      const seenTitles = new Set<string>();
+      const unique = positiveDocs.filter((item) => {
+        const key = item.doc.title.trim().toLowerCase();
+        if (seenTitles.has(key)) return false;
+        seenTitles.add(key);
+        return true;
+      });
+      
+      const topRelevant = unique.slice(0, 8).map(item => item.doc);
+      
+      setRelatedDocs(topRelevant);
+      
     } catch (err) {
-      console.error("Search error:", err);
+      console.error("Error fetching related docs:", err);
+      setRelatedDocs([]);
     } finally {
-      setSearching(false);
+      setDocsLoading(false);
     }
   };
 
-  const handleClearSearch = () => {
-    setSearchQuery("");
-    setIsSearchMode(false);
-    setCurrentPage(1);
+  const handleLocationClick = (loc: Location) => {
+    setSelectedLocation(loc);
+    setShowDocsPanel(true);
+    fetchRelatedDocs(loc);
   };
 
-  // Apply type/year filters to either search results or all documents
-  const baseDocuments = isSearchMode ? searchResults : allDocuments;
-  const filteredDocuments = baseDocuments.filter((doc) => {
-    const matchesType = selectedType === "all" || doc.type === selectedType;
-    const matchesYear = selectedYear === "all" || doc.year === selectedYear;
-    return matchesType && matchesYear;
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-full bg-gray-100">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gold" />
+      </div>
+    );
+  }
+
+  const seen = new Set<string>();
+  const uniqueLocations = locations.filter((l) => {
+    if (seen.has(l.name)) return false;
+    seen.add(l.name);
+    return true;
   });
 
-  const totalDocuments = filteredDocuments.length;
-  const totalPages = Math.ceil(totalDocuments / PAGE_SIZE);
-  const pagedDocuments = isSearchMode
-    ? filteredDocuments // show all search results without paging
-    : filteredDocuments.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
-
   return (
-    <>
-      <div className="flex flex-col h-full bg-gray-100">
+    <div className="flex flex-col h-full bg-gray-100">
+      {/* Header */}
+      <div className="border-b border-gray-200 px-6 py-4 bg-white shadow-sm flex-shrink-0">
+        <h1 className="text-xl font-display font-bold text-gray-900">Data Map</h1>
+        <p className="text-xs text-gray-500 mt-0.5">Zheng He's voyage locations — click a marker to find related documents</p>
+      </div>
 
-        {/* Header */}
-        <div className="border-b border-gray-200 px-6 py-4 bg-white shadow-sm">
-          <h1 className="text-xl font-display font-bold text-gray-900">Research Documents</h1>
-          <p className="text-xs text-gray-400 mt-0.5">
-            {loading
-              ? "Loading knowledge base…"
-              : `${allDocuments.length} documents in the knowledge base`}
-          </p>
-        </div>
+      <div className="relative flex-1 min-h-0 flex">
+        <div className="flex-1 relative">
+          <MapContainer center={[20, 80]} zoom={3}
+            style={{ height: "100%", width: "100%" }} zoomControl={true}>
+            <TileLayer
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            />
+            {uniqueLocations.map((loc, idx) => (
+              <Marker key={idx} position={[loc.lat, loc.lon]} icon={redIcon}
+                eventHandlers={{ click: () => handleLocationClick(loc) }}>
+                <Popup>
+                  <div className="text-sm">
+                    <p className="font-bold text-gray-900">{loc.name}</p>
+                    <p className="text-xs text-gray-500">Year {loc.year}</p>
+                    <p className="text-xs mt-1 text-gray-700">{loc.event}</p>
+                    <button onClick={() => handleLocationClick(loc)}
+                      className="mt-2 text-xs text-gold font-semibold flex items-center gap-1 hover:underline">
+                      <FileText className="h-3 w-3" /> View related documents
+                    </button>
+                  </div>
+                </Popup>
+              </Marker>
+            ))}
+          </MapContainer>
 
-        {/* Search + Filters */}
-        <div className="px-6 py-4 border-b border-gray-200 bg-white">
-          <div className="flex gap-3">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search by title, author, or ID…"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-                className="w-full bg-white border border-gray-300 rounded-lg pl-10 pr-10 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gold/30 focus:border-gold"
-              />
-              {searchQuery && (
-                <button onClick={handleClearSearch}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                  <X className="h-4 w-4" />
-                </button>
-              )}
-            </div>
-            <button onClick={handleSearch} disabled={searching}
-              className="px-6 py-2.5 bg-gold text-white rounded-lg text-sm font-medium hover:bg-gold-light transition-colors disabled:opacity-50 shadow-sm">
-              {searching ? "Searching…" : "Search"}
-            </button>
-            <button onClick={() => setShowFilters(!showFilters)}
-              className={`px-4 py-2.5 rounded-lg border text-sm flex items-center gap-2 transition-colors ${
-                showFilters ? "bg-gold text-white border-gold" : "border-gray-300 text-gray-500 hover:text-gray-900 hover:border-gray-400 bg-white"
-              }`}>
-              <Filter className="h-4 w-4" />
-              Filters
-            </button>
+          {/* Stats overlay - moved to bottom left to avoid zoom buttons */}
+          <div className="absolute bottom-4 left-4 bg-white/95 backdrop-blur-sm rounded-lg border border-gray-200 px-4 py-2 z-[1000] shadow-sm">
+            <p className="text-xs text-gray-400 uppercase tracking-wider">Locations</p>
+            <p className="text-2xl font-display font-bold text-gold leading-none mt-0.5">{uniqueLocations.length}</p>
+            <p className="text-xs text-gray-400 mt-0.5">From Zheng He's voyages</p>
           </div>
 
-          {showFilters && (
-            <div className="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">Document Type</label>
-                  <select value={selectedType} onChange={(e) => { setSelectedType(e.target.value); setCurrentPage(1); }}
-                    className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-800">
-                    <option value="all">All Types</option>
-                    {types.map((t) => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">Year</label>
-                  <select value={selectedYear}
-                    onChange={(e) => { setSelectedYear(e.target.value === "all" ? "all" : Number(e.target.value)); setCurrentPage(1); }}
-                    className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-800">
-                    <option value="all">All Years</option>
-                    {years.map((y) => <option key={y} value={y}>{y}</option>)}
-                  </select>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Status + pagination */}
-        <div className="px-6 py-2 text-xs text-gray-500 flex justify-between items-center border-b border-gray-200 bg-white">
-          <span>
-            {isSearchMode
-              ? `${filteredDocuments.length} result${filteredDocuments.length !== 1 ? "s" : ""} for "${searchQuery}"`
-              : `Showing ${(currentPage - 1) * PAGE_SIZE + 1}–${Math.min(currentPage * PAGE_SIZE, totalDocuments)} of ${totalDocuments} documents`}
-          </span>
-          {!isSearchMode && totalPages > 1 && (
+          {/* Legend - moved to bottom right */}
+          <div className="absolute bottom-4 right-4 bg-white/95 backdrop-blur-sm rounded-lg border border-gray-200 p-2 z-[1000] shadow-sm">
             <div className="flex items-center gap-2">
-              <button onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} disabled={currentPage === 1}
-                className="p-1 rounded hover:bg-gray-100 disabled:opacity-50">
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-              <span>Page {currentPage} of {totalPages}</span>
-              <button onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}
-                className="p-1 rounded hover:bg-gray-100 disabled:opacity-50">
-                <ChevronRight className="h-4 w-4" />
-              </button>
+              <span className="w-3 h-3 rounded-full bg-red-500 inline-block" />
+              <span className="text-xs text-gray-600">Voyage location</span>
             </div>
-          )}
+          </div>
         </div>
 
-        {/* Document list */}
-        <div className="flex-1 overflow-y-auto px-6 py-5">
-          {error && (
-            <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{error}</div>
-          )}
-          {loading ? (
-            <div className="flex items-center justify-center h-64">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gold" />
+        {/* Related documents side panel */}
+        {showDocsPanel && selectedLocation && (
+          <div className="w-96 bg-white border-l border-gray-200 flex flex-col z-[999] shadow-lg">
+            <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between bg-gray-50">
+              <div className="min-w-0 flex-1">
+                <h3 className="text-sm font-bold text-gold">{selectedLocation.name}</h3>
+                <p className="text-xs text-gray-400 mt-0.5 leading-snug">{selectedLocation.event}</p>
+              </div>
+              <button onClick={() => setShowDocsPanel(false)}
+                className="text-gray-400 hover:text-gray-600 flex-shrink-0 ml-2">
+                <X className="h-4 w-4" />
+              </button>
             </div>
-          ) : pagedDocuments.length === 0 ? (
-            <div className="text-center py-12">
-              <FileText className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-              <p className="text-gray-500">No documents found</p>
-              {searchQuery && (
-                <button onClick={handleClearSearch} className="mt-3 text-gold hover:text-gold-dark text-sm">
-                  Clear search
-                </button>
+
+            <div className="px-4 py-2 border-b border-gray-100 flex justify-between items-center">
+              <p className="text-xs font-semibold text-gray-600 flex items-center gap-1.5">
+                <FileText className="h-3.5 w-3.5 text-gold" />
+                Related Documents ({relatedDocs.length})
+              </p>
+              {docsLoading && (
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gold" />
               )}
             </div>
-          ) : (
-            <div className="space-y-4">
-              {pagedDocuments.map((doc) => (
+
+            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+              {docsLoading && (
+                <div className="flex items-center justify-center py-8">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-gold" />
+                </div>
+              )}
+              {!docsLoading && relatedDocs.length === 0 && (
+                <div className="text-center py-6">
+                  <p className="text-xs text-gray-400 mb-3">
+                    No relevant documents found for "{selectedLocation.name}".
+                  </p>
+                  <button
+                    onClick={() => navigate(`/documents?search=${encodeURIComponent(selectedLocation.name)}`)}
+                    className="text-xs text-gold font-semibold hover:underline">
+                    Search documents manually →
+                  </button>
+                </div>
+              )}
+              {!docsLoading && relatedDocs.map((doc, index) => (
                 <div key={doc.id}
-                  className="bg-white rounded-2xl border border-gray-200 px-6 py-5 hover:border-gold/50 hover:shadow-md transition-all">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-3 mb-3">
-                        <div className="w-9 h-9 rounded-lg bg-gold/10 border border-gold/30 flex items-center justify-center flex-shrink-0">
-                          <span className="text-gold text-xs font-bold">{doc.id}</span>
-                        </div>
-                        <h3 className="text-base font-display font-semibold text-gray-900 leading-snug">
-                          {doc.title}
-                        </h3>
+                  className={`rounded-lg border p-3 transition-colors ${
+                    index === 0 
+                      ? "border-gold bg-gold/5" 
+                      : "border-gray-200 bg-gray-50 hover:border-gold/40"
+                  }`}>
+                  <div className="flex items-start gap-2">
+                    {index === 0 && (
+                      <div className="flex-shrink-0 w-5 h-5 rounded-full bg-gold flex items-center justify-center">
+                        <span className="text-white text-[10px] font-bold">1</span>
                       </div>
-                      <div className="flex items-center gap-2 text-xs text-gray-400 flex-wrap">
-                        {doc.author && doc.author !== "Unknown" && <span>By {doc.author}</span>}
-                        {doc.year > 0 && <><span>•</span><span>{doc.year}</span></>}
-                        {doc.type && doc.type !== "unknown" && (
-                          <><span>•</span><span className="capitalize">{doc.type}</span></>
-                        )}
-                        {doc.url ? (
-                          <><span>•</span>
-                          <a href={doc.url} target="_blank" rel="noopener noreferrer"
-                            className="text-gold hover:underline truncate max-w-[200px]"
-                            onClick={(e) => e.stopPropagation()}>
-                            View source ↗
-                          </a></>
-                        ) : (
-                          <><span>•</span><span className="text-gray-300">No source</span></>
-                        )}
-                        <span>•</span>
-                        <span className="inline-flex items-center gap-1 text-emerald-600">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
-                          Active
-                        </span>
+                    )}
+                    {index === 1 && (
+                      <div className="flex-shrink-0 w-5 h-5 rounded-full bg-gray-400 flex items-center justify-center">
+                        <span className="text-white text-[10px] font-bold">2</span>
                       </div>
-                      {doc.tags && doc.tags.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5 mt-3">
-                          {doc.tags.slice(0, 8).map((tag, idx) => (
-                            <span key={idx} className="px-2 py-0.5 bg-gray-100 rounded text-xs text-gray-500">{tag}</span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex-shrink-0">
-                      <button onClick={() => setSelectedDoc(doc)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-50 border border-gold/30 text-xs font-medium text-gold hover:bg-red-100 transition-colors">
-                        <Eye className="h-3.5 w-3.5" />
-                        View
+                    )}
+                    {index === 2 && (
+                      <div className="flex-shrink-0 w-5 h-5 rounded-full bg-gray-500 flex items-center justify-center">
+                        <span className="text-white text-[10px] font-bold">3</span>
+                      </div>
+                    )}
+                    {index > 2 && (
+                      <div className="flex-shrink-0 w-5 h-5 rounded-full bg-gray-300 flex items-center justify-center">
+                        <span className="text-gray-600 text-[10px] font-bold">{index + 1}</span>
+                      </div>
+                    )}
+                    <div className="flex-1">
+                      <p className={`text-xs font-semibold leading-snug ${index === 0 ? "text-gold" : "text-gray-900"}`}>
+                        {doc.title}
+                      </p>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        {[
+                          doc.author !== "Unknown" && doc.author,
+                          doc.year > 0 && doc.year,
+                          doc.type && doc.type !== "unknown" && doc.type,
+                        ].filter(Boolean).join(" · ")}
+                      </p>
+                      <button
+                        onClick={() => navigate(`/documents?search=${encodeURIComponent(doc.id)}`)}
+                        className="mt-2 text-xs text-gold font-semibold flex items-center gap-1 hover:underline">
+                        <FileText className="h-3 w-3" /> View Document
                       </button>
                     </div>
                   </div>
                 </div>
               ))}
             </div>
-          )}
-        </div>
-      </div>
 
-      {selectedDoc && (
-        <DocumentModal doc={selectedDoc} onClose={() => setSelectedDoc(null)} />
-      )}
-    </>
+            <div className="px-4 py-3 border-t border-gray-100">
+              <button
+                onClick={() => navigate(`/documents?search=${encodeURIComponent(selectedLocation.name)}`)}
+                className="w-full text-xs text-gold font-semibold flex items-center justify-center gap-1.5 hover:underline">
+                <FileText className="h-3.5 w-3.5" />
+                Search all documents
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
