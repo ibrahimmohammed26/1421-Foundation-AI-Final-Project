@@ -13,15 +13,13 @@ export interface Stats {
 export interface Document {
   id: string; title: string; author: string; year: number; type: string;
   description: string; tags: string[]; content_preview: string;
-  source_file: string; url?: string; page_number?: number;
-  // similarity_score removed - we don't want to expose it to the frontend
+  source_file: string; url?: string; page_number?: number; similarity_score?: number;
 }
 export interface DocumentsResponse {
   documents: Document[]; total: number; limit: number; offset: number;
 }
 export interface ChatSource {
-  title: string; author: string; year: number; type: string;
-  // similarity removed - don't show percentages
+  title: string; author: string; year: number; type: string; similarity?: number;
 }
 export interface ChatResponse {
   content: string; session_id: string; sources?: ChatSource[];
@@ -29,46 +27,31 @@ export interface ChatResponse {
 
 // ── Documents ─────────────────────────────────────────────────────────
 
-export async function getAllDocuments(limit = 500, offset = 0): Promise<DocumentsResponse> {
+export async function getAllDocuments(limit = 10000, offset = 0): Promise<DocumentsResponse> {
   const res = await fetch(`${API}/api/documents?limit=${limit}&offset=${offset}`);
   if (!res.ok) throw new Error("Failed to fetch documents");
-  const data = await res.json();
-  // Remove similarity_score from documents if present
-  if (data.documents) {
-    data.documents = data.documents.map((doc: any) => {
-      const { similarity_score, ...rest } = doc;
-      return rest;
-    });
-  }
-  return data;
+  return res.json();
 }
-
-export async function searchDocuments(query: string, limit = 500) {
+export async function searchDocuments(query: string, limit = 200) {
   const res = await fetch(`${API}/api/documents/search?q=${encodeURIComponent(query)}&limit=${limit}`);
   if (!res.ok) throw new Error("Failed to search documents");
-  const data = await res.json();
-  // Remove similarity_score from results if present
-  if (data.results) {
-    data.results = data.results.map((doc: any) => {
-      const { similarity_score, ...rest } = doc;
-      return rest;
-    });
-  }
-  return data;
+  return res.json();
 }
-
+export async function getDocumentById(id: string): Promise<Document | null> {
+  const res = await fetch(`${API}/api/documents/${id}`);
+  if (!res.ok) return null;
+  return res.json();
+}
 export async function getDocumentTypes(): Promise<string[]> {
   const res = await fetch(`${API}/api/documents/types`);
   if (!res.ok) throw new Error("Failed to fetch document types");
   return (await res.json()).types;
 }
-
 export async function getDocumentYears(): Promise<number[]> {
   const res = await fetch(`${API}/api/documents/years`);
   if (!res.ok) throw new Error("Failed to fetch document years");
   return (await res.json()).years;
 }
-
 export async function getDocumentAuthors(): Promise<string[]> {
   const res = await fetch(`${API}/api/documents/authors`);
   if (!res.ok) throw new Error("Failed to fetch document authors");
@@ -77,39 +60,11 @@ export async function getDocumentAuthors(): Promise<string[]> {
 
 // ── Locations / Stats ─────────────────────────────────────────────────
 
-export async function getDocumentById(id: string): Promise<Document | null> {
-  try {
-    // Use the API constant, not API_BASE_URL
-    const response = await fetch(`${API}/api/documents/search?q=${encodeURIComponent(id)}&limit=1`);
-    if (!response.ok) return null;
-    const data = await response.json();
-    const results = data.results || [];
-    if (results.length > 0) {
-      const { similarity_score, ...rest } = results[0];
-      return rest as Document;
-    }
-    return null;
-  } catch (error) {
-    console.error("Error fetching document by ID:", error);
-    return null;
-  }
+export async function fetchLocations(maxYear = 1433): Promise<Location[]> {
+  const res = await fetch(`${API}/api/locations?max_year=${maxYear}`);
+  if (!res.ok) throw new Error("Failed to fetch locations");
+  return res.json();
 }
-
-export async function fetchLocations(maxYear?: number): Promise<Location[]> {
-  try {
-    const url = maxYear 
-      ? `${API}/api/locations?max_year=${maxYear}`
-      : `${API}/api/locations`;
-    const response = await fetch(url);
-    if (!response.ok) return [];
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error("Error fetching locations:", error);
-    return [];
-  }
-}
-
 export async function fetchStats(): Promise<Stats> {
   const res = await fetch(`${API}/api/stats`);
   if (!res.ok) throw new Error("Failed to fetch stats");
@@ -132,15 +87,7 @@ export async function sendChatMessage(
     const error = await res.json().catch(() => ({ detail: "Request failed" }));
     throw new Error(error.detail || `Error ${res.status}`);
   }
-  const data = await res.json();
-  // Remove similarity from sources if present
-  if (data.sources) {
-    data.sources = data.sources.map((source: any) => {
-      const { similarity, similarity_score, ...rest } = source;
-      return rest;
-    });
-  }
-  return data;
+  return res.json();
 }
 
 export async function streamChat(
@@ -163,20 +110,12 @@ export async function streamChat(
     }
     const data: ChatResponse = await res.json();
     const fullText = data.content || "";
-    
-    // Remove similarity from sources
-    const cleanSources = (data.sources || []).map((source: any) => {
-      const { similarity, similarity_score, ...rest } = source;
-      return rest;
-    });
-    
     const seen = new Set<string>();
-    const uniqueSources = cleanSources.filter((s) => {
+    const uniqueSources = (data.sources || []).filter((s) => {
       if (seen.has(s.title)) return false;
       seen.add(s.title);
       return true;
     });
-    
     const words = fullText.split(" ");
     for (let i = 0; i < words.length; i++) {
       await new Promise((resolve) => setTimeout(resolve, 8));

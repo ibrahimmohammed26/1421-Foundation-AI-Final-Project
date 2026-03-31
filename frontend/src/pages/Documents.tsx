@@ -20,25 +20,6 @@ function sortByIdAsc(docs: Document[]): Document[] {
   });
 }
 
-// Remove duplicates based on URL (keep first occurrence)
-function removeDuplicatesByUrl(docs: Document[]): Document[] {
-  const seen = new Map<string, Document>();
-  for (const doc of docs) {
-    if (doc.url && !seen.has(doc.url)) {
-      seen.set(doc.url, doc);
-    } else if (!doc.url && !seen.has(doc.id)) {
-      // For documents without URLs, use ID as key
-      seen.set(doc.id, doc);
-    }
-  }
-  return Array.from(seen.values());
-}
-
-// Don't show any similarity scores
-function showSimilarity(score: number | null | undefined): boolean {
-  return false; // Never show similarity scores
-}
-
 function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void }) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -90,7 +71,6 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
 
         {/* Body */}
         <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-6">
-
           <div className="flex items-center gap-2 flex-wrap">
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-medium text-emerald-700">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
@@ -119,12 +99,8 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
               label="URL"
               value={
                 doc.url ? (
-                  <a
-                    href={doc.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-gold hover:underline text-xs break-all"
-                  >
+                  <a href={doc.url} target="_blank" rel="noopener noreferrer"
+                    className="text-gold hover:underline text-xs break-all">
                     {doc.url}
                   </a>
                 ) : (
@@ -156,19 +132,13 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
         {/* Footer */}
         <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3">
           {doc.url && (
-            <a
-              href={doc.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-5 py-2 rounded-lg bg-gold text-white text-sm font-medium hover:bg-gold-light transition-colors flex items-center gap-2"
-            >
+            <a href={doc.url} target="_blank" rel="noopener noreferrer"
+              className="px-5 py-2 rounded-lg bg-gold text-white text-sm font-medium hover:bg-gold-light transition-colors flex items-center gap-2">
               <ExternalLink className="h-3.5 w-3.5" /> Open Source
             </a>
           )}
-          <button
-            onClick={onClose}
-            className="px-5 py-2 rounded-lg bg-gray-100 border border-gray-200 text-sm text-gray-700 hover:bg-gray-200 transition-colors"
-          >
+          <button onClick={onClose}
+            className="px-5 py-2 rounded-lg bg-gray-100 border border-gray-200 text-sm text-gray-700 hover:bg-gray-200 transition-colors">
             Close
           </button>
         </div>
@@ -180,11 +150,13 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
 export default function Documents() {
   const [searchParams] = useSearchParams();
 
-  const [documents, setDocuments]         = useState<Document[]>([]);
+  // All documents are loaded once; pagination is done client-side
+  const [allDocuments, setAllDocuments]   = useState<Document[]>([]);
   const [loading, setLoading]             = useState(true);
   const [searchQuery, setSearchQuery]     = useState("");
   const [searching, setSearching]         = useState(false);
   const [isSearchMode, setIsSearchMode]   = useState(false);
+  const [searchResults, setSearchResults] = useState<Document[]>([]);
 
   const [types, setTypes]                 = useState<string[]>([]);
   const [years, setYears]                 = useState<number[]>([]);
@@ -192,7 +164,6 @@ export default function Documents() {
   const [selectedYear, setSelectedYear]   = useState<number | "all">("all");
   const [showFilters, setShowFilters]     = useState(false);
 
-  const [totalDocuments, setTotalDocuments] = useState(0);
   const [currentPage, setCurrentPage]     = useState(1);
   const [error, setError]                 = useState<string | null>(null);
   const [selectedDoc, setSelectedDoc]     = useState<Document | null>(null);
@@ -202,14 +173,14 @@ export default function Documents() {
     getDocumentYears().then(setYears).catch(() => {});
   }, []);
 
-  const loadDocuments = useCallback(async (page: number) => {
+  // Load ALL documents once on mount
+  const loadAllDocuments = useCallback(async () => {
     setLoading(true);
     setIsSearchMode(false);
     try {
-      const data = await getAllDocuments(PAGE_SIZE, (page - 1) * PAGE_SIZE);
-      const uniqueDocs = removeDuplicatesByUrl(data.documents ?? []);
-      setDocuments(sortByIdAsc(uniqueDocs));
-      setTotalDocuments(uniqueDocs.length);
+      // Request up to 10,000 — backend default is now 10,000
+      const data = await getAllDocuments(10000, 0);
+      setAllDocuments(sortByIdAsc(data.documents ?? []));
     } catch {
       setError("Failed to load documents. Is the backend running?");
     } finally {
@@ -225,11 +196,9 @@ export default function Documents() {
       setIsSearchMode(true);
       searchDocuments(q, 200)
         .then((data) => {
-          const uniqueDocs = removeDuplicatesByUrl(data.results || []);
-          setDocuments(uniqueDocs);
-          setTotalDocuments(uniqueDocs.length);
-          if (uniqueDocs.length === 1) {
-            setSelectedDoc(uniqueDocs[0]);
+          setSearchResults(data.results || []);
+          if (data.results?.length === 1) {
+            setSelectedDoc(data.results[0]);
           }
         })
         .catch(console.error)
@@ -237,27 +206,24 @@ export default function Documents() {
           setSearching(false);
           setLoading(false);
         });
+      loadAllDocuments(); // still load all in background
     } else {
-      loadDocuments(1);
+      loadAllDocuments();
     }
   }, []);
 
-  useEffect(() => {
-    const q = searchParams.get("search");
-    if (!q) {
-      loadDocuments(currentPage);
-    }
-  }, [currentPage]);
-
   const handleSearch = async () => {
-    if (!searchQuery.trim()) { setCurrentPage(1); loadDocuments(1); return; }
+    if (!searchQuery.trim()) {
+      setIsSearchMode(false);
+      setCurrentPage(1);
+      return;
+    }
     setSearching(true);
     setIsSearchMode(true);
     try {
       const data = await searchDocuments(searchQuery, 200);
-      const uniqueDocs = removeDuplicatesByUrl(data.results || []);
-      setDocuments(uniqueDocs);
-      setTotalDocuments(uniqueDocs.length);
+      setSearchResults(data.results || []);
+      setCurrentPage(1);
     } catch (err) {
       console.error("Search error:", err);
     } finally {
@@ -267,17 +233,23 @@ export default function Documents() {
 
   const handleClearSearch = () => {
     setSearchQuery("");
+    setIsSearchMode(false);
     setCurrentPage(1);
-    loadDocuments(1);
   };
 
-  const filteredDocuments = documents.filter((doc) => {
+  // Apply type/year filters to either search results or all documents
+  const baseDocuments = isSearchMode ? searchResults : allDocuments;
+  const filteredDocuments = baseDocuments.filter((doc) => {
     const matchesType = selectedType === "all" || doc.type === selectedType;
     const matchesYear = selectedYear === "all" || doc.year === selectedYear;
     return matchesType && matchesYear;
   });
 
+  const totalDocuments = filteredDocuments.length;
   const totalPages = Math.ceil(totalDocuments / PAGE_SIZE);
+  const pagedDocuments = isSearchMode
+    ? filteredDocuments // show all search results without paging
+    : filteredDocuments.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   return (
     <>
@@ -287,9 +259,9 @@ export default function Documents() {
         <div className="border-b border-gray-200 px-6 py-4 bg-white shadow-sm">
           <h1 className="text-xl font-display font-bold text-gray-900">Research Documents</h1>
           <p className="text-xs text-gray-400 mt-0.5">
-            {totalDocuments > 0
-              ? `${totalDocuments} documents in the knowledge base`
-              : "Loading knowledge base…"}
+            {loading
+              ? "Loading knowledge base…"
+              : `${allDocuments.length} documents in the knowledge base`}
           </p>
         </div>
 
@@ -307,29 +279,20 @@ export default function Documents() {
                 className="w-full bg-white border border-gray-300 rounded-lg pl-10 pr-10 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gold/30 focus:border-gold"
               />
               {searchQuery && (
-                <button
-                  onClick={handleClearSearch}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                >
+                <button onClick={handleClearSearch}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
                   <X className="h-4 w-4" />
                 </button>
               )}
             </div>
-            <button
-              onClick={handleSearch}
-              disabled={searching}
-              className="px-6 py-2.5 bg-gold text-white rounded-lg text-sm font-medium hover:bg-gold-light transition-colors disabled:opacity-50 shadow-sm"
-            >
+            <button onClick={handleSearch} disabled={searching}
+              className="px-6 py-2.5 bg-gold text-white rounded-lg text-sm font-medium hover:bg-gold-light transition-colors disabled:opacity-50 shadow-sm">
               {searching ? "Searching…" : "Search"}
             </button>
-            <button
-              onClick={() => setShowFilters(!showFilters)}
+            <button onClick={() => setShowFilters(!showFilters)}
               className={`px-4 py-2.5 rounded-lg border text-sm flex items-center gap-2 transition-colors ${
-                showFilters
-                  ? "bg-gold text-white border-gold"
-                  : "border-gray-300 text-gray-500 hover:text-gray-900 hover:border-gray-400 bg-white"
-              }`}
-            >
+                showFilters ? "bg-gold text-white border-gold" : "border-gray-300 text-gray-500 hover:text-gray-900 hover:border-gray-400 bg-white"
+              }`}>
               <Filter className="h-4 w-4" />
               Filters
             </button>
@@ -340,24 +303,17 @@ export default function Documents() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">Document Type</label>
-                  <select
-                    value={selectedType}
-                    onChange={(e) => setSelectedType(e.target.value)}
-                    className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-800"
-                  >
+                  <select value={selectedType} onChange={(e) => { setSelectedType(e.target.value); setCurrentPage(1); }}
+                    className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-800">
                     <option value="all">All Types</option>
                     {types.map((t) => <option key={t} value={t}>{t}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">Year</label>
-                  <select
-                    value={selectedYear}
-                    onChange={(e) =>
-                      setSelectedYear(e.target.value === "all" ? "all" : Number(e.target.value))
-                    }
-                    className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-800"
-                  >
+                  <select value={selectedYear}
+                    onChange={(e) => { setSelectedYear(e.target.value === "all" ? "all" : Number(e.target.value)); setCurrentPage(1); }}
+                    className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-800">
                     <option value="all">All Years</option>
                     {years.map((y) => <option key={y} value={y}>{y}</option>)}
                   </select>
@@ -372,23 +328,17 @@ export default function Documents() {
           <span>
             {isSearchMode
               ? `${filteredDocuments.length} result${filteredDocuments.length !== 1 ? "s" : ""} for "${searchQuery}"`
-              : `Showing docs ${(currentPage - 1) * PAGE_SIZE + 1}–${Math.min(currentPage * PAGE_SIZE, totalDocuments)} of ${totalDocuments}`}
+              : `Showing ${(currentPage - 1) * PAGE_SIZE + 1}–${Math.min(currentPage * PAGE_SIZE, totalDocuments)} of ${totalDocuments} documents`}
           </span>
           {!isSearchMode && totalPages > 1 && (
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                disabled={currentPage === 1}
-                className="p-1 rounded hover:bg-gray-100 disabled:opacity-50"
-              >
+              <button onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} disabled={currentPage === 1}
+                className="p-1 rounded hover:bg-gray-100 disabled:opacity-50">
                 <ChevronLeft className="h-4 w-4" />
               </button>
               <span>Page {currentPage} of {totalPages}</span>
-              <button
-                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                disabled={currentPage === totalPages}
-                className="p-1 rounded hover:bg-gray-100 disabled:opacity-50"
-              >
+              <button onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}
+                className="p-1 rounded hover:bg-gray-100 disabled:opacity-50">
                 <ChevronRight className="h-4 w-4" />
               </button>
             </div>
@@ -398,15 +348,13 @@ export default function Documents() {
         {/* Document list */}
         <div className="flex-1 overflow-y-auto px-6 py-5">
           {error && (
-            <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
-              {error}
-            </div>
+            <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{error}</div>
           )}
           {loading ? (
             <div className="flex items-center justify-center h-64">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gold" />
             </div>
-          ) : filteredDocuments.length === 0 ? (
+          ) : pagedDocuments.length === 0 ? (
             <div className="text-center py-12">
               <FileText className="h-12 w-12 text-gray-300 mx-auto mb-3" />
               <p className="text-gray-500">No documents found</p>
@@ -418,11 +366,9 @@ export default function Documents() {
             </div>
           ) : (
             <div className="space-y-4">
-              {filteredDocuments.map((doc) => (
-                <div
-                  key={doc.id}
-                  className="bg-white rounded-2xl border border-gray-200 px-6 py-5 hover:border-gold/50 hover:shadow-md transition-all"
-                >
+              {pagedDocuments.map((doc) => (
+                <div key={doc.id}
+                  className="bg-white rounded-2xl border border-gray-200 px-6 py-5 hover:border-gold/50 hover:shadow-md transition-all">
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-3 mb-3">
@@ -441,13 +387,9 @@ export default function Documents() {
                         )}
                         {doc.url ? (
                           <><span>•</span>
-                          <a
-                            href={doc.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                          <a href={doc.url} target="_blank" rel="noopener noreferrer"
                             className="text-gold hover:underline truncate max-w-[200px]"
-                            onClick={(e) => e.stopPropagation()}
-                          >
+                            onClick={(e) => e.stopPropagation()}>
                             View source ↗
                           </a></>
                         ) : (
@@ -462,18 +404,14 @@ export default function Documents() {
                       {doc.tags && doc.tags.length > 0 && (
                         <div className="flex flex-wrap gap-1.5 mt-3">
                           {doc.tags.slice(0, 8).map((tag, idx) => (
-                            <span key={idx} className="px-2 py-0.5 bg-gray-100 rounded text-xs text-gray-500">
-                              {tag}
-                            </span>
+                            <span key={idx} className="px-2 py-0.5 bg-gray-100 rounded text-xs text-gray-500">{tag}</span>
                           ))}
                         </div>
                       )}
                     </div>
-                    <div className="flex flex-col items-end gap-3 flex-shrink-0">
-                      <button
-                        onClick={() => setSelectedDoc(doc)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-50 border border-gold/30 text-xs font-medium text-gold hover:bg-red-100 transition-colors"
-                      >
+                    <div className="flex-shrink-0">
+                      <button onClick={() => setSelectedDoc(doc)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-50 border border-gold/30 text-xs font-medium text-gold hover:bg-red-100 transition-colors">
                         <Eye className="h-3.5 w-3.5" />
                         View
                       </button>
