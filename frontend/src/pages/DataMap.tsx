@@ -110,7 +110,7 @@ export default function DataMap() {
       <div className="border-b border-gray-200 px-6 py-4 bg-white shadow-sm flex-shrink-0">
         <h1 className="text-xl font-display font-bold text-gray-900">Data Map</h1>
         <p className="text-xs text-gray-400 mt-0.5">
-          Zheng He's voyage locations (1403–1433) — click a marker to find related documents in the knowledge base
+          Zheng He's voyage locations (1403–1433) and Relevant 1421 Foundation Document Locations — click a marker to find related documents in the knowledge base
         </p>
       </div>
 

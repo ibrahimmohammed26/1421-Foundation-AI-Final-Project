@@ -1,205 +1,304 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import {
-  MessageSquare,
-  Map,
-  FileText,
-  Send,
-  BookOpen,
-  Compass,
-  Database,
-  Globe,
-} from "lucide-react";
+  MapContainer, TileLayer, Marker, Popup,
+} from "react-leaflet";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+import { fetchLocations, searchDocuments } from "@/lib/api";
+import { FileText, X } from "lucide-react";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
-const STORAGE_KEY = "1421_chat_messages";
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png",
+  iconUrl:       "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
+  shadowUrl:     "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
+});
 
-interface Stats {
-  feedback_count: number;
-  locations_count: number;
-  documents_count: number;
+const redIcon = new L.Icon({
+  iconUrl:   "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png",
+  shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
+  iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41],
+});
+
+interface Location {
+  name: string;
+  lat: number;
+  lon: number;
+  year: number;
+  event: string;
 }
 
-function getConversationCount(): number {
-  try {
-    const raw = sessionStorage.getItem(STORAGE_KEY);
-    if (!raw) return 0;
-    const messages = JSON.parse(raw);
-    return messages.filter((m: { role: string }) => m.role === "user").length;
-  } catch {
-    return 0;
+interface RelatedDoc {
+  id: string;
+  title: string;
+  author: string;
+  year: number;
+  type: string;
+  url?: string;
+  content_snippet?: string; // Add content snippet for better matching
+}
+
+export default function DataMap() {
+  const navigate = useNavigate();
+
+  const [locations, setLocations]               = useState<Location[]>([]);
+  const [loading, setLoading]                   = useState(true);
+  const [selectedLocation, setSelectedLocation] = useState<Location | null>(null);
+  const [relatedDocs, setRelatedDocs]           = useState<RelatedDoc[]>([]);
+  const [docsLoading, setDocsLoading]           = useState(false);
+  const [showDocsPanel, setShowDocsPanel]       = useState(false);
+
+  // Fetch the historically accurate locations from main.py's VOYAGE_LOCATIONS
+  useEffect(() => {
+    fetchLocations(1433)
+      .then((d) => { setLocations(d); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
+  const fetchRelatedDocs = async (loc: Location) => {
+    setDocsLoading(true);
+    setRelatedDocs([]);
+    
+    try {
+      // Create search variations to improve matching
+      const searchTerms = [
+        loc.name,                                    // e.g., "Malindi"
+        `${loc.name} Kenya`,                         // e.g., "Malindi Kenya"
+        `${loc.name} Africa`,                        // e.g., "Malindi Africa"
+        loc.event.split(' — ')[0],                   // First part of event description
+        loc.event.substring(0, 50),                  // First 50 chars of event
+      ];
+      
+      // Also add specific context for certain locations
+      const contextualTerms: { [key: string]: string[] } = {
+        "Malindi": ["Zheng He", "giraffe", "East Africa", "Kenya"],
+        "Mogadishu": ["Zheng He", "Somalia", "East Africa", "porcelain"],
+        "Aden": ["Zheng He", "Arabia", "Yemen", "Persian Gulf"],
+        "Hormuz": ["Zheng He", "Persian Gulf", "Iran", "ceramics"],
+        "Sri Lanka": ["Galle", "trilingual inscription", "Zheng He"],
+        "Calicut": ["Malabar Coast", "India", "Zheng He"],
+        "Malacca": ["Strait of Malacca", "Malaysia", "Zheng He"],
+        "Nanjing": ["shipyard", "treasure fleet", "Zheng He"],
+      };
+      
+      const extraTerms = contextualTerms[loc.name] || [];
+      const allSearchTerms = [...searchTerms, ...extraTerms];
+      
+      // Try each search term and combine results (deduplicate)
+      let allResults: RelatedDoc[] = [];
+      const seenIds = new Set<string>();
+      
+      for (const term of allSearchTerms) {
+        if (!term.trim()) continue;
+        
+        try {
+          const res = await searchDocuments(term, 15);
+          const results: RelatedDoc[] = res.results || [];
+          
+          // Add unique results
+          for (const doc of results) {
+            if (!seenIds.has(doc.id)) {
+              seenIds.add(doc.id);
+              allResults.push(doc);
+            }
+          }
+        } catch (err) {
+          console.error(`Search failed for "${term}":`, err);
+        }
+      }
+      
+      // If still no results, try a broader search with just the first word
+      if (allResults.length === 0) {
+        const firstWord = loc.name.split(' ')[0];
+        if (firstWord !== loc.name) {
+          try {
+            const res = await searchDocuments(firstWord, 10);
+            allResults = res.results || [];
+          } catch (err) {
+            console.error(`Broad search failed:`, err);
+          }
+        }
+      }
+      
+      // Deduplicate by title
+      const seenTitles = new Set<string>();
+      const unique = allResults.filter((doc: RelatedDoc) => {
+        const key = doc.title.trim().toLowerCase();
+        if (seenTitles.has(key)) return false;
+        seenTitles.add(key);
+        return true;
+      });
+      
+      setRelatedDocs(unique.slice(0, 12));
+      
+    } catch (err) {
+      console.error("Error fetching related docs:", err);
+      setRelatedDocs([]);
+    } finally {
+      setDocsLoading(false);
+    }
+  };
+
+  const handleLocationClick = (loc: Location) => {
+    setSelectedLocation(loc);
+    setShowDocsPanel(true);
+    fetchRelatedDocs(loc);
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-full bg-gray-100">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gold" />
+      </div>
+    );
   }
-}
 
-export default function Dashboard() {
-  const [stats, setStats] = useState<Stats>({
-    feedback_count: 0,
-    locations_count: 17,
-    documents_count: 897,
+  // Deduplicate markers by name so Nanjing/Calicut only appear once
+  const seen = new Set<string>();
+  const uniqueLocations = locations.filter((l) => {
+    if (seen.has(l.name)) return false;
+    seen.add(l.name);
+    return true;
   });
-  const [loading, setLoading] = useState(true);
-  const [conversationCount, setConversationCount] = useState(getConversationCount);
-
-  useEffect(() => {
-    fetch(`${API_URL}/api/stats`)
-      .then((r) => r.json())
-      .then((data) => setStats(data))
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  }, []);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setConversationCount(getConversationCount());
-    }, 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const steps = [
-    {
-      icon: MessageSquare,
-      title: "Chat with AI Historian",
-      description:
-        "Ask questions about Zheng He's voyages, Ming dynasty history, or the 1421 Foundation research. The AI searches only the 1421 Foundation knowledge base — not the web. Every answer is grounded in the indexed documents, with inline citations you can click.",
-      example: "Try: 'What was the significance of Zheng He's voyages?'",
-    },
-    {
-      icon: Map,
-      title: "Explore the Data Map",
-      description:
-        "View key locations from Zheng He's treasure fleet expeditions on an interactive map. Click any marker to see related research documents from the knowledge base.",
-      example: "Click a location marker to explore related documents",
-    },
-    {
-      icon: FileText,
-      title: "Browse Research Documents",
-      description: `Access the full knowledge base of ${stats.documents_count} documents from the 1421 Foundation, Gavin Menzies' research site, and related sources. Each document links directly to its original source.`,
-      example: "Search by title, author, or document number",
-    },
-    {
-      icon: Database,
-      title: "Document-Only Search",
-      description:
-        "The system uses FAISS vector search to find semantically relevant documents from the knowledge base. It does not use web search or external data sources — all answers come exclusively from indexed documents.",
-      example: `${stats.documents_count} documents indexed and searchable`,
-    },
-    {
-      icon: Globe,
-      title: "Inline Document Citations",
-      description:
-        "Every AI response cites its sources inline using [Document X] badges. Click any badge to jump directly to that document. If no relevant documents are found, the system will say so rather than guessing.",
-      example: "Click [Document 1] badges in chat responses to view sources",
-    },
-    {
-      icon: Send,
-      title: "Submit Feedback",
-      description:
-        "Share your thoughts, report issues, or suggest new features to improve the platform.",
-      example: "Let us know what historical topics you'd like to learn more about",
-    },
-  ];
-
-  const statCards = [
-    {
-      label: "AI Conversations",
-      value: String(conversationCount),
-      sub: conversationCount === 0 ? "Start a new chat" : `${conversationCount} question${conversationCount !== 1 ? "s" : ""} asked`,
-      icon: MessageSquare,
-    },
-    {
-      label: "Map Locations",
-      value: String(stats.locations_count),
-      sub: "Across 3 continents",
-      icon: Map,
-    },
-    {
-      label: "Documents",
-      value: loading ? "…" : String(stats.documents_count),
-      sub: "In knowledge base",
-      icon: FileText,
-    },
-    {
-      label: "Feedback",
-      value: String(stats.feedback_count),
-      sub: "User submissions",
-      icon: Send,
-    },
-  ];
 
   return (
     <div className="flex flex-col h-full bg-gray-100">
 
       {/* Header */}
       <div className="border-b border-gray-200 px-6 py-4 bg-white shadow-sm flex-shrink-0">
-        <h1 className="text-xl font-display font-bold text-gray-900">Dashboard</h1>
+        <h1 className="text-xl font-display font-bold text-gray-900">Data Map</h1>
         <p className="text-xs text-gray-400 mt-0.5">
-          Welcome to the 1421 Foundation Research System
+          Zheng He's voyage locations (1403–1433) and Relevant 1421 Foundation Document Locations — click a marker to find related documents in the knowledge base
         </p>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
-        {/* Stat cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 px-6 py-5">
-          {statCards.map(({ label, value, sub, icon: Icon }) => (
-            <div
-              key={label}
-              className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm hover:shadow-md transition-shadow"
-            >
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs text-gray-400">{label}</span>
-                <Icon className="h-4 w-4 text-gold" />
-              </div>
-              <p className="text-2xl font-display font-bold text-gold">{value}</p>
-              <p className="text-xs text-gray-400 mt-1">{sub}</p>
-            </div>
-          ))}
-        </div>
+      {/* Map + docs panel */}
+      <div className="relative flex-1 min-h-0 flex">
+        <div className="flex-1 relative">
+          <MapContainer center={[20, 80]} zoom={3}
+            style={{ height: "100%", width: "100%" }} zoomControl={true}>
+            <TileLayer
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            />
+            {uniqueLocations.map((loc, idx) => (
+              <Marker key={idx} position={[loc.lat, loc.lon]} icon={redIcon}
+                eventHandlers={{ click: () => handleLocationClick(loc) }}>
+                <Popup>
+                  <div className="text-sm">
+                    <p className="font-bold text-gray-900">{loc.name}</p>
+                    <p className="text-xs text-gray-500">Year {loc.year}</p>
+                    <p className="text-xs mt-1 text-gray-700">{loc.event}</p>
+                    <button onClick={() => handleLocationClick(loc)}
+                      className="mt-2 text-xs text-gold font-semibold flex items-center gap-1 hover:underline">
+                      <FileText className="h-3 w-3" /> View related documents
+                    </button>
+                  </div>
+                </Popup>
+              </Marker>
+            ))}
+          </MapContainer>
 
-        {/* Welcome card */}
-        <div className="px-6 pb-4">
-          <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-            <div className="flex items-start gap-4">
-              <div className="w-12 h-12 rounded-xl bg-red-50 border border-gold/20 flex items-center justify-center flex-shrink-0">
-                <BookOpen className="h-6 w-6 text-gold" />
-              </div>
-              <div>
-                <h2 className="text-lg font-display font-bold text-gray-900 mb-2">
-                  Welcome to the 1421 Foundation Research System
-                </h2>
-                <p className="text-gray-600 text-sm leading-relaxed">
-                  This platform provides AI-assisted access to the 1421 Foundation's knowledge base, covering Chinese maritime exploration during the Ming dynasty (1368–1644), the voyages of Admiral Zheng He, and the research of Gavin Menzies. All AI responses and Data Map Locations are sourced exclusively from indexed documents.
-                </p>
-              </div>
+          {/* Stats overlay */}
+          <div className="absolute top-4 left-4 bg-white/95 backdrop-blur-sm rounded-lg border border-gray-200 px-4 py-2 z-[1000] shadow-sm">
+            <p className="text-xs text-gray-400 uppercase tracking-wider">Locations</p>
+            <p className="text-2xl font-display font-bold text-gold leading-none mt-0.5">{uniqueLocations.length}</p>
+            <p className="text-xs text-gray-400 mt-0.5">Across 3 continents</p>
+          </div>
+
+          {/* Legend */}
+          <div className="absolute top-4 right-4 bg-white/95 backdrop-blur-sm rounded-lg border border-gray-200 p-3 z-[1000] shadow-sm">
+            <p className="text-xs font-semibold text-gray-700 mb-2">Legend</p>
+            <div className="flex items-center gap-2">
+              <span className="w-3 h-3 rounded-full bg-red-500 inline-block" />
+              <span className="text-xs text-gray-600">Voyage location</span>
             </div>
+            <p className="text-xs text-gray-400 mt-2 italic">Click a marker for docs</p>
           </div>
         </div>
 
-        {/* How to use */}
-        <div className="px-6 pb-6">
-          <h2 className="text-lg font-display font-bold text-gray-900 mb-4 flex items-center gap-2">
-            <Compass className="h-5 w-5 text-gold" />
-            How to Use Guide
-          </h2>
-          <div className="space-y-3">
-            {steps.map((step, index) => {
-              const Icon = step.icon;
-              return (
-                <div
-                  key={index}
-                  className="flex gap-4 bg-white rounded-xl p-4 border border-gray-200 shadow-sm hover:border-gold/30 hover:shadow-md transition-all"
-                >
-                  <div className="w-10 h-10 rounded-full bg-red-50 border border-gold/20 flex items-center justify-center flex-shrink-0">
-                    <Icon className="h-5 w-5 text-gold" />
-                  </div>
-                  <div className="flex-1">
-                    <h3 className="text-sm font-semibold text-gray-900 mb-1">{step.title}</h3>
-                    <p className="text-sm text-gray-500 mb-1.5">{step.description}</p>
-                    <p className="text-xs text-gold italic">{step.example}</p>
-                  </div>
+        {/* Related documents side panel */}
+        {showDocsPanel && selectedLocation && (
+          <div className="w-80 bg-white border-l border-gray-200 flex flex-col z-[999] shadow-lg">
+            <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between bg-gray-50">
+              <div className="min-w-0">
+                <h3 className="text-sm font-bold text-gold">{selectedLocation.name}</h3>
+                <p className="text-xs text-gray-400 mt-0.5 leading-snug">{selectedLocation.event}</p>
+              </div>
+              <button onClick={() => setShowDocsPanel(false)}
+                className="text-gray-400 hover:text-gray-600 flex-shrink-0 ml-2">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="px-4 py-2 border-b border-gray-100">
+              <p className="text-xs font-semibold text-gray-600 flex items-center gap-1.5">
+                <FileText className="h-3.5 w-3.5 text-gold" />
+                Documents mentioning "{selectedLocation.name}"
+              </p>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Searching titles, content, and related terms
+              </p>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+              {docsLoading && (
+                <div className="flex items-center justify-center py-8">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-gold" />
                 </div>
-              );
-            })}
+              )}
+              {!docsLoading && relatedDocs.length === 0 && (
+                <div className="text-center py-6">
+                  <p className="text-xs text-gray-400 mb-3">
+                    No documents found mentioning "{selectedLocation.name}" in the knowledge base.
+                  </p>
+                  <p className="text-xs text-gray-400 mb-3">
+                    Try searching in the Documents page for related content.
+                  </p>
+                  <button
+                    onClick={() => navigate(`/documents?search=${encodeURIComponent(selectedLocation.name)}`)}
+                    className="text-xs text-gold font-semibold hover:underline">
+                    Search documents manually →
+                  </button>
+                </div>
+              )}
+              {!docsLoading && relatedDocs.map((doc) => (
+                <div key={doc.id}
+                  className="rounded-lg border border-gray-200 bg-gray-50 p-3 hover:border-gold/40 transition-colors">
+                  <p className="text-xs font-semibold text-gray-900 leading-snug">{doc.title}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {[
+                      doc.author !== "Unknown" && doc.author,
+                      doc.year > 0 && doc.year,
+                      doc.type && doc.type !== "unknown" && doc.type,
+                    ].filter(Boolean).join(" · ")}
+                  </p>
+                  {/* Show content snippet if available */}
+                  {(doc as any).content_snippet && (
+                    <p className="text-xs text-gray-500 mt-1 line-clamp-2">
+                      {(doc as any).content_snippet.substring(0, 150)}...
+                    </p>
+                  )}
+                  <button
+                    onClick={() => navigate(`/documents?search=${encodeURIComponent(doc.id)}`)}
+                    className="mt-2 text-xs text-gold font-semibold flex items-center gap-1 hover:underline">
+                    <FileText className="h-3 w-3" /> View in Documents
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="px-4 py-3 border-t border-gray-100">
+              <button
+                onClick={() => navigate(`/documents?search=${encodeURIComponent(selectedLocation.name)}`)}
+                className="w-full text-xs text-gold font-semibold flex items-center justify-center gap-1.5 hover:underline">
+                <FileText className="h-3.5 w-3.5" />
+                Search all documents for "{selectedLocation.name}"
+              </button>
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
