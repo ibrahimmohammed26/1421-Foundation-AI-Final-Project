@@ -260,7 +260,7 @@ export default function Chat() {
 
   const STARTERS = [
     "What was the significance of Zheng He's voyages?",
-    "Describe Ming Dynasty naval technology",
+    "Tell me about the 1421 theory and its key evidence",
     "Is there evidence of Chinese ships reaching America?",
     "How did Chinese navigation compare to European methods?",
   ];

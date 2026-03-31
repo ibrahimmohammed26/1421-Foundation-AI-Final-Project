@@ -155,23 +155,35 @@ class Document(BaseModel):
 # ── Voyage locations ──────────────────────────────────────────────────
 
 VOYAGE_LOCATIONS = [
-    {"name": "Nanjing",   "lat": 32.06,  "lon": 118.80, "year": 1403, "event": "Yongle Emperor commissions the treasure fleet from Nanjing"},
-    {"name": "Nanjing",   "lat": 32.06,  "lon": 118.80, "year": 1405, "event": "First voyage departs — 317 ships and 28,000 men set sail"},
-    {"name": "Champa",    "lat": 10.82,  "lon": 106.63, "year": 1405, "event": "First stop on Voyage 1 — Southeast Asian ally (modern Vietnam)"},
-    {"name": "Java",      "lat": -7.61,  "lon": 110.71, "year": 1406, "event": "Voyage 1 — diplomatic missions conducted on Java"},
-    {"name": "Sumatra",   "lat": -0.59,  "lon": 101.34, "year": 1406, "event": "Voyage 1 — strategic trading post established at Palembang"},
-    {"name": "Malacca",   "lat":  2.19,  "lon": 102.25, "year": 1406, "event": "Voyage 1 — key port established, local piracy suppressed"},
-    {"name": "Calicut",   "lat": 11.26,  "lon":  75.78, "year": 1407, "event": "Voyage 1 — primary destination on the Malabar Coast, India"},
-    {"name": "Siam",      "lat": 13.74,  "lon": 100.52, "year": 1408, "event": "Voyage 2 — diplomatic relations established (modern Thailand)"},
-    {"name": "Sri Lanka", "lat":  7.87,  "lon":  80.77, "year": 1409, "event": "Voyage 2 — trilingual inscription erected at Galle"},
-    {"name": "Hormuz",    "lat": 27.16,  "lon":  56.28, "year": 1414, "event": "Voyage 4 — Persian Gulf reached for first time, 18 states sent tribute"},
-    {"name": "Aden",      "lat": 12.79,  "lon":  45.02, "year": 1417, "event": "Voyage 5 — Arabian Peninsula reached, gifts of zebras and lions received"},
-    {"name": "Mogadishu", "lat":  2.05,  "lon":  45.32, "year": 1418, "event": "Voyage 5 — Somali coast, first Chinese fleet to reach East Africa"},
-    {"name": "Malindi",   "lat": -3.22,  "lon":  40.12, "year": 1418, "event": "Voyage 5 — Kenya coast, famous giraffe gifted to the Yongle Emperor"},
-    {"name": "Mombasa",   "lat": -4.04,  "lon":  39.67, "year": 1419, "event": "Voyage 5 — East African trade firmly established"},
-    {"name": "Zanzibar",  "lat": -6.17,  "lon":  39.20, "year": 1421, "event": "Voyage 6 — southernmost point of the treasure fleet voyages"},
-    {"name": "Jidda",     "lat": 21.49,  "lon":  39.19, "year": 1432, "event": "Voyage 7 — Red Sea reached, auxiliary fleet sent towards Mecca"},
-    {"name": "Calicut",   "lat": 11.26,  "lon":  75.78, "year": 1433, "event": "Voyage 7 — Zheng He dies here on the return journey, ending the voyages"},
+
+    # — Known historical Ming treasure voyage destinations (supported by mainstream sources) —
+    {"name": "Nanjing",       "lat": 32.06,   "lon": 118.80,  "year": 1403, "event": "Treasure fleet built/commissioned in Nanjing shipyards"},  # Zheng He fleet origin
+    {"name": "Nanjing",       "lat": 32.06,   "lon": 118.80,  "year": 1405, "event": "First voyage departs from China"},  # start of official records
+    {"name": "Calicut",       "lat": 11.26,   "lon": 75.78,   "year": 1406, "event": "Voyage 1 — Calicut (Malabar Coast, India)"},  # well documented
+    {"name": "Malacca",       "lat": 2.19,    "lon": 102.25,  "year": 1406, "event": "Voyage 1 — Malacca strategic port established"},
+    {"name": "Siam",          "lat": 13.74,   "lon": 100.52,  "year": 1408, "event": "Voyage 2 — diplomatic relations with Siam"},
+    {"name": "Sri Lanka",     "lat": 7.87,    "lon": 80.77,   "year": 1409, "event": "Voyage 2 — Galle (Sri Lanka) trading contact"},
+    {"name": "Hormuz",        "lat": 27.16,   "lon": 56.28,   "year": 1414, "event": "Voyage 4 — Persian Gulf reached"},
+    {"name": "Aden",          "lat": 12.79,   "lon": 45.02,   "year": 1417, "event": "Voyage 5 — Arabian Peninsula reached"},
+    {"name": "Mogadishu",     "lat": 2.05,    "lon": 45.32,   "year": 1418, "event": "Voyage 5 — Somali Coast trading contact"},
+    {"name": "Malindi",       "lat": -3.22,   "lon": 40.12,   "year": 1418, "event": "Voyage 5 — Kenya coast embassy exchange"},
+    {"name": "Mombasa",       "lat": -4.04,   "lon": 39.67,   "year": 1419, "event": "Voyage 5 — East African coast engagement"},
+    # — End known historical segment —
+
+    # — Locations based on Gavin Menzies’s maps/hypotheses (not supported by mainstream historians) —
+    {"name": "Zanzibar",      "lat": -6.17,   "lon": 39.20,   "year": 1421, "event": "Menzies: southernmost point of fleet (speculative)"},
+    {"name": "Jidda",         "lat": 21.49,   "lon": 39.19,   "year": 1432, "event": "Menzies: Red Sea / Mecca zone (speculative)"},
+    {"name": "Calicut",       "lat": 11.26,   "lon": 75.78,   "year": 1433, "event": "Menzies: death of Zheng He on return (speculative)"},
+    {"name": "Australia",     "lat": -25.27,  "lon": 133.77,  "year": 1421, "event": "Menzies: Chinese landings on Australian shores (hypothesized)"},
+    {"name": "New Zealand",   "lat": -40.90,  "lon": 174.88,  "year": 1421, "event": "Menzies: Chinese visits to NZ (hypothesized)"},
+    {"name": "Panama Canal",  "lat": 9.08,    "lon": -79.51,  "year": 1421, "event": "Menzies: Chinese cross Panama isthmus (speculative)"},
+    {"name": "Antarctica",    "lat": -82.86,  "lon": 135.00,  "year": 1421, "event": "Menzies: claimed southern extreme (speculative)"},
+
+    # — 1421 Foundation reported leads / purported Chinese contact sites (unverified) —
+    {"name": "Virginia (USA)",         "lat": 37.43,  "lon": -78.87,  "year": 1421, "event": "Reported Chinese junk remains in Virginia (lead under investigation)"},
+    {"name": "Sacramento (USA)",       "lat": 38.58,  "lon": -121.49, "year": 1421, "event": "Reported Chinese junk in Sacramento River (lead)"},
+    {"name": "Redondo Beach (USA)",    "lat": 33.85,  "lon": -118.39, "year": 1421, "event": "Chinese-style stone anchors found near Redondo Beach"},
+    {"name": "Bimini (Bahamas)",        "lat": 25.75,  "lon": -79.30,  "year": 1421, "event": "Bimini Road stones interpreted as Chinese ballast (lead)"},
 ]
 
 # ── Document store ────────────────────────────────────────────────────
