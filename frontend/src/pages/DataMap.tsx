@@ -6,7 +6,7 @@ import {
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { fetchLocations, searchDocuments } from "@/lib/api";
-import { FileText, X } from "lucide-react";
+import { FileText, X, CheckCircle, XCircle } from "lucide-react";
 
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -36,39 +36,120 @@ interface RelatedDoc {
   year: number;
   type: string;
   url?: string;
+  similarity_score?: number;
   content_preview?: string;
+  source_file?: string;
 }
 
-// Define search variations for each location to improve matching
+// Keywords that indicate a document is actually relevant to a location
+const getRelevanceKeywords = (locationName: string): string[] => {
+  const keywords: Record<string, string[]> = {
+    "Hormuz": ["Hormuz", "Ormus", "Persian Gulf", "4th voyage", "fourth voyage", "1414"],
+    "Malindi": ["Malindi", "Kenya", "East Africa", "giraffe", "5th voyage", "fifth voyage"],
+    "Mogadishu": ["Mogadishu", "Somalia", "Somali", "East Africa", "porcelain"],
+    "Aden": ["Aden", "Yemen", "Arabia", "Arabian Peninsula", "5th voyage"],
+    "Calicut": ["Calicut", "Kozhikode", "Malabar Coast", "India", "1st voyage"],
+    "Malacca": ["Malacca", "Melaka", "Strait of Malacca", "Malaysia"],
+    "Sri Lanka": ["Sri Lanka", "Galle", "Ceylon", "trilingual inscription"],
+    "Nanjing": ["Nanjing", "shipyard", "treasure fleet", "Longjiang"],
+  };
+  return keywords[locationName] || [locationName];
+};
+
+// Check if a document is relevant to the location
+const isDocumentRelevant = (doc: RelatedDoc, locationName: string): boolean => {
+  const title = doc.title?.toLowerCase() || "";
+  const sourceFile = doc.source_file?.toLowerCase() || "";
+  const type = doc.type?.toLowerCase() || "";
+  const author = doc.author?.toLowerCase() || "";
+  
+  const relevantKeywords = getRelevanceKeywords(locationName);
+  
+  // Check title
+  for (const keyword of relevantKeywords) {
+    if (title.includes(keyword.toLowerCase())) {
+      return true;
+    }
+  }
+  
+  // Check source file (e.g., "1421_book", "evidence_annex")
+  for (const keyword of ["1421", "evidence", "annex", "zheng he", "voyage"]) {
+    if (sourceFile.includes(keyword) || title.includes(keyword)) {
+      // If it's from a book or evidence source, it's more likely relevant
+      return true;
+    }
+  }
+  
+  // Facebook posts about events/general content are NOT relevant for specific locations
+  if (type === "facebook_posts" && !title.includes(locationName.toLowerCase())) {
+    return false;
+  }
+  
+  // Generic news articles without location mention are NOT relevant
+  if (type === "general" && !title.toLowerCase().includes(locationName.toLowerCase())) {
+    return false;
+  }
+  
+  return false;
+};
+
+// Calculate relevance score for sorting
+const calculateRelevanceScore = (doc: RelatedDoc, locationName: string): number => {
+  let score = 0;
+  const title = doc.title?.toLowerCase() || "";
+  const sourceFile = doc.source_file?.toLowerCase() || "";
+  const relevantKeywords = getRelevanceKeywords(locationName);
+  
+  // Exact location name in title: +10
+  if (title.includes(locationName.toLowerCase())) {
+    score += 10;
+  }
+  
+  // Keyword matches: +5 each
+  for (const keyword of relevantKeywords) {
+    if (title.includes(keyword.toLowerCase())) {
+      score += 5;
+    }
+  }
+  
+  // From book/evidence files: +8
+  if (sourceFile.includes("1421") || sourceFile.includes("evidence") || sourceFile.includes("book")) {
+    score += 8;
+  }
+  
+  // From foundation/gavin menzies website: +4
+  if (sourceFile.includes("foundation") || sourceFile.includes("gavin") || sourceFile.includes("menzies")) {
+    score += 4;
+  }
+  
+  // Similarity score from backend: + (similarity * 10)
+  if (doc.similarity_score) {
+    score += doc.similarity_score * 10;
+  }
+  
+  return score;
+};
+
+// Define search variations for each location
 const getSearchVariations = (loc: Location): string[] => {
   const variations: string[] = [loc.name];
   
-  // Add variations with location name plus context
-  if (loc.name === "Malindi") {
-    variations.push("Malindi Kenya", "Malindi East Africa", "giraffe Malindi", "Zheng He Malindi");
+  if (loc.name === "Hormuz") {
+    variations.push("Hormuz Persian Gulf", "Zheng He Hormuz", "Ormus", "fourth voyage Hormuz", "1414 Hormuz");
+  } else if (loc.name === "Malindi") {
+    variations.push("Malindi Kenya", "giraffe Malindi", "Zheng He Malindi", "fifth voyage Malindi");
   } else if (loc.name === "Mogadishu") {
-    variations.push("Mogadishu Somalia", "Mogadishu East Africa", "Somali coast", "Zheng He Mogadishu");
+    variations.push("Mogadishu Somalia", "Somali coast", "Zheng He Mogadishu");
   } else if (loc.name === "Aden") {
-    variations.push("Aden Yemen", "Arabian Peninsula Aden", "Zheng He Aden");
-  } else if (loc.name === "Hormuz") {
-    variations.push("Hormuz Persian Gulf", "Ormus", "Zheng He Hormuz", "Persian Gulf");
-  } else if (loc.name === "Sri Lanka") {
-    variations.push("Galle Sri Lanka", "Ceylon", "trilingual inscription", "Zheng He Sri Lanka");
+    variations.push("Aden Yemen", "Arabian Peninsula", "Zheng He Aden");
   } else if (loc.name === "Calicut") {
     variations.push("Calicut India", "Kozhikode", "Malabar Coast", "Zheng He Calicut");
   } else if (loc.name === "Malacca") {
-    variations.push("Malacca Malaysia", "Melaka", "Strait of Malacca", "Zheng He Malacca");
+    variations.push("Malacca Malaysia", "Melaka", "Strait of Malacca");
+  } else if (loc.name === "Sri Lanka") {
+    variations.push("Galle Sri Lanka", "Ceylon", "trilingual inscription");
   } else if (loc.name === "Nanjing") {
-    variations.push("Nanjing China", "Nanjing shipyard", "treasure fleet Nanjing", "Longjiang shipyard");
-  } else if (loc.name === "Antarctica") {
-    variations.push("Antarctic", "southern continent", "Hong Bao Antarctica");
-  } else {
-    // Generic: add location with year and key words from event
-    variations.push(`${loc.name} ${loc.year}`);
-    const eventWords = loc.event.split(' — ')[0];
-    if (eventWords && !variations.includes(eventWords)) {
-      variations.push(eventWords);
-    }
+    variations.push("Nanjing shipyard", "treasure fleet Nanjing", "Longjiang shipyard");
   }
   
   return variations;
@@ -85,7 +166,6 @@ export default function DataMap() {
   const [showDocsPanel, setShowDocsPanel]       = useState(false);
   const [searchDebug, setSearchDebug]           = useState<string[]>([]);
 
-  // Fetch the historically accurate locations from main.py's VOYAGE_LOCATIONS
   useEffect(() => {
     fetchLocations(1433)
       .then((d) => { setLocations(d); setLoading(false); })
@@ -109,9 +189,9 @@ export default function DataMap() {
       for (const term of variations) {
         debugMessages.push(`Searching: "${term}"`);
         try {
-          const res = await searchDocuments(term, 20);
+          const res = await searchDocuments(term, 30);
           const results: RelatedDoc[] = res.results || [];
-          debugMessages.push(`  → Found ${results.length} results`);
+          debugMessages.push(`  → Found ${results.length} raw results`);
           
           for (const doc of results) {
             if (!seenIds.has(doc.id)) {
@@ -121,36 +201,16 @@ export default function DataMap() {
           }
         } catch (err) {
           debugMessages.push(`  → Error: ${err}`);
-          console.error(`Search failed for "${term}":`, err);
         }
       }
       
-      // Also try searching with the event text (first part)
-      const eventText = loc.event.split(' — ')[0];
-      if (eventText && eventText !== loc.name && !variations.includes(eventText)) {
-        debugMessages.push(`Searching event text: "${eventText}"`);
-        try {
-          const res = await searchDocuments(eventText, 15);
-          const results: RelatedDoc[] = res.results || [];
-          debugMessages.push(`  → Found ${results.length} results`);
-          for (const doc of results) {
-            if (!seenIds.has(doc.id)) {
-              seenIds.add(doc.id);
-              allResults.push(doc);
-            }
-          }
-        } catch (err) {
-          debugMessages.push(`  → Error: ${err}`);
-        }
-      }
-      
-      // Also try searching with "Zheng He" plus location
+      // Also search with "Zheng He"
       const zhengHeTerm = `Zheng He ${loc.name}`;
       debugMessages.push(`Searching: "${zhengHeTerm}"`);
       try {
-        const res = await searchDocuments(zhengHeTerm, 15);
+        const res = await searchDocuments(zhengHeTerm, 20);
         const results: RelatedDoc[] = res.results || [];
-        debugMessages.push(`  → Found ${results.length} results`);
+        debugMessages.push(`  → Found ${results.length} raw results`);
         for (const doc of results) {
           if (!seenIds.has(doc.id)) {
             seenIds.add(doc.id);
@@ -161,20 +221,34 @@ export default function DataMap() {
         debugMessages.push(`  → Error: ${err}`);
       }
       
+      // Filter for relevance
+      const relevantDocs = allResults.filter(doc => isDocumentRelevant(doc, loc.name));
+      debugMessages.push(`✅ After relevance filter: ${relevantDocs.length} / ${allResults.length}`);
+      
+      // Sort by relevance score
+      const sortedDocs = relevantDocs.sort((a, b) => {
+        const scoreA = calculateRelevanceScore(a, loc.name);
+        const scoreB = calculateRelevanceScore(b, loc.name);
+        return scoreB - scoreA;
+      });
+      
       // Deduplicate by title
       const seenTitles = new Set<string>();
-      const unique = allResults.filter((doc: RelatedDoc) => {
+      const unique = sortedDocs.filter((doc) => {
         const key = doc.title.trim().toLowerCase();
         if (seenTitles.has(key)) return false;
         seenTitles.add(key);
         return true;
       });
       
-      debugMessages.push(`✅ Total unique documents: ${unique.length}`);
-      setSearchDebug(debugMessages);
-      console.log(`📚 Found ${unique.length} documents for ${loc.name}`);
+      // Limit to 8 most relevant documents
+      const topRelevant = unique.slice(0, 8);
       
-      setRelatedDocs(unique.slice(0, 15));
+      debugMessages.push(`📚 Final results: ${topRelevant.length} relevant documents`);
+      setSearchDebug(debugMessages);
+      console.log(`📚 Found ${topRelevant.length} relevant documents for ${loc.name}`);
+      
+      setRelatedDocs(topRelevant);
       
     } catch (err) {
       console.error("Error fetching related docs:", err);
@@ -199,7 +273,6 @@ export default function DataMap() {
     );
   }
 
-  // Deduplicate markers by name so Nanjing/Calicut only appear once
   const seen = new Set<string>();
   const uniqueLocations = locations.filter((l) => {
     if (seen.has(l.name)) return false;
@@ -209,16 +282,13 @@ export default function DataMap() {
 
   return (
     <div className="flex flex-col h-full bg-gray-100">
-
-      {/* Header */}
       <div className="border-b border-gray-200 px-6 py-4 bg-white shadow-sm flex-shrink-0">
         <h1 className="text-xl font-display font-bold text-gray-900">Data Map</h1>
         <p className="text-xs text-gray-400 mt-0.5">
-          Zheng He's voyage locations (1403–1433) — click a marker to find related documents in the knowledge base
+          Zheng He's voyage locations (1403–1433) — click a marker to find related documents
         </p>
       </div>
 
-      {/* Map + docs panel */}
       <div className="relative flex-1 min-h-0 flex">
         <div className="flex-1 relative">
           <MapContainer center={[20, 80]} zoom={3}
@@ -245,25 +315,21 @@ export default function DataMap() {
             ))}
           </MapContainer>
 
-          {/* Stats overlay */}
           <div className="absolute top-4 left-4 bg-white/95 backdrop-blur-sm rounded-lg border border-gray-200 px-4 py-2 z-[1000] shadow-sm">
             <p className="text-xs text-gray-400 uppercase tracking-wider">Locations</p>
             <p className="text-2xl font-display font-bold text-gold leading-none mt-0.5">{uniqueLocations.length}</p>
             <p className="text-xs text-gray-400 mt-0.5">From Zheng He's voyages</p>
           </div>
 
-          {/* Legend */}
           <div className="absolute top-4 right-4 bg-white/95 backdrop-blur-sm rounded-lg border border-gray-200 p-3 z-[1000] shadow-sm">
             <p className="text-xs font-semibold text-gray-700 mb-2">Legend</p>
             <div className="flex items-center gap-2">
               <span className="w-3 h-3 rounded-full bg-red-500 inline-block" />
               <span className="text-xs text-gray-600">Voyage location</span>
             </div>
-            <p className="text-xs text-gray-400 mt-2 italic">Click a marker for docs</p>
           </div>
         </div>
 
-        {/* Related documents side panel */}
         {showDocsPanel && selectedLocation && (
           <div className="w-96 bg-white border-l border-gray-200 flex flex-col z-[999] shadow-lg">
             <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between bg-gray-50">
@@ -280,7 +346,7 @@ export default function DataMap() {
             <div className="px-4 py-2 border-b border-gray-100 flex justify-between items-center">
               <p className="text-xs font-semibold text-gray-600 flex items-center gap-1.5">
                 <FileText className="h-3.5 w-3.5 text-gold" />
-                Documents ({relatedDocs.length})
+                Related Documents ({relatedDocs.length})
               </p>
               {docsLoading && (
                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gold" />
@@ -296,7 +362,7 @@ export default function DataMap() {
               {!docsLoading && relatedDocs.length === 0 && (
                 <div className="text-center py-6">
                   <p className="text-xs text-gray-400 mb-3">
-                    No documents found for "{selectedLocation.name}" in the knowledge base.
+                    No relevant documents found for "{selectedLocation.name}".
                   </p>
                   <p className="text-xs text-gray-400 mb-3">
                     Try searching the Documents page directly.
@@ -306,39 +372,29 @@ export default function DataMap() {
                     className="text-xs text-gold font-semibold hover:underline">
                     Search documents manually →
                   </button>
-                  
-                  {/* Debug info - remove in production */}
-                  {searchDebug.length > 0 && (
-                    <div className="mt-4 text-left border-t border-gray-200 pt-3">
-                      <p className="text-xs text-gray-400 font-mono mb-1">🔍 Debug:</p>
-                      {searchDebug.slice(0, 8).map((msg, i) => (
-                        <p key={i} className="text-xs text-gray-400 font-mono">{msg}</p>
-                      ))}
-                    </div>
-                  )}
                 </div>
               )}
               {!docsLoading && relatedDocs.map((doc) => (
                 <div key={doc.id}
                   className="rounded-lg border border-gray-200 bg-gray-50 p-3 hover:border-gold/40 transition-colors">
-                  <p className="text-xs font-semibold text-gray-900 leading-snug">{doc.title}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    {[
-                      doc.author !== "Unknown" && doc.author,
-                      doc.year > 0 && doc.year,
-                      doc.type && doc.type !== "unknown" && doc.type,
-                    ].filter(Boolean).join(" · ")}
-                  </p>
-                  {doc.content_preview && (
-                    <p className="text-xs text-gray-500 mt-1 line-clamp-2">
-                      {doc.content_preview.substring(0, 120)}...
-                    </p>
-                  )}
-                  <button
-                    onClick={() => navigate(`/documents?search=${encodeURIComponent(doc.id)}`)}
-                    className="mt-2 text-xs text-gold font-semibold flex items-center gap-1 hover:underline">
-                    <FileText className="h-3 w-3" /> View in Documents
-                  </button>
+                  <div className="flex items-start gap-2">
+                    <CheckCircle className="h-3.5 w-3.5 text-emerald-500 mt-0.5 flex-shrink-0" />
+                    <div className="flex-1">
+                      <p className="text-xs font-semibold text-gray-900 leading-snug">{doc.title}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        {[
+                          doc.author !== "Unknown" && doc.author,
+                          doc.year > 0 && doc.year,
+                          doc.type && doc.type !== "unknown" && doc.type,
+                        ].filter(Boolean).join(" · ")}
+                      </p>
+                      <button
+                        onClick={() => navigate(`/documents?search=${encodeURIComponent(doc.id)}`)}
+                        className="mt-2 text-xs text-gold font-semibold flex items-center gap-1 hover:underline">
+                        <FileText className="h-3 w-3" /> View Document
+                      </button>
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
@@ -348,7 +404,7 @@ export default function DataMap() {
                 onClick={() => navigate(`/documents?search=${encodeURIComponent(selectedLocation.name)}`)}
                 className="w-full text-xs text-gold font-semibold flex items-center justify-center gap-1.5 hover:underline">
                 <FileText className="h-3.5 w-3.5" />
-                Search all documents for "{selectedLocation.name}"
+                Search all documents
               </button>
             </div>
           </div>
