@@ -155,6 +155,36 @@ class Document(BaseModel):
 # ── Voyage locations ──────────────────────────────────────────────────
 
 VOYAGE_LOCATIONS = [
+    # =========================================================================
+    # PART 1: KNOWN HISTORICAL VOYAGES (Zheng He's documented expeditions)
+    # These destinations are verified by Ming dynasty records and accepted by scholars.
+    # =========================================================================
+    {"name": "Nanjing", "lat": 32.06, "lon": 118.80, "year": 1403, "event": "Treasure fleet built/commissioned in Nanjing shipyards", "evidence": "Imperial Ming records [citation:1]"},
+    {"name": "Nanjing", "lat": 32.06, "lon": 118.80, "year": 1405, "event": "First voyage departs from China", "evidence": "Official Ming dynasty histories [citation:1]"},
+    {"name": "Calicut", "lat": 11.26, "lon": 75.78, "year": 1407, "event": "Voyage 1 — Calicut (Malabar Coast, India). Primary destination for trade.", "evidence": "Ma Huan's Ying-Yai Sheng-Lan (The Overall Survey of the Ocean's Shores) [citation:3]"},
+    {"name": "Malacca", "lat": 2.19, "lon": 102.25, "year": 1406, "event": "Voyage 1 — Malacca strategic port established", "evidence": "Ming dynasty records and Malacca's historical chronicles [citation:3]"},
+    {"name": "Siam", "lat": 13.74, "lon": 100.52, "year": 1408, "event": "Voyage 2 — diplomatic relations with Siam", "evidence": "Ming Shilu (Veritable Records of the Ming) [citation:3]"},
+    {"name": "Sri Lanka", "lat": 7.87, "lon": 80.77, "year": 1409, "event": "Voyage 2 — Galle (Sri Lanka) trading contact", "evidence": "Trilingual inscription at Galle (Chinese, Tamil, Persian) [citation:3]"},
+    {"name": "Hormuz", "lat": 27.16, "lon": 56.28, "year": 1414, "event": "Voyage 4 — Persian Gulf reached", "evidence": "Ma Huan's accounts; Ming court records [citation:3]"},
+    {"name": "Aden", "lat": 12.79, "lon": 45.02, "year": 1417, "event": "Voyage 5 — Arabian Peninsula reached", "evidence": "Ming court records of tribute missions [citation:3]"},
+    {"name": "Mogadishu", "lat": 2.05, "lon": 45.32, "year": 1418, "event": "Voyage 5 — Somali Coast trading contact", "evidence": "Ma Huan's Ying-Yai Sheng-Lan [citation:3]"},
+    {"name": "Malindi", "lat": -3.22, "lon": 40.12, "year": 1418, "event": "Voyage 5 — Kenya coast embassy exchange", "evidence": "Ma Huan's Ying-Yai Sheng-Lan [citation:3]"},
+
+    # =========================================================================
+    # PART 2: HYPOTHESIZED LOCATIONS (Per Gavin Menzies's "1421")
+    # IMPORTANT: Professional historians, including Robert Finlay of the Journal of World History,
+    # have stated that Menzies's claims are "uniformly without substance" and that his work
+    # "flouts the basic rules of both historical study and elementary logic" [citation:3][citation:5].
+    # =========================================================================
+    {"name": "Australia (West Coast)", "lat": -25.27, "lon": 133.77, "year": 1421, "event": "Menzies: Hong Bao's fleet charted Western Australia; Zhou Man's fleet sailed the Great Barrier Reef [citation:1][citation:9]", "evidence": "Menzies cites: 1) Professor Zhiqiang Zhang's interpretation of the Wu Pei Chih chart; 2) European Dieppe maps showing 'Java La Grande'; 3) alleged shipwrecks; 4) stone inscriptions at Mundaring [citation:9]"},
+    {"name": "New Zealand", "lat": -40.90, "lon": 174.88, "year": 1421, "event": "Menzies: Zhou Man's fleet wrecked on South Island after a tsunami", "evidence": "Menzies cites: 1) 'Carbonized remains of a junk' at Moeraki; 2) The 'Tamil Bell'; 3) Amateur researcher Cedric Bell's claims of a 'Chinese fort' in Christchurch (dismissed by New Zealand archaeologists) [citation:2][citation:9]"},
+    {"name": "Newport Tower (Rhode Island)", "lat": 41.49, "lon": -71.31, "year": 1421, "event": "Menzies: Chinese astronomical observatory", "evidence": "Menzies claims this medieval stone tower was built by Chinese explorers. Mainstream historians attribute it to Governor Benedict Arnold in the 17th century [citation:4][citation:5]"},
+    {"name": "Bimini Road (Bahamas)", "lat": 25.75, "lon": -79.30, "year": 1421, "event": "Menzies: Chinese ballast stones / breakwater", "evidence": "Menzies claims this underwater rock formation is evidence of Chinese construction. Geologists consider it a natural beachrock formation [citation:4]"},
+    {"name": "Sacramento River (California)", "lat": 38.58, "lon": -121.49, "year": 1421, "event": "Menzies: A 200-foot Chinese junk is buried in Glenn County mud", "evidence": "Menzies cites: 1) alleged 'medieval Chinese armor' found in 1936 (now lost); 2) amateur magnetometer readings; 3) shards from well-boring. Archaeologists call the claims 'absurd' and note no verifiable evidence exists [citation:6]"},
+    {"name": "British Columbia", "lat": 49.28, "lon": -123.12, "year": 1421, "event": "Menzies: Chinese settlement in Pacific Northwest", "evidence": "Menzies relies on supposed linguistic links between Mandarin and Native Haida language (Haida Gwaii). Linguists and historians reject these claims [citation:1][citation:9]"},
+    {"name": "Mexico (Palenque)", "lat": 17.48, "lon": -92.05, "year": 1421, "event": "Menzies: Chinese visited Mayan temples", "evidence": "Menzies claims Chinese influenced Mayan art. Scholars like Robert Finlay call this baseless speculation [citation:3][citation:5]"},
+    {"name": "Antarctica", "lat": -82.86, "lon": 135.00, "year": 1421, "event": "Menzies: Hong Bao's fleet explored Antarctic waters", "evidence": "Menzies reinterprets the Piri Reis map (1513) as showing Antarctica based on Chinese charts. Cartographic historians disagree [citation:3][citation:8]"}
+]
 
     # — Known historical Ming treasure voyage destinations (supported by mainstream sources) —
     {"name": "Nanjing",       "lat": 32.06,   "lon": 118.80,  "year": 1403, "event": "Treasure fleet built/commissioned in Nanjing shipyards"},  # Zheng He fleet origin
