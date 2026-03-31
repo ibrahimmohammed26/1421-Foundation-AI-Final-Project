@@ -36,7 +36,43 @@ interface RelatedDoc {
   year: number;
   type: string;
   url?: string;
+  content_preview?: string;
 }
+
+// Define search variations for each location to improve matching
+const getSearchVariations = (loc: Location): string[] => {
+  const variations: string[] = [loc.name];
+  
+  // Add variations with location name plus context
+  if (loc.name === "Malindi") {
+    variations.push("Malindi Kenya", "Malindi East Africa", "giraffe Malindi", "Zheng He Malindi");
+  } else if (loc.name === "Mogadishu") {
+    variations.push("Mogadishu Somalia", "Mogadishu East Africa", "Somali coast", "Zheng He Mogadishu");
+  } else if (loc.name === "Aden") {
+    variations.push("Aden Yemen", "Arabian Peninsula Aden", "Zheng He Aden");
+  } else if (loc.name === "Hormuz") {
+    variations.push("Hormuz Persian Gulf", "Ormus", "Zheng He Hormuz", "Persian Gulf");
+  } else if (loc.name === "Sri Lanka") {
+    variations.push("Galle Sri Lanka", "Ceylon", "trilingual inscription", "Zheng He Sri Lanka");
+  } else if (loc.name === "Calicut") {
+    variations.push("Calicut India", "Kozhikode", "Malabar Coast", "Zheng He Calicut");
+  } else if (loc.name === "Malacca") {
+    variations.push("Malacca Malaysia", "Melaka", "Strait of Malacca", "Zheng He Malacca");
+  } else if (loc.name === "Nanjing") {
+    variations.push("Nanjing China", "Nanjing shipyard", "treasure fleet Nanjing", "Longjiang shipyard");
+  } else if (loc.name === "Antarctica") {
+    variations.push("Antarctic", "southern continent", "Hong Bao Antarctica");
+  } else {
+    // Generic: add location with year and key words from event
+    variations.push(`${loc.name} ${loc.year}`);
+    const eventWords = loc.event.split(' — ')[0];
+    if (eventWords && !variations.includes(eventWords)) {
+      variations.push(eventWords);
+    }
+  }
+  
+  return variations;
+};
 
 export default function DataMap() {
   const navigate = useNavigate();
@@ -47,6 +83,7 @@ export default function DataMap() {
   const [relatedDocs, setRelatedDocs]           = useState<RelatedDoc[]>([]);
   const [docsLoading, setDocsLoading]           = useState(false);
   const [showDocsPanel, setShowDocsPanel]       = useState(false);
+  const [searchDebug, setSearchDebug]           = useState<string[]>([]);
 
   // Fetch the historically accurate locations from main.py's VOYAGE_LOCATIONS
   useEffect(() => {
@@ -58,23 +95,90 @@ export default function DataMap() {
   const fetchRelatedDocs = async (loc: Location) => {
     setDocsLoading(true);
     setRelatedDocs([]);
+    setSearchDebug([]);
+    
+    const variations = getSearchVariations(loc);
+    console.log(`🔍 Searching for "${loc.name}" with variations:`, variations);
+    
     try {
-      // Search the knowledge base for documents mentioning this location
-      // Try the location name directly — this uses the same FAISS search as the chat
-      const res = await searchDocuments(loc.name, 20);
-      const results: RelatedDoc[] = res.results || [];
-
+      let allResults: RelatedDoc[] = [];
+      const seenIds = new Set<string>();
+      const debugMessages: string[] = [];
+      
+      // Try each search variation
+      for (const term of variations) {
+        debugMessages.push(`Searching: "${term}"`);
+        try {
+          const res = await searchDocuments(term, 20);
+          const results: RelatedDoc[] = res.results || [];
+          debugMessages.push(`  → Found ${results.length} results`);
+          
+          for (const doc of results) {
+            if (!seenIds.has(doc.id)) {
+              seenIds.add(doc.id);
+              allResults.push(doc);
+            }
+          }
+        } catch (err) {
+          debugMessages.push(`  → Error: ${err}`);
+          console.error(`Search failed for "${term}":`, err);
+        }
+      }
+      
+      // Also try searching with the event text (first part)
+      const eventText = loc.event.split(' — ')[0];
+      if (eventText && eventText !== loc.name && !variations.includes(eventText)) {
+        debugMessages.push(`Searching event text: "${eventText}"`);
+        try {
+          const res = await searchDocuments(eventText, 15);
+          const results: RelatedDoc[] = res.results || [];
+          debugMessages.push(`  → Found ${results.length} results`);
+          for (const doc of results) {
+            if (!seenIds.has(doc.id)) {
+              seenIds.add(doc.id);
+              allResults.push(doc);
+            }
+          }
+        } catch (err) {
+          debugMessages.push(`  → Error: ${err}`);
+        }
+      }
+      
+      // Also try searching with "Zheng He" plus location
+      const zhengHeTerm = `Zheng He ${loc.name}`;
+      debugMessages.push(`Searching: "${zhengHeTerm}"`);
+      try {
+        const res = await searchDocuments(zhengHeTerm, 15);
+        const results: RelatedDoc[] = res.results || [];
+        debugMessages.push(`  → Found ${results.length} results`);
+        for (const doc of results) {
+          if (!seenIds.has(doc.id)) {
+            seenIds.add(doc.id);
+            allResults.push(doc);
+          }
+        }
+      } catch (err) {
+        debugMessages.push(`  → Error: ${err}`);
+      }
+      
       // Deduplicate by title
-      const seen = new Set<string>();
-      const unique = results.filter((doc: RelatedDoc) => {
+      const seenTitles = new Set<string>();
+      const unique = allResults.filter((doc: RelatedDoc) => {
         const key = doc.title.trim().toLowerCase();
-        if (seen.has(key)) return false;
-        seen.add(key);
+        if (seenTitles.has(key)) return false;
+        seenTitles.add(key);
         return true;
       });
-
-      setRelatedDocs(unique.slice(0, 8));
-    } catch {
+      
+      debugMessages.push(`✅ Total unique documents: ${unique.length}`);
+      setSearchDebug(debugMessages);
+      console.log(`📚 Found ${unique.length} documents for ${loc.name}`);
+      
+      setRelatedDocs(unique.slice(0, 15));
+      
+    } catch (err) {
+      console.error("Error fetching related docs:", err);
+      setSearchDebug([`Error: ${err}`]);
       setRelatedDocs([]);
     } finally {
       setDocsLoading(false);
@@ -110,7 +214,7 @@ export default function DataMap() {
       <div className="border-b border-gray-200 px-6 py-4 bg-white shadow-sm flex-shrink-0">
         <h1 className="text-xl font-display font-bold text-gray-900">Data Map</h1>
         <p className="text-xs text-gray-400 mt-0.5">
-          Zheng He's voyage locations (1403–1433) and Relevant 1421 Foundation Document Locations — click a marker to find related documents in the knowledge base
+          Zheng He's voyage locations (1403–1433) — click a marker to find related documents in the knowledge base
         </p>
       </div>
 
@@ -145,7 +249,7 @@ export default function DataMap() {
           <div className="absolute top-4 left-4 bg-white/95 backdrop-blur-sm rounded-lg border border-gray-200 px-4 py-2 z-[1000] shadow-sm">
             <p className="text-xs text-gray-400 uppercase tracking-wider">Locations</p>
             <p className="text-2xl font-display font-bold text-gold leading-none mt-0.5">{uniqueLocations.length}</p>
-            <p className="text-xs text-gray-400 mt-0.5">Across 3 continents</p>
+            <p className="text-xs text-gray-400 mt-0.5">From Zheng He's voyages</p>
           </div>
 
           {/* Legend */}
@@ -161,9 +265,9 @@ export default function DataMap() {
 
         {/* Related documents side panel */}
         {showDocsPanel && selectedLocation && (
-          <div className="w-80 bg-white border-l border-gray-200 flex flex-col z-[999] shadow-lg">
+          <div className="w-96 bg-white border-l border-gray-200 flex flex-col z-[999] shadow-lg">
             <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between bg-gray-50">
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <h3 className="text-sm font-bold text-gold">{selectedLocation.name}</h3>
                 <p className="text-xs text-gray-400 mt-0.5 leading-snug">{selectedLocation.event}</p>
               </div>
@@ -173,12 +277,14 @@ export default function DataMap() {
               </button>
             </div>
 
-            <div className="px-4 py-2 border-b border-gray-100">
+            <div className="px-4 py-2 border-b border-gray-100 flex justify-between items-center">
               <p className="text-xs font-semibold text-gray-600 flex items-center gap-1.5">
                 <FileText className="h-3.5 w-3.5 text-gold" />
-                Documents mentioning "{selectedLocation.name}"
+                Documents ({relatedDocs.length})
               </p>
-              <p className="text-xs text-gray-400 mt-0.5">From the knowledge base</p>
+              {docsLoading && (
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gold" />
+              )}
             </div>
 
             <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
@@ -189,12 +295,27 @@ export default function DataMap() {
               )}
               {!docsLoading && relatedDocs.length === 0 && (
                 <div className="text-center py-6">
-                  <p className="text-xs text-gray-400 mb-3">No documents found mentioning "{selectedLocation.name}" in the knowledge base.</p>
+                  <p className="text-xs text-gray-400 mb-3">
+                    No documents found for "{selectedLocation.name}" in the knowledge base.
+                  </p>
+                  <p className="text-xs text-gray-400 mb-3">
+                    Try searching the Documents page directly.
+                  </p>
                   <button
                     onClick={() => navigate(`/documents?search=${encodeURIComponent(selectedLocation.name)}`)}
                     className="text-xs text-gold font-semibold hover:underline">
                     Search documents manually →
                   </button>
+                  
+                  {/* Debug info - remove in production */}
+                  {searchDebug.length > 0 && (
+                    <div className="mt-4 text-left border-t border-gray-200 pt-3">
+                      <p className="text-xs text-gray-400 font-mono mb-1">🔍 Debug:</p>
+                      {searchDebug.slice(0, 8).map((msg, i) => (
+                        <p key={i} className="text-xs text-gray-400 font-mono">{msg}</p>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
               {!docsLoading && relatedDocs.map((doc) => (
@@ -208,6 +329,11 @@ export default function DataMap() {
                       doc.type && doc.type !== "unknown" && doc.type,
                     ].filter(Boolean).join(" · ")}
                   </p>
+                  {doc.content_preview && (
+                    <p className="text-xs text-gray-500 mt-1 line-clamp-2">
+                      {doc.content_preview.substring(0, 120)}...
+                    </p>
+                  )}
                   <button
                     onClick={() => navigate(`/documents?search=${encodeURIComponent(doc.id)}`)}
                     className="mt-2 text-xs text-gold font-semibold flex items-center gap-1 hover:underline">
