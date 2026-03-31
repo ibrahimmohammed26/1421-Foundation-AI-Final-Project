@@ -173,15 +173,39 @@ export default function Documents() {
     getDocumentYears().then(setYears).catch(() => {});
   }, []);
 
-  // Load ALL documents once on mount
+  // Load ALL documents with pagination handling
   const loadAllDocuments = useCallback(async () => {
     setLoading(true);
     setIsSearchMode(false);
     try {
-      // Request up to 10,000 — backend default is now 10,000
-      const data = await getAllDocuments(10000, 0);
-      setAllDocuments(sortByIdAsc(data.documents ?? []));
-    } catch {
+      // Try to get a large limit first (10,000)
+      let allDocs: Document[] = [];
+      let page = 0;
+      const limit = 500; // Fetch in chunks of 500
+      let hasMore = true;
+      
+      while (hasMore) {
+        try {
+          const data = await getAllDocuments(limit, page * limit);
+          const docs = data.documents ?? [];
+          allDocs = [...allDocs, ...docs];
+          
+          // If we got fewer than limit, we've reached the end
+          if (docs.length < limit) {
+            hasMore = false;
+          } else {
+            page++;
+          }
+        } catch (err) {
+          console.error("Error fetching page:", err);
+          hasMore = false;
+        }
+      }
+      
+      setAllDocuments(sortByIdAsc(allDocs));
+      console.log(`Loaded ${allDocs.length} documents total`);
+    } catch (err) {
+      console.error("Failed to load documents:", err);
       setError("Failed to load documents. Is the backend running?");
     } finally {
       setLoading(false);
@@ -194,7 +218,7 @@ export default function Documents() {
       setSearchQuery(q);
       setSearching(true);
       setIsSearchMode(true);
-      searchDocuments(q, 200)
+      searchDocuments(q, 500) // Increased limit for search results
         .then((data) => {
           setSearchResults(data.results || []);
           if (data.results?.length === 1) {
@@ -210,7 +234,7 @@ export default function Documents() {
     } else {
       loadAllDocuments();
     }
-  }, []);
+  }, [loadAllDocuments, searchParams]);
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) {
@@ -221,7 +245,7 @@ export default function Documents() {
     setSearching(true);
     setIsSearchMode(true);
     try {
-      const data = await searchDocuments(searchQuery, 200);
+      const data = await searchDocuments(searchQuery, 500); // Increased limit
       setSearchResults(data.results || []);
       setCurrentPage(1);
     } catch (err) {
