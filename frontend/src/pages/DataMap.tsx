@@ -3,8 +3,13 @@ import { useNavigate } from "react-router-dom";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+<<<<<<< HEAD
 import { searchDocuments } from "@/lib/api";
 import { FileText, X } from "lucide-react";
+=======
+import { fetchLocations, searchDocuments } from "@/lib/api";
+import { FileText, X, CheckCircle, XCircle } from "lucide-react";
+>>>>>>> bc36e49d9bd7f52521c24db351f7b16c36714141
 
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -49,6 +54,7 @@ const ALL_DATA_POINTS: DataPoint[] = [
     event: "Imperial capital under the Yongle Emperor; seat of power during all seven voyages.",
     searchTerm: "Beijing Yongle Emperor" },
 
+<<<<<<< HEAD
   // ── SOUTHEAST ASIA ──────────────────────────────────────────────────
   { id: "champa",    name: "Champa",    lat: 10.82,  lon: 106.63, year: 1405, category: "voyage",
     event: "First stop on Voyage 1 — Southeast Asian ally (modern Vietnam).",
@@ -180,21 +186,155 @@ const ALL_DATA_POINTS: DataPoint[] = [
 ];
 
 const EXCLUDE_PATTERNS = ["gallery", "minoan", "atlantis", "fresco", "artist impression", "image gallery"];
+=======
+// Keywords that indicate a document is actually relevant to a location
+const getRelevanceKeywords = (locationName: string): string[] => {
+  const keywords: Record<string, string[]> = {
+    "Hormuz": ["Hormuz", "Ormus", "Persian Gulf", "4th voyage", "fourth voyage", "1414"],
+    "Malindi": ["Malindi", "Kenya", "East Africa", "giraffe", "5th voyage", "fifth voyage"],
+    "Mogadishu": ["Mogadishu", "Somalia", "Somali", "East Africa", "porcelain"],
+    "Aden": ["Aden", "Yemen", "Arabia", "Arabian Peninsula", "5th voyage"],
+    "Calicut": ["Calicut", "Kozhikode", "Malabar Coast", "India", "1st voyage"],
+    "Malacca": ["Malacca", "Melaka", "Strait of Malacca", "Malaysia"],
+    "Sri Lanka": ["Sri Lanka", "Galle", "Ceylon", "trilingual inscription"],
+    "Nanjing": ["Nanjing", "shipyard", "treasure fleet", "Longjiang"],
+  };
+  return keywords[locationName] || [locationName];
+};
+
+// Check if a document is relevant to the location
+const isDocumentRelevant = (doc: RelatedDoc, locationName: string): boolean => {
+  const title = doc.title?.toLowerCase() || "";
+  const sourceFile = doc.source_file?.toLowerCase() || "";
+  const type = doc.type?.toLowerCase() || "";
+  const author = doc.author?.toLowerCase() || "";
+  
+  const relevantKeywords = getRelevanceKeywords(locationName);
+  
+  // Check title
+  for (const keyword of relevantKeywords) {
+    if (title.includes(keyword.toLowerCase())) {
+      return true;
+    }
+  }
+  
+  // Check source file (e.g., "1421_book", "evidence_annex")
+  for (const keyword of ["1421", "evidence", "annex", "zheng he", "voyage"]) {
+    if (sourceFile.includes(keyword) || title.includes(keyword)) {
+      // If it's from a book or evidence source, it's more likely relevant
+      return true;
+    }
+  }
+  
+  // Facebook posts about events/general content are NOT relevant for specific locations
+  if (type === "facebook_posts" && !title.includes(locationName.toLowerCase())) {
+    return false;
+  }
+  
+  // Generic news articles without location mention are NOT relevant
+  if (type === "general" && !title.toLowerCase().includes(locationName.toLowerCase())) {
+    return false;
+  }
+  
+  return false;
+};
+
+// Calculate relevance score for sorting
+const calculateRelevanceScore = (doc: RelatedDoc, locationName: string): number => {
+  let score = 0;
+  const title = doc.title?.toLowerCase() || "";
+  const sourceFile = doc.source_file?.toLowerCase() || "";
+  const relevantKeywords = getRelevanceKeywords(locationName);
+  
+  // Exact location name in title: +10
+  if (title.includes(locationName.toLowerCase())) {
+    score += 10;
+  }
+  
+  // Keyword matches: +5 each
+  for (const keyword of relevantKeywords) {
+    if (title.includes(keyword.toLowerCase())) {
+      score += 5;
+    }
+  }
+  
+  // From book/evidence files: +8
+  if (sourceFile.includes("1421") || sourceFile.includes("evidence") || sourceFile.includes("book")) {
+    score += 8;
+  }
+  
+  // From foundation/gavin menzies website: +4
+  if (sourceFile.includes("foundation") || sourceFile.includes("gavin") || sourceFile.includes("menzies")) {
+    score += 4;
+  }
+  
+  // Similarity score from backend: + (similarity * 10)
+  if (doc.similarity_score) {
+    score += doc.similarity_score * 10;
+  }
+  
+  return score;
+};
+
+// Define search variations for each location
+const getSearchVariations = (loc: Location): string[] => {
+  const variations: string[] = [loc.name];
+  
+  if (loc.name === "Hormuz") {
+    variations.push("Hormuz Persian Gulf", "Zheng He Hormuz", "Ormus", "fourth voyage Hormuz", "1414 Hormuz");
+  } else if (loc.name === "Malindi") {
+    variations.push("Malindi Kenya", "giraffe Malindi", "Zheng He Malindi", "fifth voyage Malindi");
+  } else if (loc.name === "Mogadishu") {
+    variations.push("Mogadishu Somalia", "Somali coast", "Zheng He Mogadishu");
+  } else if (loc.name === "Aden") {
+    variations.push("Aden Yemen", "Arabian Peninsula", "Zheng He Aden");
+  } else if (loc.name === "Calicut") {
+    variations.push("Calicut India", "Kozhikode", "Malabar Coast", "Zheng He Calicut");
+  } else if (loc.name === "Malacca") {
+    variations.push("Malacca Malaysia", "Melaka", "Strait of Malacca");
+  } else if (loc.name === "Sri Lanka") {
+    variations.push("Galle Sri Lanka", "Ceylon", "trilingual inscription");
+  } else if (loc.name === "Nanjing") {
+    variations.push("Nanjing shipyard", "treasure fleet Nanjing", "Longjiang shipyard");
+  }
+  
+  return variations;
+};
+>>>>>>> bc36e49d9bd7f52521c24db351f7b16c36714141
 
 export default function DataMap() {
   const navigate = useNavigate();
 
+<<<<<<< HEAD
   const [selectedPoint, setSelectedPoint]   = useState<DataPoint | null>(null);
   const [relatedDocs, setRelatedDocs]       = useState<any[]>([]);
   const [docsLoading, setDocsLoading]       = useState(false);
   const [showDocsPanel, setShowDocsPanel]   = useState(false);
   const [filterCategory, setFilterCategory] = useState<"all" | "voyage" | "evidence">("all");
+=======
+  const [locations, setLocations]               = useState<Location[]>([]);
+  const [loading, setLoading]                   = useState(true);
+  const [selectedLocation, setSelectedLocation] = useState<Location | null>(null);
+  const [relatedDocs, setRelatedDocs]           = useState<RelatedDoc[]>([]);
+  const [docsLoading, setDocsLoading]           = useState(false);
+  const [showDocsPanel, setShowDocsPanel]       = useState(false);
+  const [searchDebug, setSearchDebug]           = useState<string[]>([]);
+>>>>>>> bc36e49d9bd7f52521c24db351f7b16c36714141
 
   const fetchRelatedDocs = async (point: DataPoint) => {
     setDocsLoading(true);
     setRelatedDocs([]);
+<<<<<<< HEAD
+=======
+    setSearchDebug([]);
+    
+    const variations = getSearchVariations(loc);
+    console.log(`🔍 Searching for "${loc.name}" with variations:`, variations);
+    
+>>>>>>> bc36e49d9bd7f52521c24db351f7b16c36714141
     try {
       const seenIds = new Set<string>();
+<<<<<<< HEAD
       let allResults: any[] = [];
 
       // Search using the point's dedicated search term + location name
@@ -202,11 +342,25 @@ export default function DataMap() {
         try {
           const res = await searchDocuments(term, 15);
           for (const doc of (res.results || [])) {
+=======
+      const debugMessages: string[] = [];
+      
+      // Try each search variation
+      for (const term of variations) {
+        debugMessages.push(`Searching: "${term}"`);
+        try {
+          const res = await searchDocuments(term, 30);
+          const results: RelatedDoc[] = res.results || [];
+          debugMessages.push(`  → Found ${results.length} raw results`);
+          
+          for (const doc of results) {
+>>>>>>> bc36e49d9bd7f52521c24db351f7b16c36714141
             if (!seenIds.has(doc.id)) {
               seenIds.add(doc.id);
               allResults.push(doc);
             }
           }
+<<<<<<< HEAD
         } catch {}
       }
 
@@ -219,14 +373,68 @@ export default function DataMap() {
       // Deduplicate by title
       const seenTitles = new Set<string>();
       const unique = filtered.filter((doc) => {
+=======
+        } catch (err) {
+          debugMessages.push(`  → Error: ${err}`);
+        }
+      }
+      
+      // Also search with "Zheng He"
+      const zhengHeTerm = `Zheng He ${loc.name}`;
+      debugMessages.push(`Searching: "${zhengHeTerm}"`);
+      try {
+        const res = await searchDocuments(zhengHeTerm, 20);
+        const results: RelatedDoc[] = res.results || [];
+        debugMessages.push(`  → Found ${results.length} raw results`);
+        for (const doc of results) {
+          if (!seenIds.has(doc.id)) {
+            seenIds.add(doc.id);
+            allResults.push(doc);
+          }
+        }
+      } catch (err) {
+        debugMessages.push(`  → Error: ${err}`);
+      }
+      
+      // Filter for relevance
+      const relevantDocs = allResults.filter(doc => isDocumentRelevant(doc, loc.name));
+      debugMessages.push(`✅ After relevance filter: ${relevantDocs.length} / ${allResults.length}`);
+      
+      // Sort by relevance score
+      const sortedDocs = relevantDocs.sort((a, b) => {
+        const scoreA = calculateRelevanceScore(a, loc.name);
+        const scoreB = calculateRelevanceScore(b, loc.name);
+        return scoreB - scoreA;
+      });
+      
+      // Deduplicate by title
+      const seenTitles = new Set<string>();
+      const unique = sortedDocs.filter((doc) => {
+>>>>>>> bc36e49d9bd7f52521c24db351f7b16c36714141
         const key = doc.title.trim().toLowerCase();
         if (seenTitles.has(key)) return false;
         seenTitles.add(key);
         return true;
       });
+<<<<<<< HEAD
 
       setRelatedDocs(unique.slice(0, 6));
     } catch {
+=======
+      
+      // Limit to 8 most relevant documents
+      const topRelevant = unique.slice(0, 8);
+      
+      debugMessages.push(`📚 Final results: ${topRelevant.length} relevant documents`);
+      setSearchDebug(debugMessages);
+      console.log(`📚 Found ${topRelevant.length} relevant documents for ${loc.name}`);
+      
+      setRelatedDocs(topRelevant);
+      
+    } catch (err) {
+      console.error("Error fetching related docs:", err);
+      setSearchDebug([`Error: ${err}`]);
+>>>>>>> bc36e49d9bd7f52521c24db351f7b16c36714141
       setRelatedDocs([]);
     } finally {
       setDocsLoading(false);
@@ -251,7 +459,11 @@ export default function DataMap() {
       <div className="border-b border-gray-200 px-6 py-4 bg-white shadow-sm flex-shrink-0">
         <h1 className="text-xl font-display font-bold text-gray-900">Data Map</h1>
         <p className="text-xs text-gray-400 mt-0.5">
+<<<<<<< HEAD
           Global locations from the 1421 Foundation knowledge base — click any marker to find related documents
+=======
+          Zheng He's voyage locations (1403–1433) — click a marker to find related documents
+>>>>>>> bc36e49d9bd7f52521c24db351f7b16c36714141
         </p>
       </div>
 
@@ -377,15 +589,20 @@ export default function DataMap() {
                   </button>
                 </div>
               )}
-              {!docsLoading && relatedDocs.map((doc, index) => (
+              {!docsLoading && relatedDocs.map((doc) => (
                 <div key={doc.id}
                   className="rounded-lg border border-gray-200 bg-gray-50 p-3 hover:border-gold/40 transition-colors">
                   <div className="flex items-start gap-2">
+<<<<<<< HEAD
                     {/* Uniform gold badge — no special colour for any position */}
                     <div className="flex-shrink-0 w-5 h-5 rounded-full bg-gold/10 border border-gold/30 flex items-center justify-center">
                       <span className="text-gold text-[10px] font-bold">{index + 1}</span>
                     </div>
                     <div className="flex-1 min-w-0">
+=======
+                    <CheckCircle className="h-3.5 w-3.5 text-emerald-500 mt-0.5 flex-shrink-0" />
+                    <div className="flex-1">
+>>>>>>> bc36e49d9bd7f52521c24db351f7b16c36714141
                       <p className="text-xs font-semibold text-gray-900 leading-snug">{doc.title}</p>
                       <p className="text-xs text-gray-400 mt-0.5">
                         {[
