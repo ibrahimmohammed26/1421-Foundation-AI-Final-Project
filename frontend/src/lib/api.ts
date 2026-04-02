@@ -19,10 +19,13 @@ export interface DocumentsResponse {
   documents: Document[]; total: number; limit: number; offset: number;
 }
 export interface ChatSource {
-  title: string; author: string; year: number; type: string; similarity?: number;
+  title: string; author: string; year: number; type: string;
 }
 export interface ChatResponse {
-  content: string; session_id: string; sources?: ChatSource[];
+  content: string;
+  session_id: string;
+  sources?: ChatSource[];
+  used_web_fallback?: boolean;
 }
 
 // ── Documents ─────────────────────────────────────────────────────────
@@ -93,7 +96,7 @@ export async function sendChatMessage(
 export async function streamChat(
   messages: { role: string; content: string }[],
   onDelta: (text: string) => void,
-  onDone: (sources?: ChatSource[]) => void,
+  onDone: (sources?: ChatSource[], usedWebFallback?: boolean) => void,
   onError: (err: string) => void,
   useDocuments = true
 ) {
@@ -121,7 +124,8 @@ export async function streamChat(
       await new Promise((resolve) => setTimeout(resolve, 8));
       onDelta(i === 0 ? words[i] : " " + words[i]);
     }
-    onDone(uniqueSources);
+    // Pass usedWebFallback flag from backend response
+    onDone(uniqueSources, data.used_web_fallback ?? false);
   } catch (error) {
     onError(error instanceof Error ? error.message : "Request failed");
   }
@@ -130,10 +134,7 @@ export async function streamChat(
 // ── Feedback ──────────────────────────────────────────────────────────
 
 export async function submitFeedback(data: {
-  name?: string;
-  email: string;
-  feedback_type: string;
-  message: string;
+  name?: string; email: string; feedback_type: string; message: string;
 }) {
   const res = await fetch(`${API}/api/feedback`, {
     method: "POST",

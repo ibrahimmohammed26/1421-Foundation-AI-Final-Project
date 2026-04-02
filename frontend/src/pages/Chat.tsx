@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Send, Copy, Check, FileText, Trash2,
-  ChevronDown, ChevronUp, Square,
+  ChevronDown, ChevronUp, Square, AlertTriangle,
 } from "lucide-react";
 import { streamChat } from "@/lib/api";
 
@@ -11,6 +11,7 @@ interface Message {
   content: string;
   sources?: Source[];
   streaming?: boolean;
+  usedWebFallback?: boolean; // true when no KB docs were found
 }
 
 interface Source {
@@ -18,15 +19,15 @@ interface Source {
   author: string;
   year: number;
   type: string;
-  similarity?: number;
 }
 
 const STORAGE_KEY = "1421_chat_messages";
 
 function persistMessages(msgs: Message[]) {
   try {
-    const clean = msgs.map((m) => (m.streaming ? { ...m, streaming: false } : m));
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(clean));
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(
+      msgs.map((m) => (m.streaming ? { ...m, streaming: false } : m))
+    ));
   } catch {}
 }
 
@@ -37,9 +38,7 @@ function restoreMessages(): Message[] {
     return (JSON.parse(raw) as Message[]).map((m) =>
       m.streaming ? { ...m, streaming: false } : m
     );
-  } catch {
-    return [];
-  }
+  } catch { return []; }
 }
 
 type Listener = () => void;
@@ -61,9 +60,7 @@ const chatStore = {
 };
 
 window.addEventListener("storage", () => {
-  if (!sessionStorage.getItem(STORAGE_KEY)) {
-    chatStore.clear();
-  }
+  if (!sessionStorage.getItem(STORAGE_KEY)) chatStore.clear();
 });
 
 function deduplicateSources(sources: Source[]): Source[] {
@@ -76,39 +73,27 @@ function deduplicateSources(sources: Source[]): Source[] {
   });
 }
 
-// Renders message content, turning [Document X] into clickable gold links
 function MessageContent({
-  content,
-  sources,
-  onDocClick,
+  content, sources, onDocClick,
 }: {
-  content: string;
-  sources: Source[];
-  onDocClick: (docNum: number) => void;
+  content: string; sources: Source[]; onDocClick: (n: number) => void;
 }) {
-  // Split on [Document N] or [Document N][Document M] patterns
   const parts = content.split(/(\[Document\s*\d+\](?:\[Document\s*\d+\])*)/gi);
-
   return (
-    <div className="text-sm leading-relaxed whitespace-pre-wrap space-y-0">
+    <div className="text-sm leading-relaxed whitespace-pre-wrap">
       {parts.map((part, i) => {
-        // Check if this part contains document references
         const docRefs = [...part.matchAll(/\[Document\s*(\d+)\]/gi)];
         if (docRefs.length > 0) {
           return (
             <span key={i}>
               {docRefs.map((ref, j) => {
                 const docNum = parseInt(ref[1], 10);
-                const source = sources[docNum - 1];
+                const src = sources[docNum - 1];
                 return (
-                  <button
-                    key={j}
-                    onClick={() => onDocClick(docNum)}
-                    title={source ? source.title : `Document ${docNum}`}
-                    className="inline-flex items-center gap-0.5 mx-0.5 px-1.5 py-0.5 rounded bg-red-50 border border-gold/40 text-gold text-xs font-semibold hover:bg-red-100 hover:border-gold transition-colors"
-                  >
-                    <FileText className="h-3 w-3" />
-                    {docNum}
+                  <button key={j} onClick={() => onDocClick(docNum)}
+                    title={src ? src.title : `Document ${docNum}`}
+                    className="inline-flex items-center gap-0.5 mx-0.5 px-1.5 py-0.5 rounded bg-red-50 border border-gold/40 text-gold text-xs font-semibold hover:bg-red-100 hover:border-gold transition-colors">
+                    <FileText className="h-3 w-3" />{docNum}
                   </button>
                 );
               })}
@@ -117,6 +102,20 @@ function MessageContent({
         }
         return <span key={i}>{part}</span>;
       })}
+    </div>
+  );
+}
+
+// Disclaimer shown when AI answered from general knowledge (no KB docs found)
+function WebFallbackDisclaimer() {
+  return (
+    <div className="mt-3 flex items-start gap-2 px-3 py-2.5 rounded-lg bg-amber-50 border border-amber-200">
+      <AlertTriangle className="h-3.5 w-3.5 text-amber-600 flex-shrink-0 mt-0.5" />
+      <p className="text-xs text-amber-700 leading-relaxed">
+        <span className="font-semibold">No matching documents found in the knowledge base.</span>{" "}
+        This answer was generated from the AI's general training knowledge, not from 1421 Foundation documents.
+        Results may be less specific to the Foundation's research.
+      </p>
     </div>
   );
 }
@@ -136,33 +135,27 @@ export default function Chat() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    const unsub = chatStore.subscribe(() => {
+    return chatStore.subscribe(() => {
       setMessagesLocal([...chatStore.messages]);
       setIsTypingLocal(chatStore.isTyping);
     });
-    return () => { unsub(); };
   }, []);
 
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = "auto";
-    const maxH = 200;
-    el.style.height = Math.min(el.scrollHeight, maxH) + "px";
-    el.style.overflowY = el.scrollHeight > maxH ? "auto" : "hidden";
+    el.style.height = Math.min(el.scrollHeight, 200) + "px";
+    el.style.overflowY = el.scrollHeight > 200 ? "auto" : "hidden";
   }, [input]);
 
   const handleStop = useCallback(() => {
     chatStore.setIsTyping(false);
     const msgs = chatStore.messages;
     if (msgs.length > 0 && msgs[msgs.length - 1].streaming) {
-      chatStore.setMessages(
-        msgs.map((m, i) => i === msgs.length - 1 ? { ...m, streaming: false } : m)
-      );
+      chatStore.setMessages(msgs.map((m, i) => i === msgs.length - 1 ? { ...m, streaming: false } : m));
     }
   }, []);
 
@@ -186,35 +179,24 @@ export default function Chat() {
         content += chunk;
         chatStore.setMessages([...newMsgs, { role: "assistant", content, streaming: true }]);
       },
-      (streamSources) => {
+      (streamSources, usedWebFallback) => {
         if (!chatStore.isTyping) return;
         chatStore.setIsTyping(false);
-        
-        // Filter out sources that might be from "no data source found" responses
-        let uniqueSources: Source[] = [];
-        
-        // Only include sources if the response actually has content that references them
-        // and if the response isn't a "no data found" message
-        const hasNoDataMessage = content.toLowerCase().includes("no data source found") ||
-                                  content.toLowerCase().includes("no relevant sources") ||
-                                  content.toLowerCase().includes("i don't have enough information");
-        
-        if (!hasNoDataMessage && streamSources && streamSources.length > 0) {
-          uniqueSources = deduplicateSources(streamSources);
-        }
-        
         chatStore.setMessages([
           ...newMsgs,
-          { role: "assistant", content, sources: uniqueSources, streaming: false },
+          {
+            role: "assistant",
+            content,
+            sources: deduplicateSources(streamSources || []),
+            streaming: false,
+            usedWebFallback: usedWebFallback ?? false,
+          },
         ]);
       },
       (err) => {
         if (!chatStore.isTyping) return;
         chatStore.setIsTyping(false);
-        chatStore.setMessages([
-          ...newMsgs,
-          { role: "assistant", content: `Error: ${err}`, streaming: false },
-        ]);
+        chatStore.setMessages([...newMsgs, { role: "assistant", content: `Error: ${err}`, streaming: false }]);
       }
     );
   };
@@ -226,10 +208,9 @@ export default function Chat() {
   };
 
   const handleCopyAll = () => {
-    const full = messages
-      .map((m) => `${m.role === "user" ? "You" : "1421 AI"}: ${m.content}`)
-      .join("\n\n");
-    navigator.clipboard.writeText(full);
+    navigator.clipboard.writeText(
+      messages.map((m) => `${m.role === "user" ? "You" : "1421 AI"}: ${m.content}`).join("\n\n")
+    );
     setCopiedAll(true);
     setTimeout(() => setCopiedAll(false), 2000);
   };
@@ -248,21 +229,19 @@ export default function Chat() {
     });
   };
 
-  // When a [Document X] badge is clicked, navigate to that document
   const handleDocClick = (sources: Source[], docNum: number) => {
-    const source = sources[docNum - 1];
-    if (source) {
-      navigate(`/documents?search=${encodeURIComponent(source.title)}`);
-    } else {
-      navigate(`/documents?search=${docNum}`);
-    }
+    const src = sources[docNum - 1];
+    navigate(src
+      ? `/documents?search=${encodeURIComponent(src.title)}`
+      : `/documents?search=${docNum}`
+    );
   };
 
   const STARTERS = [
-    "What was the significance of Zheng He's voyages?",
-    "Tell me about the 1421 theory and its key evidence",
-    "Is there evidence of Chinese ships reaching America?",
-    "How did Chinese navigation compare to European methods?",
+    "What does the 1421 Foundation say about Zheng He's voyages?",
+    "What evidence exists for Chinese exploration of the Americas?",
+    "What is the significance of the 1418 map?",
+    "What does the research say about Chinese fleets visiting Africa?",
   ];
 
   const hasMessages = messages.length > 0;
@@ -274,15 +253,14 @@ export default function Chat() {
       <div className="border-b border-gray-200 px-6 py-4 bg-white shadow-sm flex-shrink-0 flex items-center justify-between">
         <div>
           <h1 className="text-xl font-display font-bold text-black">1421 AI Chat</h1>
-          <p className="text-xs text-gray-500 mt-0.5">Ask about Chinese exploration &amp; the 1421 theory — answers sourced from the knowledge base only</p>
+          <p className="text-xs text-gray-500 mt-0.5">Answers sourced from the 1421 Foundation knowledge base — general knowledge used as fallback</p>
         </div>
         {hasMessages && (
           <div className="flex items-center gap-2">
             <button onClick={handleCopyAll}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-medium text-gray-700 hover:border-gold hover:text-gold transition-colors bg-white">
-              {copiedAll
-                ? <><Check className="h-3.5 w-3.5 text-emerald-600" /><span className="text-emerald-600">Copied</span></>
-                : <><Copy className="h-3.5 w-3.5" /> Copy all</>}
+              {copiedAll ? <><Check className="h-3.5 w-3.5 text-emerald-600" /><span className="text-emerald-600">Copied</span></>
+                         : <><Copy className="h-3.5 w-3.5" /> Copy all</>}
             </button>
             <button onClick={() => setShowClearConfirm(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-medium text-red-600 hover:border-red-400 hover:bg-red-50 transition-colors bg-white">
@@ -300,8 +278,10 @@ export default function Chat() {
               <span className="text-xl font-display font-bold text-white tracking-tight">1421</span>
             </div>
             <h2 className="text-2xl font-display font-bold text-black mb-2">Welcome to 1421 AI</h2>
-            <p className="text-gray-600 max-w-md mb-2">Ask any question about Chinese maritime exploration.</p>
-            <p className="text-xs text-gray-400 max-w-md mb-6">All answers are sourced exclusively from the 1421 Foundation knowledge base. Click any document badge in responses to view the source.</p>
+            <p className="text-gray-600 max-w-md mb-2">Ask questions about Chinese maritime exploration and the 1421 hypothesis.</p>
+            <p className="text-xs text-gray-400 max-w-md mb-6">
+              Answers come from the 1421 Foundation knowledge base. A disclaimer will appear if the AI uses general knowledge instead.
+            </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg w-full">
               {STARTERS.map((q) => (
                 <button key={q} onClick={() => handleSend(q)}
@@ -320,11 +300,6 @@ export default function Chat() {
           const showSources = expandedSources.has(idx);
           const sources     = deduplicateSources(msg.sources || []);
           const sourceCount = sources.length;
-          
-          // Check if this is a "no data source found" message
-          const isNoDataMessage = msg.content.toLowerCase().includes("no data source found") ||
-                                   msg.content.toLowerCase().includes("no relevant sources") ||
-                                   msg.content.toLowerCase().includes("i don't have enough information");
 
           return (
             <div key={idx} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
@@ -344,69 +319,61 @@ export default function Chat() {
 
                 {hasContent && (
                   msg.role === "assistant" ? (
-                    <MessageContent
-                      content={msg.content}
-                      sources={sources}
-                      onDocClick={(docNum) => handleDocClick(sources, docNum)}
-                    />
+                    <MessageContent content={msg.content} sources={sources}
+                      onDocClick={(n) => handleDocClick(sources, n)} />
                   ) : (
                     <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
                   )
                 )}
 
-                {msg.role === "assistant" && !isStreaming && hasContent && !isNoDataMessage && sourceCount > 0 && (
-                  <>
-                    <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-3 flex-wrap">
-                      <button onClick={() => handleCopy(msg.content, idx)}
-                        className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gold transition-colors">
-                        {copiedIdx === idx
-                          ? <><Check className="h-3.5 w-3.5 text-emerald-600" /><span className="text-emerald-600">Copied</span></>
-                          : <><Copy className="h-3.5 w-3.5" /> Copy</>}
-                      </button>
-                      {sourceCount > 0 && (
-                        <button onClick={() => toggleSources(idx)}
-                          className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gold transition-colors">
-                          {showSources
-                            ? <><ChevronUp className="h-3.5 w-3.5" /> Hide sources</>
-                            : <><ChevronDown className="h-3.5 w-3.5" /> {sourceCount} source{sourceCount > 1 ? "s" : ""}</>}
-                        </button>
-                      )}
-                    </div>
+                {/* Web fallback disclaimer */}
+                {msg.role === "assistant" && !isStreaming && msg.usedWebFallback && (
+                  <WebFallbackDisclaimer />
+                )}
 
-                    {showSources && sourceCount > 0 && (
-                      <div className="mt-3 space-y-2">
-                        {sources.map((src, sIdx) => (
-                          <div key={sIdx} className="bg-gray-50 rounded-lg border border-gray-200 px-3 py-2">
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="flex items-center gap-2 min-w-0">
-                                <span className="w-5 h-5 rounded bg-gold/10 border border-gold/30 flex items-center justify-center text-gold text-xs font-bold flex-shrink-0">
-                                  {sIdx + 1}
-                                </span>
-                                <div className="min-w-0">
-                                  <p className="text-xs font-semibold text-gray-900 truncate">{src.title}</p>
-                                  <p className="text-xs text-gray-500 mt-0.5">
-                                    {[
-                                      src.author !== "Unknown" && src.author,
-                                      src.year > 0 && src.year,
-                                      src.type && src.type !== "unknown" && src.type,
-                                    ].filter(Boolean).join(" · ")}
-                                  </p>
-                                </div>
-                              </div>
-                              {/* Percentage completely removed */}
-                            </div>
-                            <button
-                              onClick={() => navigate(`/documents?search=${encodeURIComponent(src.title)}`)}
-                              className="mt-2 text-xs text-gold font-semibold flex items-center gap-1 hover:underline"
-                            >
-                              <FileText className="h-3 w-3" /> View in Documents
-                            </button>
-                          </div>
-                        ))}
-                        <p className="text-xs text-gray-400">Click any document badge in the response to jump directly to that source.</p>
-                      </div>
+                {msg.role === "assistant" && !isStreaming && hasContent && (
+                  <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-3 flex-wrap">
+                    <button onClick={() => handleCopy(msg.content, idx)}
+                      className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gold transition-colors">
+                      {copiedIdx === idx
+                        ? <><Check className="h-3.5 w-3.5 text-emerald-600" /><span className="text-emerald-600">Copied</span></>
+                        : <><Copy className="h-3.5 w-3.5" /> Copy</>}
+                    </button>
+                    {sourceCount > 0 && (
+                      <button onClick={() => toggleSources(idx)}
+                        className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gold transition-colors">
+                        {showSources
+                          ? <><ChevronUp className="h-3.5 w-3.5" /> Hide sources</>
+                          : <><ChevronDown className="h-3.5 w-3.5" /> {sourceCount} source{sourceCount > 1 ? "s" : ""}</>}
+                      </button>
                     )}
-                  </>
+                  </div>
+                )}
+
+                {showSources && sourceCount > 0 && (
+                  <div className="mt-3 space-y-2">
+                    {sources.map((src, sIdx) => (
+                      <div key={sIdx} className="bg-gray-50 rounded-lg border border-gray-200 px-3 py-2">
+                        <div className="flex items-start gap-2 min-w-0">
+                          <span className="w-5 h-5 rounded bg-gold/10 border border-gold/30 flex items-center justify-center text-gold text-xs font-bold flex-shrink-0 mt-0.5">
+                            {sIdx + 1}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold text-gray-900 truncate">{src.title}</p>
+                            <p className="text-xs text-gray-500 mt-0.5">
+                              {[src.author !== "Unknown" && src.author, src.year > 0 && src.year,
+                                src.type && src.type !== "unknown" && src.type].filter(Boolean).join(" · ")}
+                            </p>
+                          </div>
+                        </div>
+                        <button onClick={() => navigate(`/documents?search=${encodeURIComponent(src.title)}`)}
+                          className="mt-2 text-xs text-gold font-semibold flex items-center gap-1 hover:underline">
+                          <FileText className="h-3 w-3" /> View in Documents
+                        </button>
+                      </div>
+                    ))}
+                    <p className="text-xs text-gray-400">Click any <span className="text-gold font-semibold">[Document X]</span> badge to jump to that source.</p>
+                  </div>
                 )}
               </div>
             </div>
@@ -419,12 +386,10 @@ export default function Chat() {
       <div className="border-t border-gray-200 px-6 py-4 bg-white flex-shrink-0">
         <div className="flex items-end gap-3 max-w-3xl mx-auto">
           <div className="flex-1 relative">
-            <textarea
-              ref={textareaRef}
-              value={input}
+            <textarea ref={textareaRef} value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-              placeholder="Ask a question…"
+              placeholder="Ask a question about Zheng He, the 1421 hypothesis, or Chinese maritime exploration…"
               rows={1}
               className="w-full resize-none rounded-xl border border-gray-300 bg-white px-4 py-3 pr-16 text-sm text-black placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gold/40 focus:border-gold"
               style={{ minHeight: "48px", maxHeight: "200px", overflowY: "hidden" }}
@@ -436,21 +401,21 @@ export default function Chat() {
           {isTyping ? (
             <button onClick={handleStop}
               className="h-11 w-11 rounded-xl bg-gray-800 text-white hover:bg-gray-900 transition flex items-center justify-center flex-shrink-0 shadow-sm"
-              title="Stop generating">
+              title="Stop">
               <Square className="h-4 w-4 fill-white" />
             </button>
           ) : (
             <button onClick={() => handleSend()} disabled={!input.trim()}
               className="h-11 w-11 rounded-xl bg-gold text-white disabled:opacity-40 hover:bg-gold-light transition flex items-center justify-center flex-shrink-0 shadow-sm"
-              title="Send message">
+              title="Send">
               <Send className="h-4 w-4" />
             </button>
           )}
         </div>
-        <p className="text-xs text-gray-400 text-center mt-2">Press Enter to send · Shift+Enter for new line · Answers sourced from knowledge base only</p>
+        <p className="text-xs text-gray-400 text-center mt-2">Enter to send · Shift+Enter for new line</p>
       </div>
 
-      {/* Clear Chat Modal */}
+      {/* Clear Modal */}
       {showClearConfirm && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl border border-gray-200 p-6 max-w-sm w-full mx-4 shadow-2xl">
@@ -460,9 +425,7 @@ export default function Chat() {
               </div>
               <h3 className="text-base font-display font-bold text-gray-900">Clear Chat?</h3>
             </div>
-            <p className="text-sm text-gray-500 mb-4 leading-relaxed">
-              This will permanently delete all messages in this conversation.
-            </p>
+            <p className="text-sm text-gray-500 mb-4">This will permanently delete all messages.</p>
             {isTyping && <p className="text-sm text-amber-600 font-medium mb-4">The current response will also be stopped.</p>}
             <div className="flex gap-3 justify-end">
               <button onClick={() => setShowClearConfirm(false)}
