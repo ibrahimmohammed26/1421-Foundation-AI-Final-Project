@@ -234,6 +234,67 @@ def _meta_to_doc(idx: int, text: str, meta: dict, doc_id) -> dict:
 
 def load_knowledge_base():
     global _docs_store, _vector_index, _embeddings_model
+
+    meta_path  = FAISS_DIR / "faiss_metadata.pkl"
+    index_path = FAISS_DIR / "faiss_index.bin"
+
+    if not meta_path.exists():
+        print(f"ERROR: {meta_path} not found")
+        print(f"Please ensure faiss_metadata.pkl is in {FAISS_DIR}")
+        return
+
+    try:
+        with open(meta_path, "rb") as f:
+            data = pickle.load(f)
+
+        # Handle dictionary or old list format
+        if isinstance(data, dict):
+            documents = data.get("documents", [])
+            metadatas = data.get("metadatas", [])
+            print(f"Loaded dictionary format: {len(documents)} documents")
+        elif isinstance(data, list):
+            print("Legacy list format detected — converting...")
+            metadatas = data
+            documents = [f"Document {i+1}" for i in range(len(metadatas))]
+        else:
+            print(f"Unexpected metadata format: {type(data)}")
+            return
+
+        # Fix mismatch sizes
+        if len(documents) != len(metadatas):
+            min_len = min(len(documents), len(metadatas))
+            documents = documents[:min_len]
+            metadatas = metadatas[:min_len]
+
+        # Build docs store
+        _docs_store = []
+        for i in range(len(documents)):
+            doc_text = documents[i]
+            doc_meta = metadatas[i]
+            _docs_store.append(_meta_to_doc(i, doc_text, doc_meta, i + 1))
+
+        print(f"Loaded {len(_docs_store)} documents into knowledge base")
+
+    except Exception as e:
+        print(f"Error loading metadata: {e}")
+        import traceback
+        traceback.print_exc()
+        return
+
+    # Load FAISS
+    if index_path.exists():
+        try:
+            _vector_index = faiss.read_index(str(index_path))
+            print(f"Loaded FAISS index: {_vector_index.ntotal} vectors")
+        except Exception as e:
+            print(f"Error loading FAISS index: {e}")
+            _vector_index = None
+    else:
+        print(f"FAISS index not found at {index_path}")
+        _vector_index = None
+
+    print("Knowledge base initialization complete")
+    global _docs_store, _vector_index, _embeddings_model
     
     meta_path = FAISS_DIR / "faiss_metadata.pkl"
     index_path = FAISS_DIR / "faiss_index.bin"
