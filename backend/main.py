@@ -371,10 +371,65 @@ def _expand_query(query: str) -> List[str]:
     return list(dict.fromkeys(expansions))
 
 
+def filter_relevant_sources(sources: List[dict], max_sources: int = 5, relevance_threshold: float = 0.3) -> List[dict]:
+    """
+    Filter sources to only include relevant ones based on relevance_score.
+    
+    Args:
+        sources: List of source documents with _relevance_score
+        max_sources: Maximum number of sources to return (default 5)
+        relevance_threshold: Minimum relevance score to keep (0-1 scale)
+    
+    Returns:
+        Filtered list of sources, sorted by relevance (highest first)
+    """
+    if not sources:
+        return []
+    
+    filtered = []
+    for src in sources:
+        score = src.get("_relevance_score", 0)
+        
+        # Normalize score based on type
+        # For semantic search: scores are 0-10 (higher is better)
+        # For keyword search: scores can be 0-100+
+        # For title match: score is 20
+        
+        # Normalize to 0-1 scale for threshold comparison
+        normalized_score = 0
+        if score >= 20:  # Title match
+            normalized_score = 1.0
+        elif score >= 10:  # Very high keyword match
+            normalized_score = 0.9
+        elif score >= 5:   # Good match
+            normalized_score = 0.7
+        elif score >= 2:   # Moderate match
+            normalized_score = 0.5
+        elif score >= 1:   # Low match
+            normalized_score = 0.3
+        else:
+            normalized_score = score / 10 if score < 10 else score / 100
+        
+        # Keep sources above threshold
+        if normalized_score >= relevance_threshold:
+            filtered.append(src)
+    
+    # Also keep at least 1 source if any exist (don't return empty if there are sources)
+    if not filtered and sources:
+        # Keep the top 1 source even if below threshold
+        filtered = [sources[0]]
+    
+    # Limit to max_sources
+    if len(filtered) > max_sources:
+        filtered = filtered[:max_sources]
+    
+    return filtered
+
+
 def get_relevant_context(query: str, top_k: int = 10) -> tuple:
     """
     Multi-strategy search returning documents ranked by relevance score
-    (most relevant first). No artificial cap — returns whatever is relevant.
+    (most relevant first). Returns dynamic number of sources based on relevance.
     """
     docs_by_id: dict = {}
     expanded = _expand_query(query)
@@ -418,16 +473,18 @@ def get_relevant_context(query: str, top_k: int = 10) -> tuple:
                 docs_by_id[did]["_relevance_score"] += 20.0
 
     docs = _deduplicate_and_rank(list(docs_by_id.values()))
-    print(f"Found {len(docs)} docs. Top 3: {[d['title'][:50] for d in docs[:3]]}")
+    
+    # ✅ NEW: Filter to only relevant sources (dynamic, not fixed number)
+    relevant_docs = filter_relevant_sources(docs, max_sources=5, relevance_threshold=0.3)
+    
+    print(f"Found {len(docs)} total docs → {len(relevant_docs)} relevant docs. Top: {[d['title'][:50] for d in relevant_docs[:3]]}")
 
-    if not docs:
+    if not relevant_docs:
         return "", []
 
-    # Use as many as needed, up to top_k
-    selected = docs[:top_k]
-
+    # Build context with the relevant docs only
     context = "Relevant documents from the 1421 Foundation knowledge base:\n\n"
-    for i, doc in enumerate(selected, 1):
+    for i, doc in enumerate(relevant_docs, 1):
         context += f"[Document {i}] {doc['title']}"
         if doc.get("year") and doc["year"] > 0:
             context += f" ({doc['year']})"
@@ -439,7 +496,7 @@ def get_relevant_context(query: str, top_k: int = 10) -> tuple:
             context += f"{full[:4000]}\n"
         context += "\n"
 
-    return context, selected
+    return context, relevant_docs
 
 
 def get_comparative_context(query: str, top_k: int = 12) -> tuple:
@@ -463,12 +520,15 @@ def get_comparative_context(query: str, top_k: int = 12) -> tuple:
             docs_by_id[did]["_relevance_score"] += d["_relevance_score"] * 0.3
 
     docs = _deduplicate_and_rank(list(docs_by_id.values()))
-    if not docs:
+    
+    # ✅ NEW: Filter to only relevant sources for comparative queries too
+    relevant_docs = filter_relevant_sources(docs, max_sources=6, relevance_threshold=0.25)
+    
+    if not relevant_docs:
         return "", []
 
-    selected = docs[:top_k]
     context = "Relevant documents from the 1421 Foundation knowledge base:\n\n"
-    for i, doc in enumerate(selected, 1):
+    for i, doc in enumerate(relevant_docs, 1):
         context += f"[Document {i}] {doc['title']}"
         if doc.get("year") and doc["year"] > 0:
             context += f" ({doc['year']})"
@@ -479,7 +539,7 @@ def get_comparative_context(query: str, top_k: int = 12) -> tuple:
         if full:
             context += f"{full[:3000]}\n"
         context += "\n"
-    return context, selected
+    return context, relevant_docs
 
 # ── Routes ────────────────────────────────────────────────────────────
 
@@ -577,7 +637,7 @@ async def chat(req: ChatRequest):
 
     try:
         response = llm.invoke(_to_lc(_build_system(context, used_web_fallback), req.messages))
-        # Sources are already ranked by relevance from get_relevant_context
+        # Sources are already filtered and ranked by relevance from get_relevant_context
         clean_sources = [
             {
                 "title":           d["title"],
