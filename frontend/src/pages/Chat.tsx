@@ -11,7 +11,7 @@ interface Message {
   content: string;
   sources?: Source[];
   streaming?: boolean;
-  usedWebFallback?: boolean; // true when no KB docs were found
+  usedWebFallback?: boolean;
 }
 
 interface Source {
@@ -19,6 +19,7 @@ interface Source {
   author: string;
   year: number;
   type: string;
+  relevance_score?: number;
 }
 
 const STORAGE_KEY = "1421_chat_messages";
@@ -73,6 +74,7 @@ function deduplicateSources(sources: Source[]): Source[] {
   });
 }
 
+// Renders message text, turning [Document X] into clickable gold badge buttons
 function MessageContent({
   content, sources, onDocClick,
 }: {
@@ -106,28 +108,14 @@ function MessageContent({
   );
 }
 
-// Disclaimer shown when AI answered from general knowledge (no KB docs found)
-function WebFallbackDisclaimer() {
-  return (
-    <div className="mt-3 flex items-start gap-2 px-3 py-2.5 rounded-lg bg-amber-50 border border-amber-200">
-      <AlertTriangle className="h-3.5 w-3.5 text-amber-600 flex-shrink-0 mt-0.5" />
-      <p className="text-xs text-amber-700 leading-relaxed">
-        <span className="font-semibold">No matching documents found in the knowledge base.</span>{" "}
-        This answer was generated from the AI's general training knowledge, not from 1421 Foundation documents.
-        Results may be less specific to the Foundation's research.
-      </p>
-    </div>
-  );
-}
-
 export default function Chat() {
   const navigate = useNavigate();
 
-  const [messages, setMessagesLocal]   = useState<Message[]>(() => chatStore.messages);
-  const [isTyping, setIsTypingLocal]   = useState(() => chatStore.isTyping);
-  const [input, setInput]              = useState("");
-  const [copiedIdx, setCopiedIdx]      = useState<number | null>(null);
-  const [copiedAll, setCopiedAll]      = useState(false);
+  const [messages, setMessagesLocal] = useState<Message[]>(() => chatStore.messages);
+  const [isTyping, setIsTypingLocal] = useState(() => chatStore.isTyping);
+  const [input, setInput]            = useState("");
+  const [copiedIdx, setCopiedIdx]    = useState<number | null>(null);
+  const [copiedAll, setCopiedAll]    = useState(false);
   const [expandedSources, setExpandedSources] = useState<Set<number>>(new Set());
   const [showClearConfirm, setShowClearConfirm] = useState(false);
 
@@ -155,7 +143,9 @@ export default function Chat() {
     chatStore.setIsTyping(false);
     const msgs = chatStore.messages;
     if (msgs.length > 0 && msgs[msgs.length - 1].streaming) {
-      chatStore.setMessages(msgs.map((m, i) => i === msgs.length - 1 ? { ...m, streaming: false } : m));
+      chatStore.setMessages(msgs.map((m, i) =>
+        i === msgs.length - 1 ? { ...m, streaming: false } : m
+      ));
     }
   }, []);
 
@@ -182,12 +172,14 @@ export default function Chat() {
       (streamSources, usedWebFallback) => {
         if (!chatStore.isTyping) return;
         chatStore.setIsTyping(false);
+        // Sources are already ranked by backend — preserve that order
+        const dedupedSources = deduplicateSources(streamSources || []);
         chatStore.setMessages([
           ...newMsgs,
           {
             role: "assistant",
             content,
-            sources: deduplicateSources(streamSources || []),
+            sources: dedupedSources,
             streaming: false,
             usedWebFallback: usedWebFallback ?? false,
           },
@@ -196,7 +188,8 @@ export default function Chat() {
       (err) => {
         if (!chatStore.isTyping) return;
         chatStore.setIsTyping(false);
-        chatStore.setMessages([...newMsgs, { role: "assistant", content: `Error: ${err}`, streaming: false }]);
+        chatStore.setMessages([...newMsgs,
+          { role: "assistant", content: `Error: ${err}`, streaming: false }]);
       }
     );
   };
@@ -216,9 +209,7 @@ export default function Chat() {
   };
 
   const handleClearConfirmed = useCallback(() => {
-    chatStore.clear();
-    setInput("");
-    setShowClearConfirm(false);
+    chatStore.clear(); setInput(""); setShowClearConfirm(false);
   }, []);
 
   const toggleSources = (idx: number) => {
@@ -253,14 +244,15 @@ export default function Chat() {
       <div className="border-b border-gray-200 px-6 py-4 bg-white shadow-sm flex-shrink-0 flex items-center justify-between">
         <div>
           <h1 className="text-xl font-display font-bold text-black">1421 AI Chat</h1>
-          <p className="text-xs text-gray-500 mt-0.5">Answers sourced from the 1421 Foundation knowledge base — general knowledge used as fallback</p>
+          <p className="text-xs text-gray-500 mt-0.5">Answers sourced from the 1421 Foundation knowledge base — sources ranked by relevance</p>
         </div>
         {hasMessages && (
           <div className="flex items-center gap-2">
             <button onClick={handleCopyAll}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-medium text-gray-700 hover:border-gold hover:text-gold transition-colors bg-white">
-              {copiedAll ? <><Check className="h-3.5 w-3.5 text-emerald-600" /><span className="text-emerald-600">Copied</span></>
-                         : <><Copy className="h-3.5 w-3.5" /> Copy all</>}
+              {copiedAll
+                ? <><Check className="h-3.5 w-3.5 text-emerald-600" /><span className="text-emerald-600">Copied</span></>
+                : <><Copy className="h-3.5 w-3.5" /> Copy all</>}
             </button>
             <button onClick={() => setShowClearConfirm(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-medium text-red-600 hover:border-red-400 hover:bg-red-50 transition-colors bg-white">
@@ -280,7 +272,7 @@ export default function Chat() {
             <h2 className="text-2xl font-display font-bold text-black mb-2">Welcome to 1421 AI</h2>
             <p className="text-gray-600 max-w-md mb-2">Ask questions about Chinese maritime exploration and the 1421 hypothesis.</p>
             <p className="text-xs text-gray-400 max-w-md mb-6">
-              Answers come from the 1421 Foundation knowledge base. A disclaimer will appear if the AI uses general knowledge instead.
+              Answers come from the 1421 Foundation knowledge base. Sources are ranked by relevance — most relevant first.
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg w-full">
               {STARTERS.map((q) => (
@@ -298,6 +290,7 @@ export default function Chat() {
           const hasContent  = msg.content.trim().length > 0;
           const showDots    = isStreaming && !hasContent;
           const showSources = expandedSources.has(idx);
+          // Sources already ranked by backend (most relevant first)
           const sources     = deduplicateSources(msg.sources || []);
           const sourceCount = sources.length;
 
@@ -326,9 +319,15 @@ export default function Chat() {
                   )
                 )}
 
-                {/* Web fallback disclaimer */}
+                {/* Inline disclaimer when no KB documents were found */}
                 {msg.role === "assistant" && !isStreaming && msg.usedWebFallback && (
-                  <WebFallbackDisclaimer />
+                  <div className="mt-3 flex items-start gap-2 px-3 py-2.5 rounded-lg bg-amber-50 border border-amber-200">
+                    <AlertTriangle className="h-3.5 w-3.5 text-amber-600 flex-shrink-0 mt-0.5" />
+                    <p className="text-xs text-amber-700 leading-relaxed">
+                      <span className="font-semibold">No matching documents found in the 1421 Foundation knowledge base.</span>{" "}
+                      This response was generated from the AI's general training knowledge, not from indexed documents.
+                    </p>
+                  </div>
                 )}
 
                 {msg.role === "assistant" && !isStreaming && hasContent && (
@@ -344,7 +343,7 @@ export default function Chat() {
                         className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gold transition-colors">
                         {showSources
                           ? <><ChevronUp className="h-3.5 w-3.5" /> Hide sources</>
-                          : <><ChevronDown className="h-3.5 w-3.5" /> {sourceCount} source{sourceCount > 1 ? "s" : ""}</>}
+                          : <><ChevronDown className="h-3.5 w-3.5" /> {sourceCount} source{sourceCount > 1 ? "s" : ""} — ranked by relevance</>}
                       </button>
                     )}
                   </div>
@@ -352,21 +351,26 @@ export default function Chat() {
 
                 {showSources && sourceCount > 0 && (
                   <div className="mt-3 space-y-2">
+                    <p className="text-xs text-gray-400 mb-1">Sources ranked most → least relevant:</p>
                     {sources.map((src, sIdx) => (
                       <div key={sIdx} className="bg-gray-50 rounded-lg border border-gray-200 px-3 py-2">
                         <div className="flex items-start gap-2 min-w-0">
+                          {/* Rank badge — uniform gold style, number shows rank */}
                           <span className="w-5 h-5 rounded bg-gold/10 border border-gold/30 flex items-center justify-center text-gold text-xs font-bold flex-shrink-0 mt-0.5">
                             {sIdx + 1}
                           </span>
-                          <div className="min-w-0">
+                          <div className="min-w-0 flex-1">
                             <p className="text-xs font-semibold text-gray-900 truncate">{src.title}</p>
                             <p className="text-xs text-gray-500 mt-0.5">
-                              {[src.author !== "Unknown" && src.author, src.year > 0 && src.year,
-                                src.type && src.type !== "unknown" && src.type].filter(Boolean).join(" · ")}
+                              {[src.author !== "Unknown" && src.author,
+                                src.year > 0 && src.year,
+                                src.type && src.type !== "unknown" && src.type]
+                                .filter(Boolean).join(" · ")}
                             </p>
                           </div>
                         </div>
-                        <button onClick={() => navigate(`/documents?search=${encodeURIComponent(src.title)}`)}
+                        <button
+                          onClick={() => navigate(`/documents?search=${encodeURIComponent(src.title)}`)}
                           className="mt-2 text-xs text-gold font-semibold flex items-center gap-1 hover:underline">
                           <FileText className="h-3 w-3" /> View in Documents
                         </button>
@@ -429,13 +433,9 @@ export default function Chat() {
             {isTyping && <p className="text-sm text-amber-600 font-medium mb-4">The current response will also be stopped.</p>}
             <div className="flex gap-3 justify-end">
               <button onClick={() => setShowClearConfirm(false)}
-                className="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition-colors">
-                Cancel
-              </button>
+                className="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition-colors">Cancel</button>
               <button onClick={handleClearConfirmed}
-                className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700 transition-colors">
-                Clear all
-              </button>
+                className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700 transition-colors">Clear all</button>
             </div>
           </div>
         </div>
