@@ -234,6 +234,65 @@ def _meta_to_doc(idx: int, text: str, meta: dict, doc_id) -> dict:
 
 def load_knowledge_base():
     global _docs_store, _vector_index, _embeddings_model
+    
+    meta_path = FAISS_DIR / "faiss_metadata.pkl"
+    index_path = FAISS_DIR / "faiss_index.bin"
+    
+    if not meta_path.exists():
+        print(f"ERROR: {meta_path} not found")
+        print(f"Please ensure faiss_metadata.pkl is in {FAISS_DIR}")
+        return
+    
+    try:
+        with open(meta_path, "rb") as f:
+            data = pickle.load(f)
+        
+        if isinstance(data, dict):
+            documents = data.get("documents", [])
+            metadatas = data.get("metadatas", [])
+            print(f"✅ Dictionary format: {len(documents)} docs")
+        elif isinstance(data, list):
+            print("⚠️  Legacy list format, converting...")
+            metadatas = data
+            documents = [f"Document {i+1}" for i in range(len(metadatas))]
+            print(f"✅ Converted: {len(documents)} docs")
+        else:
+            print(f"❌ Unexpected format: {type(data)}")
+            return
+        
+        if len(documents) != len(metadatas):
+            print(f"⚠️  Length mismatch, adjusting...")
+            min_len = min(len(documents), len(metadatas))
+            documents = documents[:min_len]
+            metadatas = metadatas[:min_len]
+        
+        _docs_store = []
+        for i in range(len(documents)):
+            doc_text = documents[i] if i < len(documents) else ""
+            doc_meta = metadatas[i] if i < len(metadatas) else {}
+            _docs_store.append(_meta_to_doc(i, doc_text, doc_meta, i + 1))
+        
+        print(f"✅ Loaded {len(_docs_store)} documents")
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return
+    
+    if index_path.exists():
+        try:
+            _vector_index = faiss.read_index(str(index_path))
+            print(f"✅ FAISS index: {_vector_index.ntotal} vectors")
+        except Exception as e:
+            print(f"❌ FAISS error: {e}")
+            _vector_index = None
+    else:
+        print(f"⚠️  FAISS index not found")
+        _vector_index = None
+    
+    print("✅ Knowledge base ready")
+    global _docs_store, _vector_index, _embeddings_model
     meta_path  = FAISS_DIR / "faiss_metadata.pkl"
     index_path = FAISS_DIR / "faiss_index.bin"
     
