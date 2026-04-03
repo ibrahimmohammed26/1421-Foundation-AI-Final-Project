@@ -43,12 +43,16 @@ function restoreMessages(): Message[] {
 }
 
 type Listener = () => void;
+type Unsubscribe = () => void;
 
 const chatStore = {
   messages: restoreMessages() as Message[],
   isTyping: false,
   listeners: new Set<Listener>(),
-  subscribe(fn: Listener) { this.listeners.add(fn); return () => this.listeners.delete(fn); },
+  subscribe(fn: Listener): Unsubscribe {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  },
   notify() { this.listeners.forEach((fn) => fn()); },
   setMessages(msgs: Message[]) { this.messages = msgs; persistMessages(msgs); this.notify(); },
   setIsTyping(v: boolean) { this.isTyping = v; this.notify(); },
@@ -123,10 +127,11 @@ export default function Chat() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    return chatStore.subscribe(() => {
+    const unsubscribe = chatStore.subscribe(() => {
       setMessagesLocal([...chatStore.messages]);
       setIsTypingLocal(chatStore.isTyping);
     });
+    return unsubscribe;
   }, []);
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
@@ -172,7 +177,6 @@ export default function Chat() {
       (streamSources, usedWebFallback) => {
         if (!chatStore.isTyping) return;
         chatStore.setIsTyping(false);
-        // Sources are already ranked by backend — preserve that order
         const dedupedSources = deduplicateSources(streamSources || []);
         chatStore.setMessages([
           ...newMsgs,
@@ -290,7 +294,6 @@ export default function Chat() {
           const hasContent  = msg.content.trim().length > 0;
           const showDots    = isStreaming && !hasContent;
           const showSources = expandedSources.has(idx);
-          // Sources already ranked by backend (most relevant first)
           const sources     = deduplicateSources(msg.sources || []);
           const sourceCount = sources.length;
 
@@ -319,7 +322,6 @@ export default function Chat() {
                   )
                 )}
 
-                {/* Inline disclaimer when no KB documents were found */}
                 {msg.role === "assistant" && !isStreaming && msg.usedWebFallback && (
                   <div className="mt-3 flex items-start gap-2 px-3 py-2.5 rounded-lg bg-amber-50 border border-amber-200">
                     <AlertTriangle className="h-3.5 w-3.5 text-amber-600 flex-shrink-0 mt-0.5" />
@@ -355,7 +357,6 @@ export default function Chat() {
                     {sources.map((src, sIdx) => (
                       <div key={sIdx} className="bg-gray-50 rounded-lg border border-gray-200 px-3 py-2">
                         <div className="flex items-start gap-2 min-w-0">
-                          {/* Rank badge — uniform gold style, number shows rank */}
                           <span className="w-5 h-5 rounded bg-gold/10 border border-gold/30 flex items-center justify-center text-gold text-xs font-bold flex-shrink-0 mt-0.5">
                             {sIdx + 1}
                           </span>
