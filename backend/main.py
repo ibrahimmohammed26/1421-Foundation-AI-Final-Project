@@ -243,11 +243,13 @@ def load_knowledge_base():
         print(f"Please ensure faiss_metadata.pkl is in {FAISS_DIR}")
         return
 
+    # -----------------------
+    # Load metadata
+    # -----------------------
     try:
         with open(meta_path, "rb") as f:
             data = pickle.load(f)
 
-        # Handle dictionary or old list format
         if isinstance(data, dict):
             documents = data.get("documents", [])
             metadatas = data.get("metadatas", [])
@@ -266,12 +268,15 @@ def load_knowledge_base():
             documents = documents[:min_len]
             metadatas = metadatas[:min_len]
 
-        # Build docs store
+        # Build document store
         _docs_store = []
         for i in range(len(documents)):
-            doc_text = documents[i]
-            doc_meta = metadatas[i]
-            _docs_store.append(_meta_to_doc(i, doc_text, doc_meta, i + 1))
+            _docs_store.append(_meta_to_doc(
+                i,
+                documents[i],
+                metadatas[i],
+                i + 1
+            ))
 
         print(f"Loaded {len(_docs_store)} documents into knowledge base")
 
@@ -281,7 +286,9 @@ def load_knowledge_base():
         traceback.print_exc()
         return
 
-    # Load FAISS
+    # -----------------------
+    # Load FAISS index
+    # -----------------------
     if index_path.exists():
         try:
             _vector_index = faiss.read_index(str(index_path))
@@ -294,209 +301,6 @@ def load_knowledge_base():
         _vector_index = None
 
     print("Knowledge base initialization complete")
-    global _docs_store, _vector_index, _embeddings_model
-    
-    meta_path = FAISS_DIR / "faiss_metadata.pkl"
-    index_path = FAISS_DIR / "faiss_index.bin"
-    
-    if not meta_path.exists():
-        print(f"ERROR: {meta_path} not found")
-        print(f"Please ensure faiss_metadata.pkl is in {FAISS_DIR}")
-        return
-    
-    try:
-        with open(meta_path, "rb") as f:
-            data = pickle.load(f)
-        
-        # Handle both dictionary and list formats
-        if isinstance(data, dict):
-            documents = data.get("documents", [])
-            metadatas = data.get("metadatas", [])
-            print(f"✅ Loaded dictionary format: {len(documents)} documents, {len(metadatas)} metadata entries")
-        elif isinstance(data, list):
-            print("⚠️  Legacy list format detected. Converting to support both formats...")
-            metadatas = data
-            documents = [f"Document {i+1}" for i in range(len(metadatas))]
-            print(f"✅ Converted list format: {len(documents)} documents")
-        else:
-            print(f"❌ ERROR: Unexpected metadata format: {type(data)}")
-            return
-        
-        if len(documents) != len(metadatas):
-            print(f"⚠️  Mismatch: {len(documents)} documents vs {len(metadatas)} metadata entries")
-            min_len = min(len(documents), len(metadatas))
-            documents = documents[:min_len]
-            metadatas = metadatas[:min_len]
-            print(f"✅ Adjusted to {min_len} documents")
-        
-        _docs_store = []
-        for i in range(len(documents)):
-            doc_text = documents[i] if i < len(documents) else ""
-            doc_meta = metadatas[i] if i < len(metadatas) else {}
-            _docs_store.append(_meta_to_doc(i, doc_text, doc_meta, i + 1))
-        
-        print(f"✅ Loaded {len(_docs_store)} documents into knowledge base")
-        
-    except Exception as e:
-        print(f"❌ Error loading metadata: {e}")
-        import traceback
-        traceback.print_exc()
-        return
-    
-    if index_path.exists():
-        try:
-            _vector_index = faiss.read_index(str(index_path))
-            print(f"✅ FAISS index loaded: {_vector_index.ntotal} vectors")
-        except Exception as e:
-            print(f"❌ Error loading FAISS index: {e}")
-            _vector_index = None
-    else:
-        print(f"⚠️  FAISS index not found at {index_path}")
-        _vector_index = None
-    
-    print("✅ Knowledge base initialization complete")
-    global _docs_store, _vector_index, _embeddings_model
-    
-    meta_path = FAISS_DIR / "faiss_metadata.pkl"
-    index_path = FAISS_DIR / "faiss_index.bin"
-    
-    if not meta_path.exists():
-        print(f"ERROR: {meta_path} not found")
-        print(f"Please ensure faiss_metadata.pkl is in {FAISS_DIR}")
-        return
-    
-    try:
-        with open(meta_path, "rb") as f:
-            data = pickle.load(f)
-        
-        if isinstance(data, dict):
-            documents = data.get("documents", [])
-            metadatas = data.get("metadatas", [])
-            print(f"✅ Dictionary format: {len(documents)} docs")
-        elif isinstance(data, list):
-            print("⚠️  Legacy list format, converting...")
-            metadatas = data
-            documents = [f"Document {i+1}" for i in range(len(metadatas))]
-            print(f"✅ Converted: {len(documents)} docs")
-        else:
-            print(f"❌ Unexpected format: {type(data)}")
-            return
-        
-        if len(documents) != len(metadatas):
-            print(f"⚠️  Length mismatch, adjusting...")
-            min_len = min(len(documents), len(metadatas))
-            documents = documents[:min_len]
-            metadatas = metadatas[:min_len]
-        
-        _docs_store = []
-        for i in range(len(documents)):
-            doc_text = documents[i] if i < len(documents) else ""
-            doc_meta = metadatas[i] if i < len(metadatas) else {}
-            _docs_store.append(_meta_to_doc(i, doc_text, doc_meta, i + 1))
-        
-        print(f"✅ Loaded {len(_docs_store)} documents")
-        
-    except Exception as e:
-        print(f"❌ Error: {e}")
-        import traceback
-        traceback.print_exc()
-        return
-    
-    if index_path.exists():
-        try:
-            _vector_index = faiss.read_index(str(index_path))
-            print(f"✅ FAISS index: {_vector_index.ntotal} vectors")
-        except Exception as e:
-            print(f"❌ FAISS error: {e}")
-            _vector_index = None
-    else:
-        print(f"⚠️  FAISS index not found")
-        _vector_index = None
-    
-    print("✅ Knowledge base ready")
-    global _docs_store, _vector_index, _embeddings_model
-    meta_path  = FAISS_DIR / "faiss_metadata.pkl"
-    index_path = FAISS_DIR / "faiss_index.bin"
-    
-    if not meta_path.exists():
-        print(f"ERROR: {meta_path} not found")
-        print(f"Please ensure faiss_metadata.pkl is in {FAISS_DIR}")
-        return
-    
-    try:
-        with open(meta_path, "rb") as f:
-            data = pickle.load(f)
-        
-        # ✅ Handle both dictionary and list formats
-        if isinstance(data, dict):
-            # New format: dictionary with 'documents' and 'metadatas' keys
-            documents = data.get("documents", [])
-            metadatas = data.get("metadatas", [])
-            print(f"✅ Loaded dictionary format: {len(documents)} documents, {len(metadatas)} metadata entries")
-        elif isinstance(data, list):
-            # Old format: list of metadata only
-            print("⚠️  Legacy list format detected. Converting to support both formats...")
-            metadatas = data
-            # Create placeholder documents for backward compatibility
-            documents = [f"Document {i+1}" for i in range(len(metadatas))]
-            print(f"✅ Converted list format: {len(documents)} documents")
-        else:
-            print(f"❌ ERROR: Unexpected metadata format: {type(data)}")
-            return
-        
-        # Ensure we have matching lengths
-        if len(documents) != len(metadatas):
-            print(f"⚠️  Mismatch: {len(documents)} documents vs {len(metadatas)} metadata entries")
-            # Pad or truncate to match
-            min_len = min(len(documents), len(metadatas))
-            documents = documents[:min_len]
-            metadatas = metadatas[:min_len]
-            print(f"✅ Adjusted to {min_len} documents")
-        
-        _docs_store = []
-        for i in range(len(documents)):
-            doc_text = documents[i] if i < len(documents) else ""
-            doc_meta = metadatas[i] if i < len(metadatas) else {}
-            _docs_store.append(_meta_to_doc(i, doc_text, doc_meta, i + 1))
-        
-        print(f"✅ Loaded {len(_docs_store)} documents into knowledge base")
-        
-    except Exception as e:
-        print(f"❌ Error loading metadata: {e}")
-        import traceback
-        traceback.print_exc()
-        return
-    
-    # Load FAISS index
-    if index_path.exists():
-        try:
-            _vector_index = faiss.read_index(str(index_path))
-            print(f"✅ FAISS index loaded: {_vector_index.ntotal} vectors")
-        except Exception as e:
-            print(f"❌ Error loading FAISS index: {e}")
-            _vector_index = None
-    else:
-        print(f"⚠️  FAISS index not found at {index_path}")
-        _vector_index = None
-    
-    print("✅ Knowledge base initialization complete")
-    global _docs_store, _vector_index, _embeddings_model
-    meta_path  = FAISS_DIR / "faiss_metadata.pkl"
-    index_path = FAISS_DIR / "faiss_index.bin"
-    if not meta_path.exists():
-        print(f"ERROR: {meta_path} not found"); return
-    with open(meta_path, "rb") as f:
-        data = pickle.load(f)
-    documents = data.get("documents", [])
-    metadatas = data.get("metadatas", [])
-    _docs_store = [_meta_to_doc(i, documents[i] if i < len(documents) else "",
-                                metadatas[i] if i < len(metadatas) else {}, i + 1)
-                   for i in range(len(documents))]
-    print(f"OK: Loaded {len(_docs_store)} documents")
-    if index_path.exists():
-        _vector_index = faiss.read_index(str(index_path))
-        print(f"OK: FAISS index — {_vector_index.ntotal} vectors")
-    print("OK: Knowledge base ready")
 
 # ── Search ────────────────────────────────────────────────────────────
 
