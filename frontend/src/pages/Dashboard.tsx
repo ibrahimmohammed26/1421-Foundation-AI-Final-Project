@@ -33,8 +33,8 @@ function getConversationCount(): number {
 export default function Dashboard() {
   const [stats, setStats] = useState<Stats>({
     feedback_count: 0,
-    locations_count: 17,
-    documents_count: 890,
+    locations_count: 52,
+    documents_count: 889,
   });
   const [loading, setLoading] = useState(true);
   const [conversationCount, setConversationCount] = useState(getConversationCount);
@@ -108,7 +108,7 @@ export default function Dashboard() {
     {
       label: "Map Locations",
       value: String(stats.locations_count),
-      sub: "Across 3 continents",
+      sub: "Across several continents",
       icon: Map,
     },
     {
