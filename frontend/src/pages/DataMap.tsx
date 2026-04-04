@@ -30,11 +30,9 @@ interface DataPoint {
   name: string;
   lat: number;
   lon: number;
-  year?: number;
+  year?: number;  // Only voyage locations have years
   event: string;
-  // All search terms to try — most specific first
   searchTerms: string[];
-  // Keywords that MUST appear in title or preview for doc to be considered relevant
   requiredKeywords: string[];
   category: "voyage" | "evidence";
 }
@@ -49,22 +47,16 @@ interface RelatedDoc {
   _relevanceScore: number;
 }
 
-// Patterns that are never relevant (gallery pages, off-topic)
 const EXCLUDE_TITLE_PATTERNS = [
   "gallery", "minoan", "atlantis", "fresco", "artist impression",
   "image gallery", "photo gallery", "cookie", "privacy policy",
 ];
 
-/**
- * Score a document's relevance to a data point.
- * Returns 0 if the document does not contain any required keyword.
- */
 function scoreDoc(doc: any, point: DataPoint): number {
   const title   = (doc.title || "").toLowerCase();
   const preview = (doc.content_preview || "").toLowerCase();
   const combined = title + " " + preview;
 
-  // Hard filter — if none of the required keywords appear anywhere, score = 0
   const hasRequired = point.requiredKeywords.some(
     (kw) => combined.includes(kw.toLowerCase())
   );
@@ -72,14 +64,12 @@ function scoreDoc(doc: any, point: DataPoint): number {
 
   let score = 0;
 
-  // Score by how many required keywords appear, weighted by position
   for (const kw of point.requiredKeywords) {
     const k = kw.toLowerCase();
     if (title.includes(k))   score += 15;
     if (preview.includes(k)) score += 5;
   }
 
-  // Additional score from all search terms
   for (const term of point.searchTerms) {
     const t = term.toLowerCase();
     const words = t.split(" ").filter((w) => w.length > 3);
@@ -89,7 +79,6 @@ function scoreDoc(doc: any, point: DataPoint): number {
     }
   }
 
-  // Backend similarity bonus (normalised)
   if (doc.similarity_score != null && doc.similarity_score > 0) {
     score += Math.min(doc.similarity_score * 3, 6);
   }
@@ -98,8 +87,6 @@ function scoreDoc(doc: any, point: DataPoint): number {
 }
 
 // ── ALL DATA POINTS ───────────────────────────────────────────────────────────
-// searchTerms: tried in order to find docs (most specific first)
-// requiredKeywords: at least one must appear in title or preview for a doc to qualify
 const ALL_DATA_POINTS: DataPoint[] = [
 
   // ══ CHINA ════════════════════════════════════════════════════════════
@@ -154,13 +141,13 @@ const ALL_DATA_POINTS: DataPoint[] = [
     requiredKeywords: ["siam", "thailand"],
   },
   {
-    id: "brunei", name: "Brunei", lat: 4.94, lon: 114.95, year: 1408, category: "evidence",
+    id: "brunei", name: "Brunei", lat: 4.94, lon: 114.95, category: "evidence",
     event: "Chinese porcelain and artefacts found indicating Ming dynasty trade contact.",
     searchTerms: ["Brunei Chinese porcelain", "Brunei Ming trade"],
     requiredKeywords: ["brunei", "borneo"],
   },
   {
-    id: "philippines", name: "Philippines", lat: 12.88, lon: 121.77, year: 1417, category: "evidence",
+    id: "philippines", name: "Philippines", lat: 12.88, lon: 121.77, category: "evidence",
     event: "Chinese ceramics and evidence of pre-colonial contact with Ming dynasty fleets.",
     searchTerms: ["Philippines Chinese ceramics", "Philippines Ming dynasty"],
     requiredKeywords: ["philippines", "filipino"],
@@ -180,13 +167,13 @@ const ALL_DATA_POINTS: DataPoint[] = [
     requiredKeywords: ["calicut", "kozhikode", "malabar"],
   },
   {
-    id: "cochin", name: "Cochin", lat: 9.93, lon: 76.27, year: 1417, category: "evidence",
+    id: "cochin", name: "Cochin", lat: 9.93, lon: 76.27, category: "evidence",
     event: "Indian trading port with strong evidence of Ming dynasty ceramic trade.",
     searchTerms: ["Cochin India Chinese trade", "Kochi Ming dynasty"],
     requiredKeywords: ["cochin", "kochi"],
   },
   {
-    id: "maldives", name: "Maldives", lat: 3.20, lon: 73.22, year: 1413, category: "evidence",
+    id: "maldives", name: "Maldives", lat: 3.20, lon: 73.22, category: "evidence",
     event: "Chinese vessels recorded visiting; artefacts found on the islands.",
     searchTerms: ["Maldives Chinese", "Maldives Ming trade"],
     requiredKeywords: ["maldives", "maldive"],
@@ -212,7 +199,7 @@ const ALL_DATA_POINTS: DataPoint[] = [
     requiredKeywords: ["jidda", "jeddah", "mecca", "red sea"],
   },
   {
-    id: "muscat", name: "Muscat", lat: 23.58, lon: 58.40, year: 1414, category: "evidence",
+    id: "muscat", name: "Muscat", lat: 23.58, lon: 58.40, category: "evidence",
     event: "Omani coast visited during Persian Gulf expeditions; Chinese coins found.",
     searchTerms: ["Muscat Oman Chinese", "Oman Ming coins"],
     requiredKeywords: ["muscat", "oman"],
@@ -244,13 +231,13 @@ const ALL_DATA_POINTS: DataPoint[] = [
     requiredKeywords: ["zanzibar"],
   },
   {
-    id: "sofala", name: "Sofala", lat: -20.17, lon: 34.70, year: 1421, category: "evidence",
+    id: "sofala", name: "Sofala", lat: -20.17, lon: 34.70, category: "evidence",
     event: "Menzies argues Chinese maps show detailed knowledge of the Mozambique coast.",
     searchTerms: ["Sofala Mozambique Chinese map", "Mozambique Ming"],
     requiredKeywords: ["sofala", "mozambique"],
   },
   {
-    id: "madagascar", name: "Madagascar", lat: -18.77, lon: 46.87, year: 1421, category: "evidence",
+    id: "madagascar", name: "Madagascar", lat: -18.77, lon: 46.87, category: "evidence",
     event: "Chinese ceramic fragments and genetic evidence suggest Ming-era contact with Madagascar.",
     searchTerms: ["Madagascar Chinese contact", "Madagascar Ming dynasty ceramics"],
     requiredKeywords: ["madagascar"],
@@ -258,31 +245,31 @@ const ALL_DATA_POINTS: DataPoint[] = [
 
   // ══ EUROPE ════════════════════════════════════════════════════════════
   {
-    id: "venice", name: "Venice", lat: 45.44, lon: 12.33, year: 1428, category: "evidence",
+    id: "venice", name: "Venice", lat: 45.44, lon: 12.33, category: "evidence",
     event: "Fra Mauro's 1450 world map shows detailed knowledge of Africa and Asia, possibly derived from Chinese charts brought via traders.",
     searchTerms: ["Venice Fra Mauro map Chinese", "Fra Mauro world map", "Venice Ming maps"],
     requiredKeywords: ["venice", "fra mauro"],
   },
   {
-    id: "portugal", name: "Portugal", lat: 38.72, lon: -9.14, year: 1421, category: "evidence",
+    id: "portugal", name: "Portugal", lat: 38.72, lon: -9.14, category: "evidence",
     event: "Menzies argues Portuguese cartographers had access to Chinese charts that aided Vasco da Gama's route around Africa.",
     searchTerms: ["Portugal Chinese maps Vasco da Gama", "Portuguese Ming charts", "Portugal 1421"],
     requiredKeywords: ["portugal", "portuguese", "vasco da gama"],
   },
   {
-    id: "greenland", name: "Greenland", lat: 72.00, lon: -42.00, year: 1421, category: "evidence",
+    id: "greenland", name: "Greenland", lat: 72.00, lon: -42.00, category: "evidence",
     event: "Menzies contends Chinese fleets rounded the Arctic and mapped Greenland before European contact.",
     searchTerms: ["Greenland Chinese Arctic", "Greenland Ming 1421"],
     requiredKeywords: ["greenland", "arctic"],
   },
   {
-    id: "dieppe-france", name: "Dieppe, France", lat: 49.93, lon: 1.08, year: 1450, category: "evidence",
+    id: "dieppe-france", name: "Dieppe, France", lat: 49.93, lon: 1.08, category: "evidence",
     event: "The Dieppe maps (1540s) show 'Java la Grande' — a large southern landmass Menzies argues is Australia, derived from Chinese originals.",
     searchTerms: ["Dieppe maps Java Grande Australia", "Dieppe France Chinese maps", "Dieppe cartography"],
     requiredKeywords: ["dieppe", "java la grande", "dieppe map"],
   },
   {
-    id: "piri-reis", name: "Piri Reis Map (Turkey)", lat: 40.98, lon: 28.85, year: 1513, category: "evidence",
+    id: "piri-reis", name: "Piri Reis Map (Turkey)", lat: 40.98, lon: 28.85, category: "evidence",
     event: "The Piri Reis map of 1513 appears to show Antarctica and the Americas. Menzies argues it was derived from Chinese charts.",
     searchTerms: ["Piri Reis map Chinese Antarctica", "Piri Reis 1513", "Ottoman map Chinese source"],
     requiredKeywords: ["piri reis", "piri re'is"],
@@ -290,37 +277,37 @@ const ALL_DATA_POINTS: DataPoint[] = [
 
   // ══ AUSTRALIA ════════════════════════════════════════════════════════
   {
-    id: "darwin", name: "Darwin", lat: -12.46, lon: 130.84, year: 1421, category: "evidence",
+    id: "darwin", name: "Darwin", lat: -12.46, lon: 130.84, category: "evidence",
     event: "Chinese artefacts and stone anchors found near Darwin; possible evidence of early contact with northern Australia.",
     searchTerms: ["Darwin Australia Chinese artefacts", "Northern Territory Chinese contact"],
     requiredKeywords: ["darwin", "northern territory"],
   },
   {
-    id: "broome", name: "Broome", lat: -17.96, lon: 122.23, year: 1421, category: "evidence",
+    id: "broome", name: "Broome", lat: -17.96, lon: 122.23, category: "evidence",
     event: "Beeswax figures and Chinese coins discovered on Australia's northwest coast near Broome.",
     searchTerms: ["Broome Australia Chinese beeswax", "Broome Chinese coins northwest"],
     requiredKeywords: ["broome", "beeswax"],
   },
   {
-    id: "perth", name: "Perth", lat: -31.95, lon: 115.86, year: 1421, category: "evidence",
+    id: "perth", name: "Perth", lat: -31.95, lon: 115.86, category: "evidence",
     event: "Research suggests Chinese fleets may have charted the southwest Australian coast, with stone inscriptions claimed near Mundaring.",
     searchTerms: ["Perth Australia Chinese", "Mundaring inscription Western Australia"],
     requiredKeywords: ["perth", "mundaring", "western australia"],
   },
   {
-    id: "sydney", name: "Sydney", lat: -33.87, lon: 151.21, year: 1421, category: "evidence",
+    id: "sydney", name: "Sydney", lat: -33.87, lon: 151.21, category: "evidence",
     event: "Claims of Chinese presence in eastern Australia appear in 1421 Foundation research.",
     searchTerms: ["Sydney Australia Chinese 1421", "Eastern Australia Ming"],
     requiredKeywords: ["sydney", "eastern australia"],
   },
   {
-    id: "adelaide", name: "Adelaide", lat: -34.93, lon: 138.60, year: 1421, category: "evidence",
+    id: "adelaide", name: "Adelaide", lat: -34.93, lon: 138.60, category: "evidence",
     event: "Southern Australian coast discussed in context of Chinese mapping of the continent.",
     searchTerms: ["Adelaide South Australia Chinese", "South Australia Ming mapping"],
     requiredKeywords: ["adelaide", "south australia"],
   },
   {
-    id: "java-la-grande", name: "Java la Grande (Australia)", lat: -22.00, lon: 135.00, year: 1421, category: "evidence",
+    id: "java-la-grande", name: "Java la Grande (Australia)", lat: -22.00, lon: 135.00, category: "evidence",
     event: "'Java la Grande' on the Dieppe maps is argued by Menzies to represent Australia, charted by Chinese fleets around 1421.",
     searchTerms: ["Java la Grande Australia Dieppe", "Australia Chinese mapping Menzies"],
     requiredKeywords: ["java la grande", "australia", "dieppe"],
@@ -328,13 +315,13 @@ const ALL_DATA_POINTS: DataPoint[] = [
 
   // ══ NEW ZEALAND ══════════════════════════════════════════════════════
   {
-    id: "northland-nz", name: "Northland, NZ", lat: -35.73, lon: 174.32, year: 1421, category: "evidence",
+    id: "northland-nz", name: "Northland, NZ", lat: -35.73, lon: 174.32, category: "evidence",
     event: "Waitaha oral traditions and stone structures in Northland suggest pre-Māori contact possibly linked to Chinese voyages.",
     searchTerms: ["New Zealand Waitaha Chinese", "Northland New Zealand Chinese contact"],
     requiredKeywords: ["new zealand", "waitaha", "northland"],
   },
   {
-    id: "south-island-nz", name: "South Island, NZ", lat: -44.00, lon: 170.50, year: 1421, category: "evidence",
+    id: "south-island-nz", name: "South Island, NZ", lat: -44.00, lon: 170.50, category: "evidence",
     event: "Genetic and archaeological evidence of Chinese contact with New Zealand before European arrival; wreck claims at Moeraki.",
     searchTerms: ["New Zealand Maori Chinese genetics", "South Island New Zealand Chinese", "Moeraki wreck"],
     requiredKeywords: ["new zealand", "maori", "moeraki"],
@@ -342,63 +329,83 @@ const ALL_DATA_POINTS: DataPoint[] = [
 
   // ══ SOUTH AMERICA ═════════════════════════════════════════════════════
   {
-    id: "ecuador", name: "Ecuador", lat: -1.83, lon: -78.18, year: 1421, category: "evidence",
+    id: "ecuador", name: "Ecuador", lat: -1.83, lon: -78.18, category: "evidence",
     event: "Pre-Columbian chickens (matching Chinese genetic profiles) and sweet potato evidence points to Pacific contact with Chinese fleets.",
     searchTerms: ["Ecuador Chinese chickens pre-Columbian", "Ecuador Pacific contact Ming"],
     requiredKeywords: ["ecuador", "pre-columbian chicken"],
   },
   {
-    id: "peru", name: "Peru", lat: -9.19, lon: -75.02, year: 1421, category: "evidence",
+    id: "peru", name: "Peru", lat: -9.19, lon: -75.02, category: "evidence",
     event: "Menzies argues Chinese navigators reached Peru; genetic and botanical evidence cited alongside Andean cultural parallels.",
     searchTerms: ["Peru Chinese Inca 1421", "Peru pre-Columbian Chinese", "Peru Ming contact"],
     requiredKeywords: ["peru", "inca"],
   },
   {
-    id: "brazil", name: "Brazil", lat: -14.24, lon: -51.93, year: 1421, category: "evidence",
+    id: "brazil", name: "Brazil", lat: -14.24, lon: -51.93, category: "evidence",
     event: "1421 Foundation research cites possible Chinese presence on the Brazilian coast before Cabral's 1500 arrival.",
     searchTerms: ["Brazil Chinese pre-Columbian", "Brazil Ming 1421", "Brazil Chinese coast"],
     requiredKeywords: ["brazil", "brazilian"],
   },
   {
-    id: "chile", name: "Chile", lat: -35.68, lon: -71.54, year: 1421, category: "evidence",
+    id: "chile", name: "Chile", lat: -35.68, lon: -71.54, category: "evidence",
     event: "Araucanian people of Chile show possible Asian genetic markers discussed in the 1421 hypothesis.",
     searchTerms: ["Chile Araucanian Chinese genetics", "Chile pre-Columbian Chinese"],
     requiredKeywords: ["chile", "araucanian"],
   },
   {
-    id: "patagonia", name: "Patagonia", lat: -50.00, lon: -69.00, year: 1421, category: "evidence",
+    id: "patagonia", name: "Patagonia", lat: -50.00, lon: -69.00, category: "evidence",
     event: "Menzies argues Chinese fleets reached southern South America and possibly rounded Cape Horn.",
     searchTerms: ["Patagonia Chinese Menzies", "Patagonia Ming 1421", "South America Chinese fleet"],
     requiredKeywords: ["patagonia", "cape horn"],
   },
 
+  // ══ NEW LOCATIONS: PARAGUAY, ARGENTINA, FALKLANDS ═════════════════════════
+  {
+    id: "paraguay", name: "Paraguay", lat: -23.44, lon: -58.44, category: "evidence",
+    event: "Annex 8 – Evidence of the Voyages of Chinese Fleets visiting Paraguay. Research suggests possible Ming dynasty contact with inland South America.",
+    searchTerms: ["Paraguay Chinese fleets", "Paraguay Ming contact", "Annex 8 Paraguay"],
+    requiredKeywords: ["paraguay", "annex 8", "chinese fleets"],
+  },
+  {
+    id: "argentina", name: "Argentina", lat: -34.60, lon: -58.38, category: "evidence",
+    event: "Annex 8 – Evidence of the Voyages of Chinese Fleets visiting Argentina. Archaeological and cartographic evidence suggests Chinese exploration of the Rio de la Plata region.",
+    searchTerms: ["Argentina Chinese fleets", "Argentina Ming contact", "Annex 8 Argentina", "Rio de la Plata Chinese"],
+    requiredKeywords: ["argentina", "annex 8", "rio de la plata"],
+  },
+  {
+    id: "falklands", name: "Falkland Islands", lat: -51.80, lon: -59.52, category: "evidence",
+    event: "Annex 8 – Evidence of the Voyages of Chinese Fleets visiting the Falkland Islands. The Falklands appear on pre-Columbian maps, which Menzies argues were derived from Chinese charts.",
+    searchTerms: ["Falkland Islands Chinese", "Falklands pre-Columbian map", "Annex 8 Falklands", "Malvinas Chinese"],
+    requiredKeywords: ["falkland", "malvinas", "annex 8"],
+  },
+
   // ══ NORTH AMERICA ═════════════════════════════════════════════════════
   {
-    id: "california", name: "California", lat: 36.78, lon: -119.42, year: 1421, category: "evidence",
+    id: "california", name: "California", lat: 36.78, lon: -119.42, category: "evidence",
     event: "Chinese brass plates and artefacts found along the California coast; Menzies argues Chinese fleets mapped North America.",
     searchTerms: ["California Chinese brass plates 1421", "California Ming contact pre-Columbian"],
     requiredKeywords: ["california"],
   },
   {
-    id: "mexico", name: "Mexico", lat: 23.63, lon: -102.55, year: 1421, category: "evidence",
+    id: "mexico", name: "Mexico", lat: 23.63, lon: -102.55, category: "evidence",
     event: "Evidence of pre-Columbian contact including Chinese-style stone anchors off the Mexican coast.",
     searchTerms: ["Mexico Chinese pre-Columbian", "Mexico Ming 1421"],
     requiredKeywords: ["mexico", "mexican"],
   },
   {
-    id: "caribbean", name: "Caribbean", lat: 18.70, lon: -70.16, year: 1421, category: "evidence",
+    id: "caribbean", name: "Caribbean", lat: 18.70, lon: -70.16, category: "evidence",
     event: "Menzies cites Chinese maps showing detailed Caribbean island outlines before Columbus.",
     searchTerms: ["Caribbean Chinese maps pre-Columbian", "Caribbean Ming 1421"],
     requiredKeywords: ["caribbean"],
   },
   {
-    id: "rhode-island", name: "Rhode Island, USA", lat: 41.49, lon: -71.31, year: 1421, category: "evidence",
+    id: "rhode-island", name: "Rhode Island, USA", lat: 41.49, lon: -71.31, category: "evidence",
     event: "The Newport Tower in Rhode Island is claimed by Menzies to be a Chinese astronomical observatory built during the 1421 voyages.",
     searchTerms: ["Newport Tower Rhode Island Chinese", "Rhode Island Chinese observatory 1421"],
     requiredKeywords: ["newport tower", "rhode island"],
   },
   {
-    id: "british-columbia", name: "British Columbia", lat: 49.28, lon: -123.12, year: 1421, category: "evidence",
+    id: "british-columbia", name: "British Columbia", lat: 49.28, lon: -123.12, category: "evidence",
     event: "Menzies argues Chinese settlers remained in the Pacific Northwest; linguistic links to Haida Gwaii claimed.",
     searchTerms: ["British Columbia Chinese settlement 1421", "Haida Chinese Menzies"],
     requiredKeywords: ["british columbia", "haida", "pacific northwest"],
@@ -406,13 +413,13 @@ const ALL_DATA_POINTS: DataPoint[] = [
 
   // ══ ANTARCTICA ════════════════════════════════════════════════════════
   {
-    id: "antarctica-west", name: "West Antarctica", lat: -75.00, lon: -90.00, year: 1421, category: "evidence",
+    id: "antarctica-west", name: "West Antarctica", lat: -75.00, lon: -90.00, category: "evidence",
     event: "Menzies argues Hong Bao's fleet charted the Antarctic coastline in 1421, visible on the Piri Reis map of 1513.",
     searchTerms: ["Antarctica Chinese Piri Reis 1421", "Antarctic coastline Chinese map Hong Bao"],
     requiredKeywords: ["antarctica", "antarctic", "hong bao", "piri reis"],
   },
   {
-    id: "antarctica-east", name: "East Antarctica", lat: -72.00, lon: 75.00, year: 1421, category: "evidence",
+    id: "antarctica-east", name: "East Antarctica", lat: -72.00, lon: 75.00, category: "evidence",
     event: "Menzies contends Zhou Man's fleet sailed Antarctic waters and knowledge was passed to later European cartographers.",
     searchTerms: ["East Antarctica Chinese Zhou Man", "Antarctica Ming fleet 1421"],
     requiredKeywords: ["antarctica", "antarctic", "zhou man"],
@@ -435,7 +442,6 @@ export default function DataMap() {
       const seenIds = new Set<string>();
       let allResults: any[] = [];
 
-      // Try each search term in order
       for (const term of point.searchTerms) {
         try {
           const res = await searchDocuments(term, 20);
@@ -448,17 +454,15 @@ export default function DataMap() {
         } catch {}
       }
 
-      // Hard filter 1: remove gallery/off-topic pages
       const filtered = allResults.filter((doc) => {
         const t = (doc.title || "").toLowerCase();
         return !EXCLUDE_TITLE_PATTERNS.some((p) => t.includes(p));
       });
 
-      // Score each doc — only keep those with a meaningful score
       const scored: RelatedDoc[] = [];
       for (const doc of filtered) {
         const s = scoreDoc(doc, point);
-        if (s > 0) {  // strict: must have at least one required keyword match
+        if (s > 0) {
           scored.push({
             id:              doc.id,
             title:           doc.title,
@@ -471,7 +475,6 @@ export default function DataMap() {
         }
       }
 
-      // Deduplicate by title
       const seenTitles = new Set<string>();
       const unique = scored.filter((doc) => {
         const key = doc.title.trim().toLowerCase();
@@ -480,7 +483,6 @@ export default function DataMap() {
         return true;
       });
 
-      // Sort most relevant first, cap at 8
       unique.sort((a, b) => b._relevanceScore - a._relevanceScore);
       setRelatedDocs(unique.slice(0, 8));
     } catch {
