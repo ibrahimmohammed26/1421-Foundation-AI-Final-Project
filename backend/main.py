@@ -31,6 +31,8 @@ app = FastAPI(title="1421 Foundation API", version="1.0.0")
 
 VERCEL_ORIGIN = "https://1421-foundation-ai-final-project.vercel.app"
 
+# ── CORS ──────────────────────────────────────────────────────────────
+
 class CORSEverythingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if request.method == "OPTIONS":
@@ -60,6 +62,7 @@ DATA_DIR = Path(os.getenv("DATA_DIR", str(BASE_DIR.parent / "data")))
 FAISS_DIR = DATA_DIR / "vector_databases" / "main_index"
 
 # ── Email ─────────────────────────────────────────────────────────────
+
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 NOTIFY_EMAIL   = os.getenv("NOTIFY_EMAIL", "")
 
@@ -102,6 +105,7 @@ RULES:
 2. Do NOT fabricate [Document X] citations — there are no documents to cite.
 3. Be clear, factual, and academic. Write in clear UK English."""
 
+# ── LLM / Embeddings ─────────────────────────────────────────────────
 
 def get_llm():
     return ChatOpenAI(
@@ -117,7 +121,7 @@ def get_embeddings_fn():
         api_key=os.getenv("OPENAI_API_KEY"),
     )
 
-# ── Models ────────────────────────────────────────────────────────────
+# ── Pydantic models ───────────────────────────────────────────────────
 
 class ChatRequest(BaseModel):
     messages: list[dict]
@@ -214,7 +218,7 @@ def _meta_to_doc(idx: int, text: str, meta: dict, doc_id) -> dict:
             break
     if not title:
         first = clean.split(".")[0].strip()
-        title = first[:200] if first else f"Document {idx+1}"
+        title = first[:200] if first else f"Document {idx + 1}"
     return {
         "id":               str(doc_id),
         "title":            title,
@@ -229,7 +233,7 @@ def _meta_to_doc(idx: int, text: str, meta: dict, doc_id) -> dict:
         "url":              meta.get("url", "") or "",
         "page_number":      meta.get("page", None),
         "similarity_score": None,
-        "_relevance_score": 0.0,  # internal ranking score
+        "_relevance_score": 0.0,
     }
 
 def load_knowledge_base():
@@ -240,67 +244,53 @@ def load_knowledge_base():
 
     if not meta_path.exists():
         print(f"ERROR: {meta_path} not found")
-        print(f"Please ensure faiss_metadata.pkl is in {FAISS_DIR}")
         return
 
-    # -----------------------
-    # Load metadata
-    # -----------------------
     try:
         with open(meta_path, "rb") as f:
             data = pickle.load(f)
 
+        # Support both the new dict format and the old flat-list format
         if isinstance(data, dict):
             documents = data.get("documents", [])
             metadatas = data.get("metadatas", [])
-            print(f"Loaded dictionary format: {len(documents)} documents")
+            print(f"Dict format: {len(documents)} docs, {len(metadatas)} metadatas")
         elif isinstance(data, list):
-            print("Legacy list format detected — converting...")
+            print("Legacy list format — converting")
             metadatas = data
-            documents = [f"Document {i+1}" for i in range(len(metadatas))]
+            documents = [f"Document {i + 1}" for i in range(len(metadatas))]
         else:
-            print(f"Unexpected metadata format: {type(data)}")
+            print(f"Unexpected pickle format: {type(data)}")
             return
 
-        # Fix mismatch sizes
-        if len(documents) != len(metadatas):
-            min_len = min(len(documents), len(metadatas))
-            documents = documents[:min_len]
-            metadatas = metadatas[:min_len]
+        # Guard against mismatched lengths
+        n = min(len(documents), len(metadatas))
+        documents = documents[:n]
+        metadatas = metadatas[:n]
 
-        # Build document store
-        _docs_store = []
-        for i in range(len(documents)):
-            _docs_store.append(_meta_to_doc(
-                i,
-                documents[i],
-                metadatas[i],
-                i + 1
-            ))
-
-        print(f"Loaded {len(_docs_store)} documents into knowledge base")
+        _docs_store = [
+            _meta_to_doc(i, documents[i], metadatas[i], i + 1)
+            for i in range(n)
+        ]
+        print(f"OK: Loaded {len(_docs_store)} documents")
 
     except Exception as e:
         print(f"Error loading metadata: {e}")
-        import traceback
-        traceback.print_exc()
+        import traceback; traceback.print_exc()
         return
 
-    # -----------------------
-    # Load FAISS index
-    # -----------------------
     if index_path.exists():
         try:
             _vector_index = faiss.read_index(str(index_path))
-            print(f"Loaded FAISS index: {_vector_index.ntotal} vectors")
+            print(f"OK: FAISS index loaded — {_vector_index.ntotal} vectors")
         except Exception as e:
             print(f"Error loading FAISS index: {e}")
             _vector_index = None
     else:
-        print(f"FAISS index not found at {index_path}")
+        print(f"WARNING: FAISS index not found at {index_path}")
         _vector_index = None
 
-    print("Knowledge base initialization complete")
+    print("Knowledge base ready")
 
 # ── Search ────────────────────────────────────────────────────────────
 
@@ -317,13 +307,14 @@ def search_semantic(query: str, top_k: int = 5) -> List[dict]:
         for i, idx in enumerate(indices[0]):
             if 0 <= idx < len(_docs_store):
                 doc = dict(_docs_store[idx])
-                # Lower L2 distance = more similar; convert to positive relevance
                 doc["similarity_score"] = float(distances[0][i])
+                # Lower L2 distance = more similar → higher relevance
                 doc["_relevance_score"] = max(0.0, 10.0 - float(distances[0][i]))
                 results.append(doc)
         return results
     except Exception as e:
-        print(f"Semantic search error: {e}"); return []
+        print(f"Semantic search error: {e}")
+        return []
 
 def search_keyword(query: str, limit: int = 50) -> List[dict]:
     if not _docs_store:
@@ -359,16 +350,12 @@ def search_by_title(q: str, limit: int = 5) -> List[dict]:
         if q in title or title in q:
             d = dict(doc)
             d["similarity_score"] = 1.0
-            d["_relevance_score"] = 20.0  # exact title match gets highest score
+            d["_relevance_score"] = 20.0
             results.append(d)
     results.sort(key=lambda x: len(x["title"]))
     return results[:limit]
 
 def _deduplicate_and_rank(docs: List[dict]) -> List[dict]:
-    """
-    Deduplicate by title, then sort by _relevance_score descending
-    so the most relevant documents come first.
-    """
     seen: set = set()
     unique = []
     for d in docs:
@@ -376,7 +363,6 @@ def _deduplicate_and_rank(docs: List[dict]) -> List[dict]:
         if key and key not in seen:
             seen.add(key)
             unique.append(d)
-    # Sort: highest relevance score first
     unique.sort(key=lambda x: x.get("_relevance_score", 0.0), reverse=True)
     return unique
 
@@ -417,87 +403,49 @@ def _expand_query(query: str) -> List[str]:
         if topic in q or any(w in q for w in topic.split()):
             expansions.extend(syns)
 
-    stop = {"describe","explain","what","how","did","the","and","for","tell","about","give","me","does","say"}
+    stop = {"describe", "explain", "what", "how", "did", "the", "and", "for",
+            "tell", "about", "give", "me", "does", "say"}
     expansions.extend([w for w in core.split() if len(w) > 4 and w not in stop][:5])
     return list(dict.fromkeys(expansions))
 
-
-def filter_relevant_sources(sources: List[dict], max_sources: int = 5, relevance_threshold: float = 0.3) -> List[dict]:
+def _filter_relevant(docs: List[dict], max_docs: int = 5, threshold: float = 0.3) -> List[dict]:
     """
-    Filter sources to only include relevant ones based on relevance_score.
-    
-    Args:
-        sources: List of source documents with _relevance_score
-        max_sources: Maximum number of sources to return (default 5)
-        relevance_threshold: Minimum relevance score to keep (0-1 scale)
-    
-    Returns:
-        Filtered list of sources, sorted by relevance (highest first)
+    Keep only docs whose normalised relevance score meets the threshold.
+    Always returns at least 1 doc if any exist.
+    Caps at max_docs.
     """
-    if not sources:
+    if not docs:
         return []
-    
-    filtered = []
-    for src in sources:
-        score = src.get("_relevance_score", 0)
-        
-        # Normalize score based on type
-        # For semantic search: scores are 0-10 (higher is better)
-        # For keyword search: scores can be 0-100+
-        # For title match: score is 20
-        
-        # Normalize to 0-1 scale for threshold comparison
-        normalized_score = 0
-        if score >= 20:  # Title match
-            normalized_score = 1.0
-        elif score >= 10:  # Very high keyword match
-            normalized_score = 0.9
-        elif score >= 5:   # Good match
-            normalized_score = 0.7
-        elif score >= 2:   # Moderate match
-            normalized_score = 0.5
-        elif score >= 1:   # Low match
-            normalized_score = 0.3
-        else:
-            normalized_score = score / 10 if score < 10 else score / 100
-        
-        # Keep sources above threshold
-        if normalized_score >= relevance_threshold:
-            filtered.append(src)
-    
-    # Also keep at least 1 source if any exist (don't return empty if there are sources)
-    if not filtered and sources:
-        # Keep the top 1 source even if below threshold
-        filtered = [sources[0]]
-    
-    # Limit to max_sources
-    if len(filtered) > max_sources:
-        filtered = filtered[:max_sources]
-    
-    return filtered
 
+    def normalise(score: float) -> float:
+        if score >= 20:  return 1.0   # exact title match
+        if score >= 10:  return 0.9
+        if score >= 5:   return 0.7
+        if score >= 2:   return 0.5
+        if score >= 1:   return 0.3
+        return score / 10.0
+
+    filtered = [d for d in docs if normalise(d.get("_relevance_score", 0)) >= threshold]
+    if not filtered:
+        filtered = [docs[0]]  # always return at least one
+    return filtered[:max_docs]
 
 def get_relevant_context(query: str, top_k: int = 10) -> tuple:
-    """
-    Multi-strategy search returning documents ranked by relevance score
-    (most relevant first). Returns dynamic number of sources based on relevance.
-    """
     docs_by_id: dict = {}
     expanded = _expand_query(query)
     print(f"Query: '{query}' → {len(expanded)} variants")
 
-    # Strategy 1: Semantic search — gives a relevance score per result
+    # Semantic search across all expansions
     for sq in expanded[:12]:
         for d in search_semantic(sq, top_k):
             did = d["id"]
             if did not in docs_by_id:
                 docs_by_id[did] = d
             else:
-                # Keep the highest relevance score across multiple searches
                 if d["_relevance_score"] > docs_by_id[did]["_relevance_score"]:
                     docs_by_id[did]["_relevance_score"] = d["_relevance_score"]
 
-    # Strategy 2: Keyword search — good for exact term matches
+    # Keyword search
     for d in search_keyword(query, top_k * 2):
         did = d["id"]
         if did not in docs_by_id:
@@ -513,7 +461,7 @@ def get_relevant_context(query: str, top_k: int = 10) -> tuple:
             else:
                 docs_by_id[did]["_relevance_score"] += d["_relevance_score"] * 0.3
 
-    # Strategy 3: Title search
+    # Title search for quoted terms
     m = re.search(r'["\'](.+?)["\']', query)
     if m:
         for d in search_by_title(m.group(1)):
@@ -523,19 +471,17 @@ def get_relevant_context(query: str, top_k: int = 10) -> tuple:
             else:
                 docs_by_id[did]["_relevance_score"] += 20.0
 
-    docs = _deduplicate_and_rank(list(docs_by_id.values()))
-    
-    # ✅ NEW: Filter to only relevant sources (dynamic, not fixed number)
-    relevant_docs = filter_relevant_sources(docs, max_sources=5, relevance_threshold=0.3)
-    
-    print(f"Found {len(docs)} total docs → {len(relevant_docs)} relevant docs. Top: {[d['title'][:50] for d in relevant_docs[:3]]}")
+    all_docs = _deduplicate_and_rank(list(docs_by_id.values()))
+    selected = _filter_relevant(all_docs, max_docs=5, threshold=0.3)
 
-    if not relevant_docs:
+    print(f"Found {len(all_docs)} → kept {len(selected)} relevant. "
+          f"Top: {[d['title'][:50] for d in selected[:3]]}")
+
+    if not selected:
         return "", []
 
-    # Build context with the relevant docs only
     context = "Relevant documents from the 1421 Foundation knowledge base:\n\n"
-    for i, doc in enumerate(relevant_docs, 1):
+    for i, doc in enumerate(selected, 1):
         context += f"[Document {i}] {doc['title']}"
         if doc.get("year") and doc["year"] > 0:
             context += f" ({doc['year']})"
@@ -547,8 +493,7 @@ def get_relevant_context(query: str, top_k: int = 10) -> tuple:
             context += f"{full[:4000]}\n"
         context += "\n"
 
-    return context, relevant_docs
-
+    return context, selected
 
 def get_comparative_context(query: str, top_k: int = 12) -> tuple:
     docs_by_id: dict = {}
@@ -556,13 +501,17 @@ def get_comparative_context(query: str, top_k: int = 12) -> tuple:
     for sep in [" to ", " with ", " and ", " versus ", " vs "]:
         parts = q.replace("compare", "").split(sep)
         if len(parts) >= 2:
-            for d in search_semantic(parts[0].strip(), top_k // 2) + search_semantic(parts[1].strip(), top_k // 2):
+            for d in (search_semantic(parts[0].strip(), top_k // 2) +
+                      search_semantic(parts[1].strip(), top_k // 2)):
                 did = d["id"]
                 if did not in docs_by_id:
                     docs_by_id[did] = d
                 else:
-                    docs_by_id[did]["_relevance_score"] = max(docs_by_id[did]["_relevance_score"], d["_relevance_score"])
+                    docs_by_id[did]["_relevance_score"] = max(
+                        docs_by_id[did]["_relevance_score"], d["_relevance_score"]
+                    )
             break
+
     for d in search_semantic(query, top_k) + search_keyword(query, top_k):
         did = d["id"]
         if did not in docs_by_id:
@@ -570,16 +519,14 @@ def get_comparative_context(query: str, top_k: int = 12) -> tuple:
         else:
             docs_by_id[did]["_relevance_score"] += d["_relevance_score"] * 0.3
 
-    docs = _deduplicate_and_rank(list(docs_by_id.values()))
-    
-    # ✅ NEW: Filter to only relevant sources for comparative queries too
-    relevant_docs = filter_relevant_sources(docs, max_sources=6, relevance_threshold=0.25)
-    
-    if not relevant_docs:
+    all_docs = _deduplicate_and_rank(list(docs_by_id.values()))
+    selected = _filter_relevant(all_docs, max_docs=6, threshold=0.25)
+
+    if not selected:
         return "", []
 
     context = "Relevant documents from the 1421 Foundation knowledge base:\n\n"
-    for i, doc in enumerate(relevant_docs, 1):
+    for i, doc in enumerate(selected, 1):
         context += f"[Document {i}] {doc['title']}"
         if doc.get("year") and doc["year"] > 0:
             context += f" ({doc['year']})"
@@ -590,9 +537,12 @@ def get_comparative_context(query: str, top_k: int = 12) -> tuple:
         if full:
             context += f"{full[:3000]}\n"
         context += "\n"
-    return context, relevant_docs
+    return context, selected
 
 # ── Routes ────────────────────────────────────────────────────────────
+# IMPORTANT: All /api/documents/... literal sub-paths MUST be declared
+# BEFORE /api/documents/{doc_id}, otherwise FastAPI matches {doc_id}
+# first and the literal routes are never reached.
 
 @app.get("/")
 def root():
@@ -607,8 +557,11 @@ async def get_documents(limit: int = Query(default=10000, le=10000), offset: int
     if not _docs_store:
         return {"documents": [], "total": 0, "limit": limit, "offset": offset}
     paged = _docs_store[offset: offset + limit]
-    safe  = [{k: v for k, v in d.items() if k not in ("content_full", "_relevance_score")} for d in paged]
+    safe  = [{k: v for k, v in d.items() if k not in ("content_full", "_relevance_score")}
+             for d in paged]
     return {"documents": safe, "total": len(_docs_store), "limit": limit, "offset": offset}
+
+# ── These three MUST come before /api/documents/{doc_id} ─────────────
 
 @app.get("/api/documents/search")
 async def search_documents_endpoint(q: str, limit: int = 50):
@@ -617,16 +570,46 @@ async def search_documents_endpoint(q: str, limit: int = 50):
     if q.strip().isdigit():
         for d in _docs_store:
             if d["id"] == q.strip():
-                exact = dict(d); exact["similarity_score"] = 1.0
-                results.append(exact); seen.add(d["id"]); break
+                exact = dict(d)
+                exact["similarity_score"] = 1.0
+                results.append(exact)
+                seen.add(d["id"])
+                break
     for d in search_by_title(q, 5):
-        if d["id"] not in seen: results.append(d); seen.add(d["id"])
+        if d["id"] not in seen:
+            results.append(d); seen.add(d["id"])
     for d in search_semantic(q, min(limit, 10)):
-        if d["id"] not in seen: results.append(d); seen.add(d["id"])
+        if d["id"] not in seen:
+            results.append(d); seen.add(d["id"])
     for d in search_keyword(q, limit):
-        if d["id"] not in seen: results.append(d); seen.add(d["id"])
-    final = [{k: v for k, v in d.items() if k not in ("content_full", "_relevance_score")} for d in results[:limit]]
+        if d["id"] not in seen:
+            results.append(d); seen.add(d["id"])
+    final = [
+        {k: v for k, v in d.items() if k not in ("content_full", "_relevance_score")}
+        for d in results[:limit]
+    ]
     return {"results": final, "total": len(final), "query": q}
+
+@app.get("/api/documents/types")
+async def get_document_types():
+    return {"types": sorted({
+        d["type"] for d in _docs_store if d["type"] and d["type"] != "unknown"
+    })}
+
+@app.get("/api/documents/years")
+async def get_document_years():
+    return {"years": sorted(
+        {d["year"] for d in _docs_store if d["year"] and d["year"] > 0},
+        reverse=True
+    )}
+
+@app.get("/api/documents/authors")
+async def get_document_authors():
+    return {"authors": sorted(
+        {d["author"] for d in _docs_store if d["author"] and d["author"] != "Unknown"}
+    )}
+
+# ── This MUST come AFTER all /api/documents/... literal routes ────────
 
 @app.get("/api/documents/{doc_id}")
 async def get_document_by_id(doc_id: str):
@@ -635,17 +618,7 @@ async def get_document_by_id(doc_id: str):
             return {k: v for k, v in d.items() if k not in ("content_full", "_relevance_score")}
     raise HTTPException(status_code=404, detail="Document not found")
 
-@app.get("/api/documents/types")
-async def get_document_types():
-    return {"types": sorted({d["type"] for d in _docs_store if d["type"] and d["type"] != "unknown"})}
-
-@app.get("/api/documents/years")
-async def get_document_years():
-    return {"years": sorted({d["year"] for d in _docs_store if d["year"] and d["year"] > 0}, reverse=True)}
-
-@app.get("/api/documents/authors")
-async def get_document_authors():
-    return {"authors": sorted({d["author"] for d in _docs_store if d["author"] and d["author"] != "Unknown"})}
+# ── Chat routes ───────────────────────────────────────────────────────
 
 def _build_system(context: str, use_web_fallback: bool) -> str:
     if use_web_fallback:
@@ -688,7 +661,6 @@ async def chat(req: ChatRequest):
 
     try:
         response = llm.invoke(_to_lc(_build_system(context, used_web_fallback), req.messages))
-        # Sources are already filtered and ranked by relevance from get_relevant_context
         clean_sources = [
             {
                 "title":           d["title"],
@@ -716,27 +688,42 @@ async def chat_stream(req: ChatRequest):
     if req.use_documents and last:
         context, _ = get_relevant_context(last, top_k=10)
     lc_messages = _to_lc(_build_system(context, not bool(context)), req.messages)
+
     async def generate():
         try:
             async for chunk in llm.astream(lc_messages):
                 if chunk.content:
-                    yield f"data: {chunk.content.replace(chr(10), chr(92)+'n')}\n\n"
+                    safe = chunk.content.replace("\n", "\\n")
+                    yield f"data: {safe}\n\n"
             yield "data: [DONE]\n\n"
         except Exception as e:
             yield f"data: ERROR: {str(e)}\n\n"
-    return StreamingResponse(generate(), media_type="text/event-stream",
-        headers={"Access-Control-Allow-Origin": VERCEL_ORIGIN,
-                 "Access-Control-Allow-Credentials": "true",
-                 "Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Access-Control-Allow-Origin":      VERCEL_ORIGIN,
+            "Access-Control-Allow-Credentials": "true",
+            "Cache-Control":                    "no-cache",
+            "X-Accel-Buffering":                "no",
+        }
+    )
+
+# ── Misc routes ───────────────────────────────────────────────────────
 
 @app.get("/api/debug/rag")
 async def debug_rag(q: str = "Ming dynasty naval technology"):
     context, docs = get_relevant_context(q, top_k=10)
-    return {"query": q, "docs_found": len(docs),
-            "ranked_docs": [{"rank": i+1, "title": d["title"], "score": round(d.get("_relevance_score",0),2)}
-                            for i, d in enumerate(docs)],
-            "faiss_loaded": _vector_index is not None,
-            "store_size": len(_docs_store)}
+    return {
+        "query":        q,
+        "docs_found":   len(docs),
+        "ranked_docs":  [{"rank": i + 1, "title": d["title"],
+                          "score": round(d.get("_relevance_score", 0), 2)}
+                         for i, d in enumerate(docs)],
+        "faiss_loaded": _vector_index is not None,
+        "store_size":   len(_docs_store),
+    }
 
 @app.post("/api/feedback")
 async def submit_feedback(req: FeedbackRequest):
@@ -744,16 +731,22 @@ async def submit_feedback(req: FeedbackRequest):
     feedback_path = DATA_DIR / "feedback.json"
     try:
         existing = json.load(open(feedback_path)) if feedback_path.exists() else []
-        existing.append({"name": req.name or "Anonymous", "email": req.email,
-                          "feedback_type": req.feedback_type, "message": req.message,
-                          "created_at": datetime.now().isoformat()})
+        existing.append({
+            "name":          req.name or "Anonymous",
+            "email":         req.email,
+            "feedback_type": req.feedback_type,
+            "message":       req.message,
+            "created_at":    datetime.now().isoformat(),
+        })
         json.dump(existing, open(feedback_path, "w"), indent=2)
     except Exception as e:
         print(f"Feedback store error: {e}")
     loop = asyncio.get_event_loop()
     with concurrent.futures.ThreadPoolExecutor() as pool:
-        loop.run_in_executor(pool, send_feedback_email, req.name or "Anonymous",
-                             req.email, req.feedback_type, req.message)
+        loop.run_in_executor(
+            pool, send_feedback_email,
+            req.name or "Anonymous", req.email, req.feedback_type, req.message
+        )
     return {"status": "ok"}
 
 @app.get("/api/stats")
@@ -765,15 +758,20 @@ def get_stats():
             feedback_count = len(json.load(open(fp)))
     except Exception:
         pass
-    return {"feedback_count": feedback_count, "locations_count": len(VOYAGE_LOCATIONS),
-            "documents_count": len(_docs_store) or 347}
+    return {
+        "feedback_count":  feedback_count,
+        "locations_count": len(VOYAGE_LOCATIONS),
+        "documents_count": len(_docs_store) or 347,
+    }
 
 @app.get("/api/test-db")
 async def test_db():
-    return {"store_size": len(_docs_store),
-            "faiss_loaded": _vector_index is not None,
-            "faiss_vectors": _vector_index.ntotal if _vector_index else 0,
-            "sample": [{"id": d["id"], "title": d["title"]} for d in _docs_store[:5]]}
+    return {
+        "store_size":    len(_docs_store),
+        "faiss_loaded":  _vector_index is not None,
+        "faiss_vectors": _vector_index.ntotal if _vector_index else 0,
+        "sample":        [{"id": d["id"], "title": d["title"]} for d in _docs_store[:5]],
+    }
 
 @app.on_event("startup")
 def init_app():
