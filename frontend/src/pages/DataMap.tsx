@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { searchDocuments } from "@/lib/api";
-import { FileText, X } from "lucide-react";
+import { FileText, X, Search } from "lucide-react";
 
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -30,7 +30,7 @@ interface DataPoint {
   name: string;
   lat: number;
   lon: number;
-  year?: number;  // Only voyage locations have years
+  year?: number;
   event: string;
   searchTerms: string[];
   requiredKeywords: string[];
@@ -53,8 +53,8 @@ const EXCLUDE_TITLE_PATTERNS = [
 ];
 
 function scoreDoc(doc: any, point: DataPoint): number {
-  const title   = (doc.title || "").toLowerCase();
-  const preview = (doc.content_preview || "").toLowerCase();
+  const title    = (doc.title || "").toLowerCase();
+  const preview  = (doc.content_preview || "").toLowerCase();
   const combined = title + " " + preview;
 
   const hasRequired = point.requiredKeywords.some(
@@ -63,367 +63,254 @@ function scoreDoc(doc: any, point: DataPoint): number {
   if (!hasRequired) return 0;
 
   let score = 0;
-
   for (const kw of point.requiredKeywords) {
     const k = kw.toLowerCase();
     if (title.includes(k))   score += 15;
     if (preview.includes(k)) score += 5;
   }
-
   for (const term of point.searchTerms) {
-    const t = term.toLowerCase();
-    const words = t.split(" ").filter((w) => w.length > 3);
+    const words = term.toLowerCase().split(" ").filter((w) => w.length > 3);
     for (const word of words) {
       if (title.includes(word))   score += 4;
       if (preview.includes(word)) score += 1;
     }
   }
-
   if (doc.similarity_score != null && doc.similarity_score > 0) {
     score += Math.min(doc.similarity_score * 3, 6);
   }
-
   return score;
 }
 
-// ── ALL DATA POINTS ───────────────────────────────────────────────────────────
 const ALL_DATA_POINTS: DataPoint[] = [
-
   // ══ CHINA ════════════════════════════════════════════════════════════
-  {
-    id: "nanjing", name: "Nanjing", lat: 32.06, lon: 118.80, year: 1403, category: "voyage",
+  { id: "nanjing", name: "Nanjing", lat: 32.06, lon: 118.80, year: 1403, category: "voyage",
     event: "Yongle Emperor commissions the treasure fleet; first voyage departs 1405 with 317 ships and 28,000 men.",
     searchTerms: ["Nanjing treasure fleet", "Nanjing Zheng He", "treasure fleet departs"],
-    requiredKeywords: ["nanjing", "treasure fleet", "first voyage"],
-  },
-  {
-    id: "quanzhou", name: "Quanzhou", lat: 24.87, lon: 118.68, year: 1405, category: "voyage",
+    requiredKeywords: ["nanjing", "treasure fleet", "first voyage"] },
+  { id: "quanzhou", name: "Quanzhou", lat: 24.87, lon: 118.68, year: 1405, category: "voyage",
     event: "Major departure port and home of the world's largest medieval shipyard.",
     searchTerms: ["Quanzhou shipyard", "Quanzhou port", "Chinese shipyard"],
-    requiredKeywords: ["quanzhou", "shipyard", "departure port"],
-  },
-  {
-    id: "beijing", name: "Beijing", lat: 39.90, lon: 116.41, year: 1421, category: "voyage",
+    requiredKeywords: ["quanzhou", "shipyard", "departure port"] },
+  { id: "beijing", name: "Beijing", lat: 39.90, lon: 116.41, year: 1421, category: "voyage",
     event: "Imperial capital under the Yongle Emperor; seat of power during all seven voyages.",
     searchTerms: ["Beijing Yongle Emperor", "Ming court Beijing", "Forbidden City"],
-    requiredKeywords: ["beijing", "yongle", "ming court", "imperial"],
-  },
+    requiredKeywords: ["beijing", "yongle", "ming court", "imperial"] },
 
   // ══ SOUTHEAST ASIA ═══════════════════════════════════════════════════
-  {
-    id: "champa", name: "Champa", lat: 10.82, lon: 106.63, year: 1405, category: "voyage",
+  { id: "champa", name: "Champa", lat: 10.82, lon: 106.63, year: 1405, category: "voyage",
     event: "First stop on Voyage 1 — Southeast Asian ally (modern Vietnam).",
     searchTerms: ["Champa Vietnam Zheng He", "Champa kingdom", "Champa voyage"],
-    requiredKeywords: ["champa", "vietnam"],
-  },
-  {
-    id: "java", name: "Java", lat: -7.61, lon: 110.71, year: 1406, category: "voyage",
+    requiredKeywords: ["champa", "vietnam"] },
+  { id: "java", name: "Java", lat: -7.61, lon: 110.71, year: 1406, category: "voyage",
     event: "Diplomatic missions conducted on Java during Voyage 1.",
     searchTerms: ["Java Zheng He", "Java Ming dynasty", "Java diplomatic"],
-    requiredKeywords: ["java"],
-  },
-  {
-    id: "sumatra", name: "Sumatra", lat: -0.59, lon: 101.34, year: 1406, category: "voyage",
+    requiredKeywords: ["java"] },
+  { id: "sumatra", name: "Sumatra", lat: -0.59, lon: 101.34, year: 1406, category: "voyage",
     event: "Strategic trading post established at Palembang, Sumatra.",
     searchTerms: ["Sumatra Palembang Zheng He", "Sumatra Ming", "Palembang trading"],
-    requiredKeywords: ["sumatra", "palembang"],
-  },
-  {
-    id: "malacca", name: "Malacca", lat: 2.19, lon: 102.25, year: 1406, category: "voyage",
+    requiredKeywords: ["sumatra", "palembang"] },
+  { id: "malacca", name: "Malacca", lat: 2.19, lon: 102.25, year: 1406, category: "voyage",
     event: "Key port established; local piracy suppressed by Zheng He's fleet.",
     searchTerms: ["Malacca Zheng He", "Malacca strait", "Melaka Ming"],
-    requiredKeywords: ["malacca", "melaka"],
-  },
-  {
-    id: "siam", name: "Siam", lat: 13.74, lon: 100.52, year: 1408, category: "voyage",
+    requiredKeywords: ["malacca", "melaka"] },
+  { id: "siam", name: "Siam", lat: 13.74, lon: 100.52, year: 1408, category: "voyage",
     event: "Voyage 2 — diplomatic relations established with modern Thailand.",
     searchTerms: ["Siam Thailand Zheng He", "Siam tribute", "Thailand Ming"],
-    requiredKeywords: ["siam", "thailand"],
-  },
-  {
-    id: "brunei", name: "Brunei", lat: 4.94, lon: 114.95, category: "evidence",
+    requiredKeywords: ["siam", "thailand"] },
+  { id: "brunei", name: "Brunei", lat: 4.94, lon: 114.95, category: "evidence",
     event: "Chinese porcelain and artefacts found indicating Ming dynasty trade contact.",
     searchTerms: ["Brunei Chinese porcelain", "Brunei Ming trade"],
-    requiredKeywords: ["brunei", "borneo"],
-  },
-  {
-    id: "philippines", name: "Philippines", lat: 12.88, lon: 121.77, category: "evidence",
+    requiredKeywords: ["brunei", "borneo"] },
+  { id: "philippines", name: "Philippines", lat: 12.88, lon: 121.77, category: "evidence",
     event: "Chinese ceramics and evidence of pre-colonial contact with Ming dynasty fleets.",
     searchTerms: ["Philippines Chinese ceramics", "Philippines Ming dynasty"],
-    requiredKeywords: ["philippines", "filipino"],
-  },
+    requiredKeywords: ["philippines", "filipino"] },
 
   // ══ SOUTH ASIA ════════════════════════════════════════════════════════
-  {
-    id: "sri-lanka", name: "Sri Lanka", lat: 7.87, lon: 80.77, year: 1409, category: "voyage",
+  { id: "sri-lanka", name: "Sri Lanka", lat: 7.87, lon: 80.77, year: 1409, category: "voyage",
     event: "Voyage 2 — trilingual inscription erected at Galle in Chinese, Tamil and Persian.",
     searchTerms: ["Sri Lanka Galle trilingual inscription", "Galle Sri Lanka", "Ceylon Zheng He"],
-    requiredKeywords: ["sri lanka", "galle", "ceylon", "trilingual"],
-  },
-  {
-    id: "calicut", name: "Calicut", lat: 11.26, lon: 75.78, year: 1407, category: "voyage",
+    requiredKeywords: ["sri lanka", "galle", "ceylon", "trilingual"] },
+  { id: "calicut", name: "Calicut", lat: 11.26, lon: 75.78, year: 1407, category: "voyage",
     event: "Primary destination on Malabar Coast, India. Zheng He dies here 1433.",
     searchTerms: ["Calicut Zheng He", "Kozhikode Malabar", "Calicut India Ming"],
-    requiredKeywords: ["calicut", "kozhikode", "malabar"],
-  },
-  {
-    id: "cochin", name: "Cochin", lat: 9.93, lon: 76.27, category: "evidence",
+    requiredKeywords: ["calicut", "kozhikode", "malabar"] },
+  { id: "cochin", name: "Cochin", lat: 9.93, lon: 76.27, category: "evidence",
     event: "Indian trading port with strong evidence of Ming dynasty ceramic trade.",
     searchTerms: ["Cochin India Chinese trade", "Kochi Ming dynasty"],
-    requiredKeywords: ["cochin", "kochi"],
-  },
-  {
-    id: "maldives", name: "Maldives", lat: 3.20, lon: 73.22, category: "evidence",
+    requiredKeywords: ["cochin", "kochi"] },
+  { id: "maldives", name: "Maldives", lat: 3.20, lon: 73.22, category: "evidence",
     event: "Chinese vessels recorded visiting; artefacts found on the islands.",
     searchTerms: ["Maldives Chinese", "Maldives Ming trade"],
-    requiredKeywords: ["maldives", "maldive"],
-  },
+    requiredKeywords: ["maldives", "maldive"] },
 
   // ══ MIDDLE EAST ══════════════════════════════════════════════════════
-  {
-    id: "hormuz", name: "Hormuz", lat: 27.16, lon: 56.28, year: 1414, category: "voyage",
+  { id: "hormuz", name: "Hormuz", lat: 27.16, lon: 56.28, year: 1414, category: "voyage",
     event: "Voyage 4 — Persian Gulf reached for first time; 18 states sent tribute.",
     searchTerms: ["Hormuz Persian Gulf Zheng He", "Ormus Zheng He", "Hormuz tribute"],
-    requiredKeywords: ["hormuz", "ormus", "persian gulf"],
-  },
-  {
-    id: "aden", name: "Aden", lat: 12.79, lon: 45.02, year: 1417, category: "voyage",
+    requiredKeywords: ["hormuz", "ormus", "persian gulf"] },
+  { id: "aden", name: "Aden", lat: 12.79, lon: 45.02, year: 1417, category: "voyage",
     event: "Voyage 5 — Arabian Peninsula reached; gifts of zebras and lions received.",
     searchTerms: ["Aden Yemen Zheng He", "Aden fifth voyage", "Arabian Peninsula Ming"],
-    requiredKeywords: ["aden", "yemen", "arabian"],
-  },
-  {
-    id: "jidda", name: "Jidda", lat: 21.49, lon: 39.19, year: 1432, category: "voyage",
+    requiredKeywords: ["aden", "yemen", "arabian"] },
+  { id: "jidda", name: "Jidda", lat: 21.49, lon: 39.19, year: 1432, category: "voyage",
     event: "Voyage 7 — Red Sea reached; auxiliary fleet sent towards Mecca.",
     searchTerms: ["Jidda Mecca Red Sea Zheng He", "Jeddah Ming seventh voyage"],
-    requiredKeywords: ["jidda", "jeddah", "mecca", "red sea"],
-  },
-  {
-    id: "muscat", name: "Muscat", lat: 23.58, lon: 58.40, category: "evidence",
+    requiredKeywords: ["jidda", "jeddah", "mecca", "red sea"] },
+  { id: "muscat", name: "Muscat", lat: 23.58, lon: 58.40, category: "evidence",
     event: "Omani coast visited during Persian Gulf expeditions; Chinese coins found.",
     searchTerms: ["Muscat Oman Chinese", "Oman Ming coins"],
-    requiredKeywords: ["muscat", "oman"],
-  },
+    requiredKeywords: ["muscat", "oman"] },
 
   // ══ EAST AFRICA ══════════════════════════════════════════════════════
-  {
-    id: "mogadishu", name: "Mogadishu", lat: 2.05, lon: 45.32, year: 1418, category: "voyage",
+  { id: "mogadishu", name: "Mogadishu", lat: 2.05, lon: 45.32, year: 1418, category: "voyage",
     event: "Voyage 5 — Somali coast; first Chinese fleet to reach East Africa.",
     searchTerms: ["Mogadishu Somalia Zheng He", "Mogadishu fifth voyage", "Somali coast Chinese"],
-    requiredKeywords: ["mogadishu", "somalia", "somali"],
-  },
-  {
-    id: "malindi", name: "Malindi", lat: -3.22, lon: 40.12, year: 1418, category: "voyage",
+    requiredKeywords: ["mogadishu", "somalia", "somali"] },
+  { id: "malindi", name: "Malindi", lat: -3.22, lon: 40.12, year: 1418, category: "voyage",
     event: "Voyage 5 — Kenya coast; famous giraffe gifted to the Yongle Emperor.",
     searchTerms: ["Malindi Kenya Zheng He", "Malindi giraffe Yongle", "Kenya coast fifth voyage"],
-    requiredKeywords: ["malindi", "kenya", "giraffe"],
-  },
-  {
-    id: "mombasa", name: "Mombasa", lat: -4.04, lon: 39.67, year: 1419, category: "voyage",
+    requiredKeywords: ["malindi", "kenya", "giraffe"] },
+  { id: "mombasa", name: "Mombasa", lat: -4.04, lon: 39.67, year: 1419, category: "voyage",
     event: "Voyage 5 — East African trade firmly established.",
     searchTerms: ["Mombasa Kenya Zheng He", "Mombasa Ming trade", "East Africa fifth voyage"],
-    requiredKeywords: ["mombasa"],
-  },
-  {
-    id: "zanzibar", name: "Zanzibar", lat: -6.17, lon: 39.20, year: 1421, category: "voyage",
+    requiredKeywords: ["mombasa"] },
+  { id: "zanzibar", name: "Zanzibar", lat: -6.17, lon: 39.20, year: 1421, category: "voyage",
     event: "Voyage 6 — southernmost confirmed point of the treasure fleet.",
     searchTerms: ["Zanzibar Zheng He", "Zanzibar sixth voyage"],
-    requiredKeywords: ["zanzibar"],
-  },
-  {
-    id: "sofala", name: "Sofala", lat: -20.17, lon: 34.70, category: "evidence",
+    requiredKeywords: ["zanzibar"] },
+  { id: "sofala", name: "Sofala", lat: -20.17, lon: 34.70, category: "evidence",
     event: "Menzies argues Chinese maps show detailed knowledge of the Mozambique coast.",
     searchTerms: ["Sofala Mozambique Chinese map", "Mozambique Ming"],
-    requiredKeywords: ["sofala", "mozambique"],
-  },
-  {
-    id: "madagascar", name: "Madagascar", lat: -18.77, lon: 46.87, category: "evidence",
+    requiredKeywords: ["sofala", "mozambique"] },
+  { id: "madagascar", name: "Madagascar", lat: -18.77, lon: 46.87, category: "evidence",
     event: "Chinese ceramic fragments and genetic evidence suggest Ming-era contact with Madagascar.",
     searchTerms: ["Madagascar Chinese contact", "Madagascar Ming dynasty ceramics"],
-    requiredKeywords: ["madagascar"],
-  },
+    requiredKeywords: ["madagascar"] },
 
   // ══ EUROPE ════════════════════════════════════════════════════════════
-  {
-    id: "venice", name: "Venice", lat: 45.44, lon: 12.33, category: "evidence",
-    event: "Fra Mauro's 1450 world map shows detailed knowledge of Africa and Asia, possibly derived from Chinese charts brought via traders.",
+  { id: "venice", name: "Venice", lat: 45.44, lon: 12.33, category: "evidence",
+    event: "Fra Mauro's 1450 world map shows detailed knowledge of Africa and Asia, possibly derived from Chinese charts.",
     searchTerms: ["Venice Fra Mauro map Chinese", "Fra Mauro world map", "Venice Ming maps"],
-    requiredKeywords: ["venice", "fra mauro"],
-  },
-  {
-    id: "portugal", name: "Portugal", lat: 38.72, lon: -9.14, category: "evidence",
-    event: "Menzies argues Portuguese cartographers had access to Chinese charts that aided Vasco da Gama's route around Africa.",
+    requiredKeywords: ["venice", "fra mauro"] },
+  { id: "portugal", name: "Portugal", lat: 38.72, lon: -9.14, category: "evidence",
+    event: "Menzies argues Portuguese cartographers had access to Chinese charts that aided Vasco da Gama's route.",
     searchTerms: ["Portugal Chinese maps Vasco da Gama", "Portuguese Ming charts", "Portugal 1421"],
-    requiredKeywords: ["portugal", "portuguese", "vasco da gama"],
-  },
-  {
-    id: "greenland", name: "Greenland", lat: 72.00, lon: -42.00, category: "evidence",
+    requiredKeywords: ["portugal", "portuguese", "vasco da gama"] },
+  { id: "greenland", name: "Greenland", lat: 72.00, lon: -42.00, category: "evidence",
     event: "Menzies contends Chinese fleets rounded the Arctic and mapped Greenland before European contact.",
     searchTerms: ["Greenland Chinese Arctic", "Greenland Ming 1421"],
-    requiredKeywords: ["greenland", "arctic"],
-  },
-  {
-    id: "dieppe-france", name: "Dieppe, France", lat: 49.93, lon: 1.08, category: "evidence",
-    event: "The Dieppe maps (1540s) show 'Java la Grande' — a large southern landmass Menzies argues is Australia, derived from Chinese originals.",
+    requiredKeywords: ["greenland", "arctic"] },
+  { id: "dieppe-france", name: "Dieppe, France", lat: 49.93, lon: 1.08, category: "evidence",
+    event: "The Dieppe maps (1540s) show 'Java la Grande' — a large southern landmass Menzies argues is Australia.",
     searchTerms: ["Dieppe maps Java Grande Australia", "Dieppe France Chinese maps", "Dieppe cartography"],
-    requiredKeywords: ["dieppe", "java la grande", "dieppe map"],
-  },
-  {
-    id: "piri-reis", name: "Piri Reis Map (Turkey)", lat: 40.98, lon: 28.85, category: "evidence",
-    event: "The Piri Reis map of 1513 appears to show Antarctica and the Americas. Menzies argues it was derived from Chinese charts.",
+    requiredKeywords: ["dieppe", "java la grande", "dieppe map"] },
+  { id: "piri-reis", name: "Piri Reis Map (Turkey)", lat: 40.98, lon: 28.85, category: "evidence",
+    event: "The Piri Reis map of 1513 appears to show Antarctica and the Americas, derived from Chinese charts.",
     searchTerms: ["Piri Reis map Chinese Antarctica", "Piri Reis 1513", "Ottoman map Chinese source"],
-    requiredKeywords: ["piri reis", "piri re'is"],
-  },
+    requiredKeywords: ["piri reis", "piri re'is"] },
 
   // ══ AUSTRALIA ════════════════════════════════════════════════════════
-  {
-    id: "darwin", name: "Darwin", lat: -12.46, lon: 130.84, category: "evidence",
-    event: "Chinese artefacts and stone anchors found near Darwin; possible evidence of early contact with northern Australia.",
+  { id: "darwin", name: "Darwin", lat: -12.46, lon: 130.84, category: "evidence",
+    event: "Chinese artefacts and stone anchors found near Darwin; possible early contact with northern Australia.",
     searchTerms: ["Darwin Australia Chinese artefacts", "Northern Territory Chinese contact"],
-    requiredKeywords: ["darwin", "northern territory"],
-  },
-  {
-    id: "broome", name: "Broome", lat: -17.96, lon: 122.23, category: "evidence",
+    requiredKeywords: ["darwin", "northern territory"] },
+  { id: "broome", name: "Broome", lat: -17.96, lon: 122.23, category: "evidence",
     event: "Beeswax figures and Chinese coins discovered on Australia's northwest coast near Broome.",
     searchTerms: ["Broome Australia Chinese beeswax", "Broome Chinese coins northwest"],
-    requiredKeywords: ["broome", "beeswax"],
-  },
-  {
-    id: "perth", name: "Perth", lat: -31.95, lon: 115.86, category: "evidence",
-    event: "Research suggests Chinese fleets may have charted the southwest Australian coast, with stone inscriptions claimed near Mundaring.",
+    requiredKeywords: ["broome", "beeswax"] },
+  { id: "perth", name: "Perth", lat: -31.95, lon: 115.86, category: "evidence",
+    event: "Research suggests Chinese fleets may have charted the southwest Australian coast.",
     searchTerms: ["Perth Australia Chinese", "Mundaring inscription Western Australia"],
-    requiredKeywords: ["perth", "mundaring", "western australia"],
-  },
-  {
-    id: "sydney", name: "Sydney", lat: -33.87, lon: 151.21, category: "evidence",
+    requiredKeywords: ["perth", "mundaring", "western australia"] },
+  { id: "sydney", name: "Sydney", lat: -33.87, lon: 151.21, category: "evidence",
     event: "Claims of Chinese presence in eastern Australia appear in 1421 Foundation research.",
     searchTerms: ["Sydney Australia Chinese 1421", "Eastern Australia Ming"],
-    requiredKeywords: ["sydney", "eastern australia"],
-  },
-  {
-    id: "adelaide", name: "Adelaide", lat: -34.93, lon: 138.60, category: "evidence",
+    requiredKeywords: ["sydney", "eastern australia"] },
+  { id: "adelaide", name: "Adelaide", lat: -34.93, lon: 138.60, category: "evidence",
     event: "Southern Australian coast discussed in context of Chinese mapping of the continent.",
     searchTerms: ["Adelaide South Australia Chinese", "South Australia Ming mapping"],
-    requiredKeywords: ["adelaide", "south australia"],
-  },
-  {
-    id: "java-la-grande", name: "Java la Grande (Australia)", lat: -22.00, lon: 135.00, category: "evidence",
+    requiredKeywords: ["adelaide", "south australia"] },
+  { id: "java-la-grande", name: "Java la Grande (Australia)", lat: -22.00, lon: 135.00, category: "evidence",
     event: "'Java la Grande' on the Dieppe maps is argued by Menzies to represent Australia, charted by Chinese fleets around 1421.",
     searchTerms: ["Java la Grande Australia Dieppe", "Australia Chinese mapping Menzies"],
-    requiredKeywords: ["java la grande", "australia", "dieppe"],
-  },
+    requiredKeywords: ["java la grande", "australia", "dieppe"] },
 
   // ══ NEW ZEALAND ══════════════════════════════════════════════════════
-  {
-    id: "northland-nz", name: "Northland, NZ", lat: -35.73, lon: 174.32, category: "evidence",
-    event: "Waitaha oral traditions and stone structures in Northland suggest pre-Māori contact possibly linked to Chinese voyages.",
+  { id: "northland-nz", name: "Northland, NZ", lat: -35.73, lon: 174.32, category: "evidence",
+    event: "Waitaha oral traditions and stone structures in Northland suggest pre-Māori contact.",
     searchTerms: ["New Zealand Waitaha Chinese", "Northland New Zealand Chinese contact"],
-    requiredKeywords: ["new zealand", "waitaha", "northland"],
-  },
-  {
-    id: "south-island-nz", name: "South Island, NZ", lat: -44.00, lon: 170.50, category: "evidence",
-    event: "Genetic and archaeological evidence of Chinese contact with New Zealand before European arrival; wreck claims at Moeraki.",
+    requiredKeywords: ["new zealand", "waitaha", "northland"] },
+  { id: "south-island-nz", name: "South Island, NZ", lat: -44.00, lon: 170.50, category: "evidence",
+    event: "Genetic and archaeological evidence of Chinese contact; wreck claims at Moeraki.",
     searchTerms: ["New Zealand Maori Chinese genetics", "South Island New Zealand Chinese", "Moeraki wreck"],
-    requiredKeywords: ["new zealand", "maori", "moeraki"],
-  },
+    requiredKeywords: ["new zealand", "maori", "moeraki"] },
 
   // ══ SOUTH AMERICA ═════════════════════════════════════════════════════
-  {
-    id: "ecuador", name: "Ecuador", lat: -1.83, lon: -78.18, category: "evidence",
-    event: "Pre-Columbian chickens (matching Chinese genetic profiles) and sweet potato evidence points to Pacific contact with Chinese fleets.",
+  { id: "ecuador", name: "Ecuador", lat: -1.83, lon: -78.18, category: "evidence",
+    event: "Pre-Columbian chickens (matching Chinese genetic profiles) and sweet potato evidence.",
     searchTerms: ["Ecuador Chinese chickens pre-Columbian", "Ecuador Pacific contact Ming"],
-    requiredKeywords: ["ecuador", "pre-columbian chicken"],
-  },
-  {
-    id: "peru", name: "Peru", lat: -9.19, lon: -75.02, category: "evidence",
-    event: "Menzies argues Chinese navigators reached Peru; genetic and botanical evidence cited alongside Andean cultural parallels.",
+    requiredKeywords: ["ecuador", "pre-columbian chicken"] },
+  { id: "peru", name: "Peru", lat: -9.19, lon: -75.02, category: "evidence",
+    event: "Menzies argues Chinese navigators reached Peru; genetic and botanical evidence cited.",
     searchTerms: ["Peru Chinese Inca 1421", "Peru pre-Columbian Chinese", "Peru Ming contact"],
-    requiredKeywords: ["peru", "inca"],
-  },
-  {
-    id: "brazil", name: "Brazil", lat: -14.24, lon: -51.93, category: "evidence",
-    event: "1421 Foundation research cites possible Chinese presence on the Brazilian coast before Cabral's 1500 arrival.",
+    requiredKeywords: ["peru", "inca"] },
+  { id: "brazil", name: "Brazil", lat: -14.24, lon: -51.93, category: "evidence",
+    event: "1421 Foundation research cites possible Chinese presence before Cabral's 1500 arrival.",
     searchTerms: ["Brazil Chinese pre-Columbian", "Brazil Ming 1421", "Brazil Chinese coast"],
-    requiredKeywords: ["brazil", "brazilian"],
-  },
-  {
-    id: "chile", name: "Chile", lat: -35.68, lon: -71.54, category: "evidence",
-    event: "Araucanian people of Chile show possible Asian genetic markers discussed in the 1421 hypothesis.",
+    requiredKeywords: ["brazil", "brazilian"] },
+  { id: "chile", name: "Chile", lat: -35.68, lon: -71.54, category: "evidence",
+    event: "Araucanian people of Chile show possible Asian genetic markers.",
     searchTerms: ["Chile Araucanian Chinese genetics", "Chile pre-Columbian Chinese"],
-    requiredKeywords: ["chile", "araucanian"],
-  },
-  {
-    id: "patagonia", name: "Patagonia", lat: -50.00, lon: -69.00, category: "evidence",
+    requiredKeywords: ["chile", "araucanian"] },
+  { id: "patagonia", name: "Patagonia", lat: -50.00, lon: -69.00, category: "evidence",
     event: "Menzies argues Chinese fleets reached southern South America and possibly rounded Cape Horn.",
     searchTerms: ["Patagonia Chinese Menzies", "Patagonia Ming 1421", "South America Chinese fleet"],
-    requiredKeywords: ["patagonia", "cape horn"],
-  },
-
-  // ══ NEW LOCATIONS: PARAGUAY, ARGENTINA, FALKLANDS ═════════════════════════
-  {
-    id: "paraguay", name: "Paraguay", lat: -23.44, lon: -58.44, category: "evidence",
-    event: "Evidence of the Voyages of Chinese Fleets visiting Paraguay. Research suggests possible Ming dynasty contact with inland South America.",
+    requiredKeywords: ["patagonia", "cape horn"] },
+  { id: "paraguay", name: "Paraguay", lat: -23.44, lon: -58.44, category: "evidence",
+    event: "Evidence of the Voyages of Chinese Fleets visiting Paraguay.",
     searchTerms: ["Paraguay Chinese fleets", "Paraguay Ming contact", "Annex 8 Paraguay"],
-    requiredKeywords: ["paraguay", "annex 8", "chinese fleets"],
-  },
-  {
-    id: "argentina", name: "Argentina", lat: -34.60, lon: -58.38, category: "evidence",
-    event: "Evidence of the Voyages of Chinese Fleets visiting Argentina. Archaeological and cartographic evidence suggests Chinese exploration of the Rio de la Plata region.",
+    requiredKeywords: ["paraguay", "annex 8", "chinese fleets"] },
+  { id: "argentina", name: "Argentina", lat: -34.60, lon: -58.38, category: "evidence",
+    event: "Evidence of Chinese fleets visiting Argentina; cartographic evidence of the Rio de la Plata region.",
     searchTerms: ["Argentina Chinese fleets", "Argentina Ming contact", "Annex 8 Argentina", "Rio de la Plata Chinese"],
-    requiredKeywords: ["argentina", "annex 8", "rio de la plata"],
-  },
-  {
-    id: "falklands", name: "Falkland Islands", lat: -51.80, lon: -59.52, category: "evidence",
-    event: "Evidence of the Voyages of Chinese Fleets visiting the Falkland Islands. The Falklands appear on pre-Columbian maps, which Menzies argues were derived from Chinese charts.",
+    requiredKeywords: ["argentina", "annex 8", "rio de la plata"] },
+  { id: "falklands", name: "Falkland Islands", lat: -51.80, lon: -59.52, category: "evidence",
+    event: "The Falklands appear on pre-Columbian maps Menzies argues were derived from Chinese charts.",
     searchTerms: ["Falkland Islands Chinese", "Falklands pre-Columbian map", "Annex 8 Falklands", "Malvinas Chinese"],
-    requiredKeywords: ["falkland", "malvinas", "annex 8"],
-  },
+    requiredKeywords: ["falkland", "malvinas", "annex 8"] },
 
   // ══ NORTH AMERICA ═════════════════════════════════════════════════════
-  {
-    id: "california", name: "California", lat: 36.78, lon: -119.42, category: "evidence",
-    event: "Chinese brass plates and artefacts found along the California coast; Menzies argues Chinese fleets mapped North America.",
+  { id: "california", name: "California", lat: 36.78, lon: -119.42, category: "evidence",
+    event: "Chinese brass plates and artefacts found along the California coast.",
     searchTerms: ["California Chinese brass plates 1421", "California Ming contact pre-Columbian"],
-    requiredKeywords: ["california"],
-  },
-  {
-    id: "mexico", name: "Mexico", lat: 23.63, lon: -102.55, category: "evidence",
-    event: "Evidence of pre-Columbian contact including Chinese-style stone anchors off the Mexican coast.",
+    requiredKeywords: ["california"] },
+  { id: "mexico", name: "Mexico", lat: 23.63, lon: -102.55, category: "evidence",
+    event: "Evidence of pre-Columbian contact including Chinese-style stone anchors.",
     searchTerms: ["Mexico Chinese pre-Columbian", "Mexico Ming 1421"],
-    requiredKeywords: ["mexico", "mexican"],
-  },
-  {
-    id: "caribbean", name: "Caribbean", lat: 18.70, lon: -70.16, category: "evidence",
+    requiredKeywords: ["mexico", "mexican"] },
+  { id: "caribbean", name: "Caribbean", lat: 18.70, lon: -70.16, category: "evidence",
     event: "Menzies cites Chinese maps showing detailed Caribbean island outlines before Columbus.",
     searchTerms: ["Caribbean Chinese maps pre-Columbian", "Caribbean Ming 1421"],
-    requiredKeywords: ["caribbean"],
-  },
-  {
-    id: "rhode-island", name: "Rhode Island, USA", lat: 41.49, lon: -71.31, category: "evidence",
-    event: "The Newport Tower in Rhode Island is claimed by Menzies to be a Chinese astronomical observatory built during the 1421 voyages.",
+    requiredKeywords: ["caribbean"] },
+  { id: "rhode-island", name: "Rhode Island, USA", lat: 41.49, lon: -71.31, category: "evidence",
+    event: "The Newport Tower is claimed by Menzies to be a Chinese astronomical observatory.",
     searchTerms: ["Newport Tower Rhode Island Chinese", "Rhode Island Chinese observatory 1421"],
-    requiredKeywords: ["newport tower", "rhode island"],
-  },
-  {
-    id: "british-columbia", name: "British Columbia", lat: 49.28, lon: -123.12, category: "evidence",
+    requiredKeywords: ["newport tower", "rhode island"] },
+  { id: "british-columbia", name: "British Columbia", lat: 49.28, lon: -123.12, category: "evidence",
     event: "Menzies argues Chinese settlers remained in the Pacific Northwest; linguistic links to Haida Gwaii claimed.",
     searchTerms: ["British Columbia Chinese settlement 1421", "Haida Chinese Menzies"],
-    requiredKeywords: ["british columbia", "haida", "pacific northwest"],
-  },
+    requiredKeywords: ["british columbia", "haida", "pacific northwest"] },
 
   // ══ ANTARCTICA ════════════════════════════════════════════════════════
-  {
-    id: "antarctica-west", name: "West Antarctica", lat: -75.00, lon: -90.00, category: "evidence",
-    event: "Menzies argues Hong Bao's fleet charted the Antarctic coastline in 1421, visible on the Piri Reis map of 1513.",
+  { id: "antarctica-west", name: "West Antarctica", lat: -75.00, lon: -90.00, category: "evidence",
+    event: "Menzies argues Hong Bao's fleet charted the Antarctic coastline in 1421.",
     searchTerms: ["Antarctica Chinese Piri Reis 1421", "Antarctic coastline Chinese map Hong Bao"],
-    requiredKeywords: ["antarctica", "antarctic", "hong bao", "piri reis"],
-  },
-  {
-    id: "antarctica-east", name: "East Antarctica", lat: -72.00, lon: 75.00, category: "evidence",
-    event: "Menzies contends Zhou Man's fleet sailed Antarctic waters and knowledge was passed to later European cartographers.",
+    requiredKeywords: ["antarctica", "antarctic", "hong bao", "piri reis"] },
+  { id: "antarctica-east", name: "East Antarctica", lat: -72.00, lon: 75.00, category: "evidence",
+    event: "Menzies contends Zhou Man's fleet sailed Antarctic waters.",
     searchTerms: ["East Antarctica Chinese Zhou Man", "Antarctica Ming fleet 1421"],
-    requiredKeywords: ["antarctica", "antarctic", "zhou man"],
-  },
+    requiredKeywords: ["antarctica", "antarctic", "zhou man"] },
 ];
 
 export default function DataMap() {
@@ -434,6 +321,59 @@ export default function DataMap() {
   const [docsLoading, setDocsLoading]       = useState(false);
   const [showDocsPanel, setShowDocsPanel]   = useState(false);
   const [filterCategory, setFilterCategory] = useState<"all" | "voyage" | "evidence">("all");
+
+  // Location search state
+  const [locationSearch, setLocationSearch] = useState("");
+  const [searchSuggestions, setSearchSuggestions] = useState<DataPoint[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  // Filter points by category AND location search
+  const visiblePoints = useMemo(() => {
+    let pts = ALL_DATA_POINTS;
+    if (filterCategory !== "all") {
+      pts = pts.filter((p) => p.category === filterCategory);
+    }
+    if (locationSearch.trim()) {
+      const q = locationSearch.toLowerCase();
+      pts = pts.filter((p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.event.toLowerCase().includes(q)
+      );
+    }
+    return pts;
+  }, [filterCategory, locationSearch]);
+
+  const voyageCount   = ALL_DATA_POINTS.filter((p) => p.category === "voyage").length;
+  const evidenceCount = ALL_DATA_POINTS.filter((p) => p.category === "evidence").length;
+
+  // Autocomplete suggestions
+  const handleLocationInput = (value: string) => {
+    setLocationSearch(value);
+    if (value.trim().length > 0) {
+      const q = value.toLowerCase();
+      const matches = ALL_DATA_POINTS.filter((p) =>
+        p.name.toLowerCase().includes(q)
+      ).slice(0, 6);
+      setSearchSuggestions(matches);
+      setShowSuggestions(matches.length > 0);
+    } else {
+      setSearchSuggestions([]);
+      setShowSuggestions(false);
+    }
+  };
+
+  const handleSuggestionClick = (point: DataPoint) => {
+    setLocationSearch(point.name);
+    setShowSuggestions(false);
+    // Open the docs panel for this point
+    handlePointClick(point);
+  };
+
+  const handleClearLocationSearch = () => {
+    setLocationSearch("");
+    setSearchSuggestions([]);
+    setShowSuggestions(false);
+  };
 
   const fetchRelatedDocs = async (point: DataPoint) => {
     setDocsLoading(true);
@@ -498,27 +438,61 @@ export default function DataMap() {
     fetchRelatedDocs(point);
   };
 
-  const visiblePoints = ALL_DATA_POINTS.filter(
-    (p) => filterCategory === "all" || p.category === filterCategory
-  );
-  const voyageCount   = ALL_DATA_POINTS.filter((p) => p.category === "voyage").length;
-  const evidenceCount = ALL_DATA_POINTS.filter((p) => p.category === "evidence").length;
-
   return (
     <div className="flex flex-col h-full bg-gray-100">
       <div className="border-b border-gray-200 px-6 py-4 bg-white shadow-sm flex-shrink-0">
         <h1 className="text-xl font-display font-bold text-gray-900">Data Map</h1>
         <p className="text-xs text-gray-400 mt-0.5">
-          Global locations from the 1421 Foundation knowledge base — click any marker for related documents, ranked by relevance
+          Global locations from the 1421 Foundation knowledge base — click any marker for related documents
         </p>
       </div>
 
-      {/* Filter bar */}
-      <div className="px-6 py-2 bg-white border-b border-gray-200 flex items-center gap-3 flex-shrink-0">
-        <span className="text-xs text-gray-500 font-medium">Show:</span>
+      {/* Search + filter bar */}
+      <div className="px-6 py-3 bg-white border-b border-gray-200 flex-shrink-0 flex items-center gap-3 flex-wrap">
+
+        {/* Location search */}
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400 pointer-events-none" />
+          <input
+            type="text"
+            value={locationSearch}
+            onChange={(e) => handleLocationInput(e.target.value)}
+            onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+            onFocus={() => locationSearch && setShowSuggestions(searchSuggestions.length > 0)}
+            placeholder="Search locations…"
+            className="w-full pl-9 pr-8 py-1.5 text-xs border border-gray-300 rounded-lg bg-white text-gray-800 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gold/30 focus:border-gold"
+          />
+          {locationSearch && (
+            <button onClick={handleClearLocationSearch}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+          {/* Autocomplete dropdown */}
+          {showSuggestions && (
+            <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-[2000] overflow-hidden">
+              {searchSuggestions.map((point) => (
+                <button key={point.id}
+                  onMouseDown={() => handleSuggestionClick(point)}
+                  className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100 last:border-0">
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold flex-shrink-0 ${
+                    point.category === "voyage" ? "bg-red-100 text-red-700" : "bg-blue-100 text-blue-700"
+                  }`}>
+                    {point.category === "voyage" ? "Voyage" : "Evidence"}
+                  </span>
+                  <span className="text-gray-800 font-medium">{point.name}</span>
+                  {point.year && <span className="text-gray-400 ml-auto flex-shrink-0">{point.year}</span>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Category filters */}
+        <span className="text-xs text-gray-500 font-medium flex-shrink-0">Show:</span>
         {(["all", "voyage", "evidence"] as const).map((cat) => (
           <button key={cat} onClick={() => setFilterCategory(cat)}
-            className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+            className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors flex-shrink-0 ${
               filterCategory === cat
                 ? "bg-gold text-white border-gold"
                 : "border-gray-300 text-gray-600 hover:border-gold hover:text-gold bg-white"
@@ -528,6 +502,13 @@ export default function DataMap() {
             {cat === "evidence" && `Evidence locations (${evidenceCount})`}
           </button>
         ))}
+
+        {/* Active search indicator */}
+        {(locationSearch || filterCategory !== "all") && (
+          <span className="text-xs text-gold font-medium flex-shrink-0">
+            {visiblePoints.length} shown
+          </span>
+        )}
       </div>
 
       <div className="relative flex-1 min-h-0 flex">

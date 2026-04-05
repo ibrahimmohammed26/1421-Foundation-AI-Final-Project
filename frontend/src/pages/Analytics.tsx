@@ -122,7 +122,7 @@ export default function Analytics() {
             <Database className="h-4 w-4" /> Data Statistics
           </button>
           <button onClick={() => setActiveChart("global")} className={tabClass("global")}>
-            <Map className="h-4 w-4" /> Global Data Map
+            <Map className="h-4 w-4" /> Data Map Locations
           </button>
           <button onClick={() => setActiveChart("timeline")} className={tabClass("timeline")}>
             <BarChart3 className="h-4 w-4" /> Voyage Timeline

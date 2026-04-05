@@ -35,7 +35,7 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
         <Icon className="h-3.5 w-3.5 text-gray-400" />
         <span className="text-xs text-gray-400 uppercase tracking-wide">{label}</span>
       </div>
-      <div className="flex-1 text-sm text-gray-800">{value}</div>
+      <div className="flex-1 text-sm text-gray-800 min-w-0">{value}</div>
     </div>
   );
 
@@ -48,12 +48,12 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
 
         {/* Header */}
         <div className="flex items-start justify-between gap-4 px-6 py-5 border-b border-gray-100">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-9 h-9 rounded-lg bg-gold flex items-center justify-center flex-shrink-0">
+          <div className="flex items-start gap-3 min-w-0 flex-1">
+            <div className="w-9 h-9 rounded-lg bg-gold flex items-center justify-center flex-shrink-0 mt-0.5">
               <span className="text-white text-xs font-bold">{doc.id}</span>
             </div>
-            <div className="min-w-0">
-              <h2 className="text-base font-display font-bold text-gray-900 leading-snug break-words">
+            <div className="min-w-0 flex-1">
+              <h2 className="text-base font-display font-bold text-gray-900 leading-snug">
                 {doc.title}
               </h2>
               {doc.author && doc.author !== "Unknown" && (
@@ -161,27 +161,25 @@ export default function Documents() {
   const [isSearchMode, setIsSearchMode]   = useState(false);
   const [searchResults, setSearchResults] = useState<Document[]>([]);
 
-  const [types, setTypes]                 = useState<string[]>([]);
-  const [years, setYears]                 = useState<number[]>([]);
-  const [authors, setAuthors]             = useState<string[]>([]);
+  const [types, setTypes]     = useState<string[]>([]);
+  const [years, setYears]     = useState<number[]>([]);
+  const [authors, setAuthors] = useState<string[]>([]);
 
-  const [selectedType, setSelectedType]   = useState<string>("all");
-  const [selectedYear, setSelectedYear]   = useState<number | "all">("all");
+  const [selectedType,   setSelectedType]   = useState<string>("all");
+  const [selectedYear,   setSelectedYear]   = useState<number | "all">("all");
   const [selectedAuthor, setSelectedAuthor] = useState<string>("all");
-  const [showFilters, setShowFilters]     = useState(false);
+  const [showFilters,    setShowFilters]    = useState(false);
 
-  const [currentPage, setCurrentPage]     = useState(1);
-  const [error, setError]                 = useState<string | null>(null);
-  const [selectedDoc, setSelectedDoc]     = useState<Document | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [error, setError]             = useState<string | null>(null);
+  const [selectedDoc, setSelectedDoc] = useState<Document | null>(null);
 
-  // Load filter options
   useEffect(() => {
     getDocumentTypes().then(setTypes).catch(() => {});
     getDocumentYears().then(setYears).catch(() => {});
     getDocumentAuthors().then(setAuthors).catch(() => {});
   }, []);
 
-  // Load all documents (paginated in chunks of 500 to avoid timeout)
   const loadAllDocuments = useCallback(async () => {
     setLoading(true);
     setIsSearchMode(false);
@@ -245,20 +243,17 @@ export default function Documents() {
     setCurrentPage(1);
   };
 
-  // Count active filters for badge
   const activeFilterCount = [
     selectedType !== "all",
     selectedYear !== "all",
     selectedAuthor !== "all",
   ].filter(Boolean).length;
 
-  // Apply filters
   const baseDocuments = isSearchMode ? searchResults : allDocuments;
   const filteredDocuments = baseDocuments.filter((doc) => {
     if (selectedType !== "all" && doc.type !== selectedType) return false;
     if (selectedYear !== "all" && doc.year !== selectedYear) return false;
     if (selectedAuthor !== "all") {
-      // "no-author" is a special value for docs with no author
       if (selectedAuthor === "__no_author__") {
         if (doc.author && doc.author !== "Unknown") return false;
       } else {
@@ -274,7 +269,6 @@ export default function Documents() {
     ? filteredDocuments
     : filteredDocuments.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
-  // Count docs with no author for the filter label
   const noAuthorCount = allDocuments.filter(
     (d) => !d.author || d.author === "Unknown"
   ).length;
@@ -319,7 +313,9 @@ export default function Documents() {
             </button>
             <button onClick={() => setShowFilters(!showFilters)}
               className={`px-4 py-2.5 rounded-lg border text-sm flex items-center gap-2 transition-colors relative ${
-                showFilters ? "bg-gold text-white border-gold" : "border-gray-300 text-gray-500 hover:text-gray-900 hover:border-gray-400 bg-white"
+                showFilters
+                  ? "bg-gold text-white border-gold"
+                  : "border-gray-300 text-gray-500 hover:text-gray-900 hover:border-gray-400 bg-white"
               }`}>
               <Filter className="h-4 w-4" />
               Filters
@@ -334,18 +330,15 @@ export default function Documents() {
           {showFilters && (
             <div className="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-
-                {/* Type filter */}
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">Document Type</label>
-                  <select value={selectedType} onChange={(e) => { setSelectedType(e.target.value); setCurrentPage(1); }}
+                  <select value={selectedType}
+                    onChange={(e) => { setSelectedType(e.target.value); setCurrentPage(1); }}
                     className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-800">
                     <option value="all">All Types</option>
                     {types.map((t) => <option key={t} value={t}>{t}</option>)}
                   </select>
                 </div>
-
-                {/* Year filter */}
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">Year</label>
                   <select value={selectedYear}
@@ -355,13 +348,11 @@ export default function Documents() {
                     {years.map((y) => <option key={y} value={y}>{y}</option>)}
                   </select>
                 </div>
-
-                {/* Author filter */}
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1 flex items-center gap-1">
+                  <label className="block text-xs text-gray-500 mb-1">
                     Author
                     {noAuthorCount > 0 && (
-                      <span className="text-gray-400">· {noAuthorCount} without author</span>
+                      <span className="text-gray-400 ml-1">· {noAuthorCount} without author</span>
                     )}
                   </label>
                   <select value={selectedAuthor}
@@ -375,8 +366,6 @@ export default function Documents() {
                   </select>
                 </div>
               </div>
-
-              {/* Clear filters link */}
               {activeFilterCount > 0 && (
                 <button
                   onClick={() => { setSelectedType("all"); setSelectedYear("all"); setSelectedAuthor("all"); setCurrentPage(1); }}
@@ -395,7 +384,9 @@ export default function Documents() {
               ? `${filteredDocuments.length} result${filteredDocuments.length !== 1 ? "s" : ""} for "${searchQuery}"`
               : `Showing ${Math.min((currentPage - 1) * PAGE_SIZE + 1, totalDocuments)}–${Math.min(currentPage * PAGE_SIZE, totalDocuments)} of ${totalDocuments} documents`}
             {activeFilterCount > 0 && (
-              <span className="ml-2 text-gold font-medium">({activeFilterCount} filter{activeFilterCount > 1 ? "s" : ""} active)</span>
+              <span className="ml-2 text-gold font-medium">
+                ({activeFilterCount} filter{activeFilterCount > 1 ? "s" : ""} active)
+              </span>
             )}
           </span>
           {!isSearchMode && totalPages > 1 && (
@@ -430,7 +421,7 @@ export default function Documents() {
                 <button
                   onClick={() => { handleClearSearch(); setSelectedType("all"); setSelectedYear("all"); setSelectedAuthor("all"); }}
                   className="mt-3 text-gold hover:text-gold-dark text-sm">
-                  Clear search & filters
+                  Clear search &amp; filters
                 </button>
               )}
             </div>
@@ -439,21 +430,32 @@ export default function Documents() {
               {pagedDocuments.map((doc) => (
                 <div key={doc.id}
                   className="bg-white rounded-2xl border border-gray-200 px-6 py-5 hover:border-gold/50 hover:shadow-md transition-all">
-                  <div className="flex items-start justify-between gap-4">
+                  {/*
+                    Layout: two columns — left takes remaining space, right is the View button.
+                    The title sits above the metadata row.
+                    min-w-0 on the left column prevents flex overflow that causes title wrap/break.
+                  */}
+                  <div className="flex items-start gap-4">
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-3 mb-3">
-                        <div className="w-9 h-9 rounded-lg bg-gold/10 border border-gold/30 flex items-center justify-center flex-shrink-0">
+                      {/* Row 1: badge + title on the same line */}
+                      <div className="flex items-start gap-3 mb-2">
+                        <div className="w-9 h-9 rounded-lg bg-gold/10 border border-gold/30 flex items-center justify-center flex-shrink-0 mt-0.5">
                           <span className="text-gold text-xs font-bold">{doc.id}</span>
                         </div>
-                        <h3 className="text-base font-display font-semibold text-gray-900 leading-snug">
+                        {/* Title: wraps naturally, never overflows */}
+                        <h3 className="text-base font-display font-semibold text-gray-900 leading-snug flex-1 min-w-0">
                           {doc.title}
                         </h3>
                       </div>
-                      <div className="flex items-center gap-2 text-xs text-gray-400 flex-wrap">
+
+                      {/* Row 2: metadata chips */}
+                      <div className="pl-12 flex items-center gap-2 text-xs text-gray-400 flex-wrap">
                         {doc.author && doc.author !== "Unknown"
                           ? <span>By {doc.author}</span>
                           : <span className="italic text-gray-300">No author</span>}
-                        {doc.year > 0 && <><span>•</span><span>{doc.year}</span></>}
+                        {doc.year > 0 && (
+                          <><span>•</span><span>{doc.year}</span></>
+                        )}
                         {doc.type && doc.type !== "unknown" && (
                           <><span>•</span><span className="capitalize">{doc.type}</span></>
                         )}
@@ -473,17 +475,21 @@ export default function Documents() {
                           Active
                         </span>
                       </div>
+
+                      {/* Row 3: tags */}
                       {doc.tags && doc.tags.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5 mt-3">
+                        <div className="pl-12 flex flex-wrap gap-1.5 mt-2">
                           {doc.tags.slice(0, 8).map((tag, idx) => (
                             <span key={idx} className="px-2 py-0.5 bg-gray-100 rounded text-xs text-gray-500">{tag}</span>
                           ))}
                         </div>
                       )}
                     </div>
-                    <div className="flex-shrink-0">
+
+                    {/* View button — right column, never shrinks */}
+                    <div className="flex-shrink-0 self-start">
                       <button onClick={() => setSelectedDoc(doc)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-50 border border-gold/30 text-xs font-medium text-gold hover:bg-red-100 transition-colors">
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-50 border border-gold/30 text-xs font-medium text-gold hover:bg-red-100 transition-colors whitespace-nowrap">
                         <Eye className="h-3.5 w-3.5" />
                         View
                       </button>
