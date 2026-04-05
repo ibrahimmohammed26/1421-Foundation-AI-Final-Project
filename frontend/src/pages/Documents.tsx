@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import {
   getAllDocuments, searchDocuments, getDocumentTypes, getDocumentYears,
-  Document,
+  getDocumentAuthors, Document,
 } from "@/lib/api";
 
 const PAGE_SIZE = 50;
@@ -61,10 +61,8 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
               )}
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors flex-shrink-0"
-          >
+          <button onClick={onClose}
+            className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors flex-shrink-0">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -85,9 +83,15 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
 
           <div className="bg-gray-50 rounded-xl border border-gray-100 px-4 py-1">
             <MetaRow icon={Hash} label="Doc No." value={<span className="font-mono font-bold text-gray-700">{doc.id}</span>} />
-            {doc.author && doc.author !== "Unknown" && (
-              <MetaRow icon={User} label="Author" value={doc.author} />
-            )}
+            <MetaRow
+              icon={User}
+              label="Author"
+              value={
+                doc.author && doc.author !== "Unknown"
+                  ? doc.author
+                  : <span className="text-gray-400 text-xs italic">No author recorded</span>
+              }
+            />
             {doc.year > 0 && (
               <MetaRow icon={Calendar} label="Year" value={doc.year} />
             )}
@@ -150,7 +154,6 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
 export default function Documents() {
   const [searchParams] = useSearchParams();
 
-  // All documents are loaded once; pagination is done client-side
   const [allDocuments, setAllDocuments]   = useState<Document[]>([]);
   const [loading, setLoading]             = useState(true);
   const [searchQuery, setSearchQuery]     = useState("");
@@ -160,52 +163,42 @@ export default function Documents() {
 
   const [types, setTypes]                 = useState<string[]>([]);
   const [years, setYears]                 = useState<number[]>([]);
+  const [authors, setAuthors]             = useState<string[]>([]);
+
   const [selectedType, setSelectedType]   = useState<string>("all");
   const [selectedYear, setSelectedYear]   = useState<number | "all">("all");
+  const [selectedAuthor, setSelectedAuthor] = useState<string>("all");
   const [showFilters, setShowFilters]     = useState(false);
 
   const [currentPage, setCurrentPage]     = useState(1);
   const [error, setError]                 = useState<string | null>(null);
   const [selectedDoc, setSelectedDoc]     = useState<Document | null>(null);
 
+  // Load filter options
   useEffect(() => {
     getDocumentTypes().then(setTypes).catch(() => {});
     getDocumentYears().then(setYears).catch(() => {});
+    getDocumentAuthors().then(setAuthors).catch(() => {});
   }, []);
 
-  // Load ALL documents with pagination handling
+  // Load all documents (paginated in chunks of 500 to avoid timeout)
   const loadAllDocuments = useCallback(async () => {
     setLoading(true);
     setIsSearchMode(false);
     try {
-      // Try to get a large limit first (10,000)
       let allDocs: Document[] = [];
       let page = 0;
-      const limit = 500; // Fetch in chunks of 500
+      const limit = 500;
       let hasMore = true;
-      
       while (hasMore) {
-        try {
-          const data = await getAllDocuments(limit, page * limit);
-          const docs = data.documents ?? [];
-          allDocs = [...allDocs, ...docs];
-          
-          // If we got fewer than limit, we've reached the end
-          if (docs.length < limit) {
-            hasMore = false;
-          } else {
-            page++;
-          }
-        } catch (err) {
-          console.error("Error fetching page:", err);
-          hasMore = false;
-        }
+        const data = await getAllDocuments(limit, page * limit);
+        const docs = data.documents ?? [];
+        allDocs = [...allDocs, ...docs];
+        hasMore = docs.length === limit;
+        page++;
       }
-      
       setAllDocuments(sortByIdAsc(allDocs));
-      console.log(`Loaded ${allDocs.length} documents total`);
-    } catch (err) {
-      console.error("Failed to load documents:", err);
+    } catch {
       setError("Failed to load documents. Is the backend running?");
     } finally {
       setLoading(false);
@@ -218,34 +211,25 @@ export default function Documents() {
       setSearchQuery(q);
       setSearching(true);
       setIsSearchMode(true);
-      searchDocuments(q, 500) // Increased limit for search results
+      searchDocuments(q, 500)
         .then((data) => {
           setSearchResults(data.results || []);
-          if (data.results?.length === 1) {
-            setSelectedDoc(data.results[0]);
-          }
+          if (data.results?.length === 1) setSelectedDoc(data.results[0]);
         })
         .catch(console.error)
-        .finally(() => {
-          setSearching(false);
-          setLoading(false);
-        });
-      loadAllDocuments(); // still load all in background
+        .finally(() => { setSearching(false); setLoading(false); });
+      loadAllDocuments();
     } else {
       loadAllDocuments();
     }
   }, [loadAllDocuments, searchParams]);
 
   const handleSearch = async () => {
-    if (!searchQuery.trim()) {
-      setIsSearchMode(false);
-      setCurrentPage(1);
-      return;
-    }
+    if (!searchQuery.trim()) { setIsSearchMode(false); setCurrentPage(1); return; }
     setSearching(true);
     setIsSearchMode(true);
     try {
-      const data = await searchDocuments(searchQuery, 500); // Increased limit
+      const data = await searchDocuments(searchQuery, 500);
       setSearchResults(data.results || []);
       setCurrentPage(1);
     } catch (err) {
@@ -261,19 +245,39 @@ export default function Documents() {
     setCurrentPage(1);
   };
 
-  // Apply type/year filters to either search results or all documents
+  // Count active filters for badge
+  const activeFilterCount = [
+    selectedType !== "all",
+    selectedYear !== "all",
+    selectedAuthor !== "all",
+  ].filter(Boolean).length;
+
+  // Apply filters
   const baseDocuments = isSearchMode ? searchResults : allDocuments;
   const filteredDocuments = baseDocuments.filter((doc) => {
-    const matchesType = selectedType === "all" || doc.type === selectedType;
-    const matchesYear = selectedYear === "all" || doc.year === selectedYear;
-    return matchesType && matchesYear;
+    if (selectedType !== "all" && doc.type !== selectedType) return false;
+    if (selectedYear !== "all" && doc.year !== selectedYear) return false;
+    if (selectedAuthor !== "all") {
+      // "no-author" is a special value for docs with no author
+      if (selectedAuthor === "__no_author__") {
+        if (doc.author && doc.author !== "Unknown") return false;
+      } else {
+        if (doc.author !== selectedAuthor) return false;
+      }
+    }
+    return true;
   });
 
   const totalDocuments = filteredDocuments.length;
-  const totalPages = Math.ceil(totalDocuments / PAGE_SIZE);
+  const totalPages     = Math.ceil(totalDocuments / PAGE_SIZE);
   const pagedDocuments = isSearchMode
-    ? filteredDocuments // show all search results without paging
+    ? filteredDocuments
     : filteredDocuments.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  // Count docs with no author for the filter label
+  const noAuthorCount = allDocuments.filter(
+    (d) => !d.author || d.author === "Unknown"
+  ).length;
 
   return (
     <>
@@ -314,17 +318,24 @@ export default function Documents() {
               {searching ? "Searching…" : "Search"}
             </button>
             <button onClick={() => setShowFilters(!showFilters)}
-              className={`px-4 py-2.5 rounded-lg border text-sm flex items-center gap-2 transition-colors ${
+              className={`px-4 py-2.5 rounded-lg border text-sm flex items-center gap-2 transition-colors relative ${
                 showFilters ? "bg-gold text-white border-gold" : "border-gray-300 text-gray-500 hover:text-gray-900 hover:border-gray-400 bg-white"
               }`}>
               <Filter className="h-4 w-4" />
               Filters
+              {activeFilterCount > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+                  {activeFilterCount}
+                </span>
+              )}
             </button>
           </div>
 
           {showFilters && (
             <div className="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+                {/* Type filter */}
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">Document Type</label>
                   <select value={selectedType} onChange={(e) => { setSelectedType(e.target.value); setCurrentPage(1); }}
@@ -333,6 +344,8 @@ export default function Documents() {
                     {types.map((t) => <option key={t} value={t}>{t}</option>)}
                   </select>
                 </div>
+
+                {/* Year filter */}
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">Year</label>
                   <select value={selectedYear}
@@ -342,7 +355,35 @@ export default function Documents() {
                     {years.map((y) => <option key={y} value={y}>{y}</option>)}
                   </select>
                 </div>
+
+                {/* Author filter */}
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1 flex items-center gap-1">
+                    Author
+                    {noAuthorCount > 0 && (
+                      <span className="text-gray-400">· {noAuthorCount} without author</span>
+                    )}
+                  </label>
+                  <select value={selectedAuthor}
+                    onChange={(e) => { setSelectedAuthor(e.target.value); setCurrentPage(1); }}
+                    className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-800">
+                    <option value="all">All Authors</option>
+                    {noAuthorCount > 0 && (
+                      <option value="__no_author__">No author recorded ({noAuthorCount})</option>
+                    )}
+                    {authors.map((a) => <option key={a} value={a}>{a}</option>)}
+                  </select>
+                </div>
               </div>
+
+              {/* Clear filters link */}
+              {activeFilterCount > 0 && (
+                <button
+                  onClick={() => { setSelectedType("all"); setSelectedYear("all"); setSelectedAuthor("all"); setCurrentPage(1); }}
+                  className="mt-3 text-xs text-gold hover:underline font-medium">
+                  Clear all filters
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -352,7 +393,10 @@ export default function Documents() {
           <span>
             {isSearchMode
               ? `${filteredDocuments.length} result${filteredDocuments.length !== 1 ? "s" : ""} for "${searchQuery}"`
-              : `Showing ${(currentPage - 1) * PAGE_SIZE + 1}–${Math.min(currentPage * PAGE_SIZE, totalDocuments)} of ${totalDocuments} documents`}
+              : `Showing ${Math.min((currentPage - 1) * PAGE_SIZE + 1, totalDocuments)}–${Math.min(currentPage * PAGE_SIZE, totalDocuments)} of ${totalDocuments} documents`}
+            {activeFilterCount > 0 && (
+              <span className="ml-2 text-gold font-medium">({activeFilterCount} filter{activeFilterCount > 1 ? "s" : ""} active)</span>
+            )}
           </span>
           {!isSearchMode && totalPages > 1 && (
             <div className="flex items-center gap-2">
@@ -382,9 +426,11 @@ export default function Documents() {
             <div className="text-center py-12">
               <FileText className="h-12 w-12 text-gray-300 mx-auto mb-3" />
               <p className="text-gray-500">No documents found</p>
-              {searchQuery && (
-                <button onClick={handleClearSearch} className="mt-3 text-gold hover:text-gold-dark text-sm">
-                  Clear search
+              {(searchQuery || activeFilterCount > 0) && (
+                <button
+                  onClick={() => { handleClearSearch(); setSelectedType("all"); setSelectedYear("all"); setSelectedAuthor("all"); }}
+                  className="mt-3 text-gold hover:text-gold-dark text-sm">
+                  Clear search & filters
                 </button>
               )}
             </div>
@@ -404,7 +450,9 @@ export default function Documents() {
                         </h3>
                       </div>
                       <div className="flex items-center gap-2 text-xs text-gray-400 flex-wrap">
-                        {doc.author && doc.author !== "Unknown" && <span>By {doc.author}</span>}
+                        {doc.author && doc.author !== "Unknown"
+                          ? <span>By {doc.author}</span>
+                          : <span className="italic text-gray-300">No author</span>}
                         {doc.year > 0 && <><span>•</span><span>{doc.year}</span></>}
                         {doc.type && doc.type !== "unknown" && (
                           <><span>•</span><span className="capitalize">{doc.type}</span></>

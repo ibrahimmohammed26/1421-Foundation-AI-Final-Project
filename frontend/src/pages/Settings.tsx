@@ -208,7 +208,7 @@ export default function Settings() {
                 </a>
                 <a href="https://www.facebook.com/1421foundation/" target="_blank" rel="noopener noreferrer"
                   className="inline-flex items-center gap-2 text-gold hover:text-gold-dark transition-colors text-sm">
-                  <ExternalLink className="h-4 w-4 flex-shrink-0" /> 1421 Foundation Facebook
+                  <ExternalLink className="h-4 w-4 flex-shrink-0" /> 1421 Foundation Facebook Website
                 </a>
               </div>
               <div className="pt-3 text-xs text-gray-400">© 2026 1421 Foundation. All rights reserved.</div>
