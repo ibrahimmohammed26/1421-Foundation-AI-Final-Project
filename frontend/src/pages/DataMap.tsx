@@ -362,19 +362,19 @@ const ALL_DATA_POINTS: DataPoint[] = [
   // ══ NEW LOCATIONS: PARAGUAY, ARGENTINA, FALKLANDS ═════════════════════════
   {
     id: "paraguay", name: "Paraguay", lat: -23.44, lon: -58.44, category: "evidence",
-    event: "Annex 8 – Evidence of the Voyages of Chinese Fleets visiting Paraguay. Research suggests possible Ming dynasty contact with inland South America.",
+    event: "Evidence of the Voyages of Chinese Fleets visiting Paraguay. Research suggests possible Ming dynasty contact with inland South America.",
     searchTerms: ["Paraguay Chinese fleets", "Paraguay Ming contact", "Annex 8 Paraguay"],
     requiredKeywords: ["paraguay", "annex 8", "chinese fleets"],
   },
   {
     id: "argentina", name: "Argentina", lat: -34.60, lon: -58.38, category: "evidence",
-    event: "Annex 8 – Evidence of the Voyages of Chinese Fleets visiting Argentina. Archaeological and cartographic evidence suggests Chinese exploration of the Rio de la Plata region.",
+    event: "Evidence of the Voyages of Chinese Fleets visiting Argentina. Archaeological and cartographic evidence suggests Chinese exploration of the Rio de la Plata region.",
     searchTerms: ["Argentina Chinese fleets", "Argentina Ming contact", "Annex 8 Argentina", "Rio de la Plata Chinese"],
     requiredKeywords: ["argentina", "annex 8", "rio de la plata"],
   },
   {
     id: "falklands", name: "Falkland Islands", lat: -51.80, lon: -59.52, category: "evidence",
-    event: "Annex 8 – Evidence of the Voyages of Chinese Fleets visiting the Falkland Islands. The Falklands appear on pre-Columbian maps, which Menzies argues were derived from Chinese charts.",
+    event: "Evidence of the Voyages of Chinese Fleets visiting the Falkland Islands. The Falklands appear on pre-Columbian maps, which Menzies argues were derived from Chinese charts.",
     searchTerms: ["Falkland Islands Chinese", "Falklands pre-Columbian map", "Annex 8 Falklands", "Malvinas Chinese"],
     requiredKeywords: ["falkland", "malvinas", "annex 8"],
   },
