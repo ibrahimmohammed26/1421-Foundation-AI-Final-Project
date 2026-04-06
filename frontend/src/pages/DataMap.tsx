@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import L from "leaflet";
@@ -56,12 +56,8 @@ function scoreDoc(doc: any, point: DataPoint): number {
   const title    = (doc.title || "").toLowerCase();
   const preview  = (doc.content_preview || "").toLowerCase();
   const combined = title + " " + preview;
-
-  const hasRequired = point.requiredKeywords.some(
-    (kw) => combined.includes(kw.toLowerCase())
-  );
+  const hasRequired = point.requiredKeywords.some((kw) => combined.includes(kw.toLowerCase()));
   if (!hasRequired) return 0;
-
   let score = 0;
   for (const kw of point.requiredKeywords) {
     const k = kw.toLowerCase();
@@ -238,7 +234,7 @@ const ALL_DATA_POINTS: DataPoint[] = [
 
   // ══ NEW ZEALAND ══════════════════════════════════════════════════════
   { id: "northland-nz", name: "Northland, NZ", lat: -35.73, lon: 174.32, category: "evidence",
-    event: "Waitaha oral traditions and stone structures in Northland suggest pre-Māori contact.",
+    event: "Waitaha oral traditions and stone structures suggest pre-Māori contact possibly linked to Chinese voyages.",
     searchTerms: ["New Zealand Waitaha Chinese", "Northland New Zealand Chinese contact"],
     requiredKeywords: ["new zealand", "waitaha", "northland"] },
   { id: "south-island-nz", name: "South Island, NZ", lat: -44.00, lon: 170.50, category: "evidence",
@@ -260,7 +256,7 @@ const ALL_DATA_POINTS: DataPoint[] = [
     searchTerms: ["Brazil Chinese pre-Columbian", "Brazil Ming 1421", "Brazil Chinese coast"],
     requiredKeywords: ["brazil", "brazilian"] },
   { id: "chile", name: "Chile", lat: -35.68, lon: -71.54, category: "evidence",
-    event: "Araucanian people of Chile show possible Asian genetic markers.",
+    event: "Araucanian people of Chile show possible Asian genetic markers discussed in the 1421 hypothesis.",
     searchTerms: ["Chile Araucanian Chinese genetics", "Chile pre-Columbian Chinese"],
     requiredKeywords: ["chile", "araucanian"] },
   { id: "patagonia", name: "Patagonia", lat: -50.00, lon: -69.00, category: "evidence",
@@ -268,7 +264,7 @@ const ALL_DATA_POINTS: DataPoint[] = [
     searchTerms: ["Patagonia Chinese Menzies", "Patagonia Ming 1421", "South America Chinese fleet"],
     requiredKeywords: ["patagonia", "cape horn"] },
   { id: "paraguay", name: "Paraguay", lat: -23.44, lon: -58.44, category: "evidence",
-    event: "Evidence of the Voyages of Chinese Fleets visiting Paraguay.",
+    event: "Evidence of the Voyages of Chinese Fleets visiting Paraguay; possible Ming dynasty contact.",
     searchTerms: ["Paraguay Chinese fleets", "Paraguay Ming contact", "Annex 8 Paraguay"],
     requiredKeywords: ["paraguay", "annex 8", "chinese fleets"] },
   { id: "argentina", name: "Argentina", lat: -34.60, lon: -58.38, category: "evidence",
@@ -313,65 +309,77 @@ const ALL_DATA_POINTS: DataPoint[] = [
     requiredKeywords: ["antarctica", "antarctic", "zhou man"] },
 ];
 
+// Pre-computed totals
+const VOYAGE_COUNT   = ALL_DATA_POINTS.filter((p) => p.category === "voyage").length;
+const EVIDENCE_COUNT = ALL_DATA_POINTS.filter((p) => p.category === "evidence").length;
+const TOTAL_COUNT    = ALL_DATA_POINTS.length;
+
 export default function DataMap() {
   const navigate = useNavigate();
 
-  const [selectedPoint, setSelectedPoint]   = useState<DataPoint | null>(null);
-  const [relatedDocs, setRelatedDocs]       = useState<RelatedDoc[]>([]);
-  const [docsLoading, setDocsLoading]       = useState(false);
-  const [showDocsPanel, setShowDocsPanel]   = useState(false);
-  const [filterCategory, setFilterCategory] = useState<"all" | "voyage" | "evidence">("all");
+  const [selectedPoint,    setSelectedPoint]    = useState<DataPoint | null>(null);
+  const [relatedDocs,      setRelatedDocs]      = useState<RelatedDoc[]>([]);
+  const [docsLoading,      setDocsLoading]      = useState(false);
+  const [showDocsPanel,    setShowDocsPanel]    = useState(false);
+  const [filterCategory,   setFilterCategory]   = useState<"all" | "voyage" | "evidence">("all");
+  const [locationSearch,   setLocationSearch]   = useState("");
+  const [suggestions,      setSuggestions]      = useState<DataPoint[]>([]);
+  const [showSuggestions,  setShowSuggestions]  = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
 
-  // Location search state
-  const [locationSearch, setLocationSearch] = useState("");
-  const [searchSuggestions, setSearchSuggestions] = useState<DataPoint[]>([]);
-  const [showSuggestions, setShowSuggestions] = useState(false);
+  // Close suggestions on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
-  // Filter points by category AND location search
+  // Filtered visible points (category + text search)
   const visiblePoints = useMemo(() => {
-    let pts = ALL_DATA_POINTS;
-    if (filterCategory !== "all") {
-      pts = pts.filter((p) => p.category === filterCategory);
-    }
-    if (locationSearch.trim()) {
-      const q = locationSearch.toLowerCase();
-      pts = pts.filter((p) =>
+    const q = locationSearch.trim().toLowerCase();
+    return ALL_DATA_POINTS.filter((p) => {
+      if (filterCategory !== "all" && p.category !== filterCategory) return false;
+      if (!q) return true;
+      return (
         p.name.toLowerCase().includes(q) ||
         p.event.toLowerCase().includes(q)
       );
-    }
-    return pts;
+    });
   }, [filterCategory, locationSearch]);
 
-  const voyageCount   = ALL_DATA_POINTS.filter((p) => p.category === "voyage").length;
-  const evidenceCount = ALL_DATA_POINTS.filter((p) => p.category === "evidence").length;
+  // Counts that update with the search, but per-category counts are always based on full list
+  const shownVoyage   = visiblePoints.filter((p) => p.category === "voyage").length;
+  const shownEvidence = visiblePoints.filter((p) => p.category === "evidence").length;
 
-  // Autocomplete suggestions
   const handleLocationInput = (value: string) => {
     setLocationSearch(value);
     if (value.trim().length > 0) {
       const q = value.toLowerCase();
       const matches = ALL_DATA_POINTS.filter((p) =>
         p.name.toLowerCase().includes(q)
-      ).slice(0, 6);
-      setSearchSuggestions(matches);
+      ).slice(0, 8);
+      setSuggestions(matches);
       setShowSuggestions(matches.length > 0);
     } else {
-      setSearchSuggestions([]);
+      setSuggestions([]);
       setShowSuggestions(false);
     }
   };
 
   const handleSuggestionClick = (point: DataPoint) => {
     setLocationSearch(point.name);
+    setSuggestions([]);
     setShowSuggestions(false);
-    // Open the docs panel for this point
     handlePointClick(point);
   };
 
-  const handleClearLocationSearch = () => {
+  const handleClearSearch = () => {
     setLocationSearch("");
-    setSearchSuggestions([]);
+    setSuggestions([]);
     setShowSuggestions(false);
   };
 
@@ -380,56 +388,35 @@ export default function DataMap() {
     setRelatedDocs([]);
     try {
       const seenIds = new Set<string>();
-      let allResults: any[] = [];
-
+      const allResults: any[] = [];
       for (const term of point.searchTerms) {
         try {
           const res = await searchDocuments(term, 20);
           for (const doc of (res.results || [])) {
-            if (!seenIds.has(doc.id)) {
-              seenIds.add(doc.id);
-              allResults.push(doc);
-            }
+            if (!seenIds.has(doc.id)) { seenIds.add(doc.id); allResults.push(doc); }
           }
         } catch {}
       }
-
       const filtered = allResults.filter((doc) => {
         const t = (doc.title || "").toLowerCase();
         return !EXCLUDE_TITLE_PATTERNS.some((p) => t.includes(p));
       });
-
       const scored: RelatedDoc[] = [];
       for (const doc of filtered) {
         const s = scoreDoc(doc, point);
-        if (s > 0) {
-          scored.push({
-            id:              doc.id,
-            title:           doc.title,
-            author:          doc.author || "Unknown",
-            year:            doc.year || 0,
-            type:            doc.type || "document",
-            url:             doc.url,
-            _relevanceScore: s,
-          });
-        }
+        if (s > 0) scored.push({ id: doc.id, title: doc.title, author: doc.author || "Unknown",
+          year: doc.year || 0, type: doc.type || "document", url: doc.url, _relevanceScore: s });
       }
-
       const seenTitles = new Set<string>();
       const unique = scored.filter((doc) => {
         const key = doc.title.trim().toLowerCase();
         if (seenTitles.has(key)) return false;
-        seenTitles.add(key);
-        return true;
+        seenTitles.add(key); return true;
       });
-
       unique.sort((a, b) => b._relevanceScore - a._relevanceScore);
       setRelatedDocs(unique.slice(0, 8));
-    } catch {
-      setRelatedDocs([]);
-    } finally {
-      setDocsLoading(false);
-    }
+    } catch { setRelatedDocs([]); }
+    finally { setDocsLoading(false); }
   };
 
   const handlePointClick = (point: DataPoint) => {
@@ -440,6 +427,8 @@ export default function DataMap() {
 
   return (
     <div className="flex flex-col h-full bg-gray-100">
+
+      {/* Page header */}
       <div className="border-b border-gray-200 px-6 py-4 bg-white shadow-sm flex-shrink-0">
         <h1 className="text-xl font-display font-bold text-gray-900">Data Map</h1>
         <p className="text-xs text-gray-400 mt-0.5">
@@ -447,69 +436,111 @@ export default function DataMap() {
         </p>
       </div>
 
-      {/* Search + filter bar */}
-      <div className="px-6 py-3 bg-white border-b border-gray-200 flex-shrink-0 flex items-center gap-3 flex-wrap">
+      {/* ── Control bar ─────────────────────────────────────────────── */}
+      <div className="bg-white border-b border-gray-200 flex-shrink-0">
 
-        {/* Location search */}
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400 pointer-events-none" />
-          <input
-            type="text"
-            value={locationSearch}
-            onChange={(e) => handleLocationInput(e.target.value)}
-            onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
-            onFocus={() => locationSearch && setShowSuggestions(searchSuggestions.length > 0)}
-            placeholder="Search locations…"
-            className="w-full pl-9 pr-8 py-1.5 text-xs border border-gray-300 rounded-lg bg-white text-gray-800 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gold/30 focus:border-gold"
-          />
-          {locationSearch && (
-            <button onClick={handleClearLocationSearch}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-              <X className="h-3.5 w-3.5" />
-            </button>
-          )}
-          {/* Autocomplete dropdown */}
-          {showSuggestions && (
-            <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-[2000] overflow-hidden">
-              {searchSuggestions.map((point) => (
-                <button key={point.id}
-                  onMouseDown={() => handleSuggestionClick(point)}
-                  className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100 last:border-0">
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold flex-shrink-0 ${
-                    point.category === "voyage" ? "bg-red-100 text-red-700" : "bg-blue-100 text-blue-700"
-                  }`}>
-                    {point.category === "voyage" ? "Voyage" : "Evidence"}
-                  </span>
-                  <span className="text-gray-800 font-medium">{point.name}</span>
-                  {point.year && <span className="text-gray-400 ml-auto flex-shrink-0">{point.year}</span>}
-                </button>
-              ))}
-            </div>
-          )}
+        {/* Row 1: Location search */}
+        <div className="px-6 pt-3 pb-2">
+          <div className="relative" ref={searchRef}>
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none z-10" />
+            <input
+              type="text"
+              value={locationSearch}
+              onChange={(e) => handleLocationInput(e.target.value)}
+              onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
+              placeholder="Search for a location… e.g. Malacca, Peru, Antarctica"
+              className="w-full pl-10 pr-9 py-2.5 text-sm border border-gray-300 rounded-xl bg-white text-gray-800 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gold/30 focus:border-gold"
+            />
+            {locationSearch && (
+              <button onClick={handleClearSearch}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                <X className="h-4 w-4" />
+              </button>
+            )}
+
+            {/* Autocomplete dropdown */}
+            {showSuggestions && (
+              <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-xl z-[2000] overflow-hidden">
+                {suggestions.map((point) => (
+                  <button key={point.id}
+                    onMouseDown={() => handleSuggestionClick(point)}
+                    className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-3 border-b border-gray-100 last:border-0 transition-colors">
+                    <span className={`text-[10px] px-2 py-0.5 rounded font-semibold flex-shrink-0 ${
+                      point.category === "voyage" ? "bg-red-100 text-red-700" : "bg-blue-100 text-blue-700"
+                    }`}>
+                      {point.category === "voyage" ? "Voyage" : "Evidence"}
+                    </span>
+                    <span className="text-gray-800 font-medium flex-1">{point.name}</span>
+                    {point.year && <span className="text-gray-400 text-xs flex-shrink-0">{point.year}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Category filters */}
-        <span className="text-xs text-gray-500 font-medium flex-shrink-0">Show:</span>
-        {(["all", "voyage", "evidence"] as const).map((cat) => (
-          <button key={cat} onClick={() => setFilterCategory(cat)}
-            className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors flex-shrink-0 ${
-              filterCategory === cat
+        {/* Row 2: Category filter pills + counts */}
+        <div className="px-6 pb-2.5 flex items-center gap-3 flex-wrap">
+          <span className="text-xs text-gray-500 font-medium">Show:</span>
+
+          {/* All */}
+          <button onClick={() => setFilterCategory("all")}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+              filterCategory === "all"
                 ? "bg-gold text-white border-gold"
                 : "border-gray-300 text-gray-600 hover:border-gold hover:text-gold bg-white"
             }`}>
-            {cat === "all"      && `All (${ALL_DATA_POINTS.length})`}
-            {cat === "voyage"   && `Confirmed voyages (${voyageCount})`}
-            {cat === "evidence" && `Evidence locations (${evidenceCount})`}
+            All
+            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+              filterCategory === "all" ? "bg-white/20 text-white" : "bg-gray-100 text-gray-600"
+            }`}>
+              {locationSearch ? visiblePoints.length : TOTAL_COUNT}
+            </span>
           </button>
-        ))}
 
-        {/* Active search indicator */}
-        {(locationSearch || filterCategory !== "all") && (
-          <span className="text-xs text-gold font-medium flex-shrink-0">
-            {visiblePoints.length} shown
-          </span>
-        )}
+          {/* Confirmed voyages */}
+          <button onClick={() => setFilterCategory("voyage")}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+              filterCategory === "voyage"
+                ? "bg-red-600 text-white border-red-600"
+                : "border-gray-300 text-gray-600 hover:border-red-400 hover:text-red-600 bg-white"
+            }`}>
+            <span className="w-2 h-2 rounded-full bg-red-500 inline-block" />
+            Confirmed voyages
+            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+              filterCategory === "voyage" ? "bg-white/20 text-white" : "bg-gray-100 text-gray-600"
+            }`}>
+              {locationSearch && filterCategory === "voyage" ? shownVoyage : VOYAGE_COUNT}
+            </span>
+          </button>
+
+          {/* Evidence locations */}
+          <button onClick={() => setFilterCategory("evidence")}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+              filterCategory === "evidence"
+                ? "bg-blue-600 text-white border-blue-600"
+                : "border-gray-300 text-gray-600 hover:border-blue-400 hover:text-blue-600 bg-white"
+            }`}>
+            <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />
+            Evidence locations
+            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+              filterCategory === "evidence" ? "bg-white/20 text-white" : "bg-gray-100 text-gray-600"
+            }`}>
+              {locationSearch && filterCategory === "evidence" ? shownEvidence : EVIDENCE_COUNT}
+            </span>
+          </button>
+
+          {/* Live result count when searching */}
+          {locationSearch.trim() && (
+            <span className="text-xs text-gray-400 ml-auto">
+              {visiblePoints.length === 0
+                ? "No locations match"
+                : `${visiblePoints.length} location${visiblePoints.length !== 1 ? "s" : ""} match`}
+            </span>
+          )}
+        </div>
       </div>
+      {/* ── End control bar ─────────────────────────────────────────── */}
 
       <div className="relative flex-1 min-h-0 flex">
         <div className="flex-1 relative">
@@ -546,10 +577,13 @@ export default function DataMap() {
             ))}
           </MapContainer>
 
-          {/* Stats overlay */}
+          {/* Stats overlay — updates with search */}
           <div className="absolute top-4 left-14 bg-white/95 backdrop-blur-sm rounded-lg border border-gray-200 px-4 py-2 z-[1000] shadow-sm">
-            <p className="text-xs text-gray-400 uppercase tracking-wider">Locations</p>
+            <p className="text-xs text-gray-400 uppercase tracking-wider">Showing</p>
             <p className="text-2xl font-display font-bold text-gold leading-none mt-0.5">{visiblePoints.length}</p>
+            {visiblePoints.length !== TOTAL_COUNT && (
+              <p className="text-[10px] text-gray-400 mt-0.5">of {TOTAL_COUNT} total</p>
+            )}
           </div>
 
           {/* Legend */}
@@ -557,11 +591,11 @@ export default function DataMap() {
             <p className="text-xs font-semibold text-gray-700 mb-2">Legend</p>
             <div className="flex items-center gap-2 mb-1">
               <span className="w-3 h-3 rounded-full bg-red-500 inline-block" />
-              <span className="text-xs text-gray-600">Confirmed voyage stop</span>
+              <span className="text-xs text-gray-600">Confirmed voyage stop ({VOYAGE_COUNT})</span>
             </div>
             <div className="flex items-center gap-2">
               <span className="w-3 h-3 rounded-full bg-blue-500 inline-block" />
-              <span className="text-xs text-gray-600">Evidence / research location</span>
+              <span className="text-xs text-gray-600">Evidence / research ({EVIDENCE_COUNT})</span>
             </div>
             <p className="text-xs text-gray-400 mt-2 italic">Click any marker for documents</p>
           </div>
@@ -592,9 +626,11 @@ export default function DataMap() {
             <div className="px-4 py-2 border-b border-gray-100">
               <p className="text-xs font-semibold text-gray-600 flex items-center gap-1.5">
                 <FileText className="h-3.5 w-3.5 text-gold" />
-                {relatedDocs.length > 0
-                  ? `${relatedDocs.length} relevant document${relatedDocs.length > 1 ? "s" : ""} — most relevant first`
-                  : "Searching knowledge base…"}
+                {docsLoading
+                  ? "Searching knowledge base…"
+                  : relatedDocs.length > 0
+                    ? `${relatedDocs.length} relevant document${relatedDocs.length > 1 ? "s" : ""} — most relevant first`
+                    : "No relevant documents found"}
               </p>
             </div>
 
