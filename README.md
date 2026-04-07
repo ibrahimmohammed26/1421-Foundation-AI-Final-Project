@@ -1,61 +1,22 @@
-# 1421 Foundation AncientWave AI Project
+# 1421 Foundation – AncientWave AI Project
 
 **Student:** Ibrahim Mohammed  
-**Project Supervisor:** Martin Walter  
+**Project Supervisor:** Edward Anstead  
 **Client:** Ian Hudson, The 1421 Research, Education and Exploration Foundation  
-**Degree:** BSc Computer Science (Hons), City St George's, University of London
-
-## Live Demo
-
-🌐 **Frontend (Vercel):** https://1421-foundation-ai-final-project.vercel.app
+**Degree:** BSc Computer Science (Hons), City St George’s, University of London  
 
 ---
 
-## GitHub Repository Structure
-1421-Foundation-AI-Final-Project/
-├── .gitignore
-├── .python-version
-├── LICENSE
-├── Procfile
-├── README.md
-├── package.json
-├── package-lock.json
-├── requirements.txt
-├── backend/
-│ ├── main.py
-│ ├── requirements.txt
-│ └── .env.example
-├── data/
-│ └── vector_databases/
-│ └── main_index/
-│ └── faiss_index.bin
-├── frontend/
-│ ├── src/
-│ │ ├── App.tsx
-│ │ ├── pages/
-│ │ │ ├── Chat.tsx
-│ │ │ ├── DataMap.tsx
-│ │ │ └── Feedback.tsx
-│ │ └── lib/
-│ │ └── api.ts
-│ ├── index.html
-│ ├── package.json
-│ ├── package-lock.json
-│ ├── vite.config.js
-│ ├── postcss.config.js
-│ ├── tailwind.config.js
-│ └── .env.example
-├── raw_csvs/ (source data files)
-├── scraping_scripts/ (scripts used to collect data)
-├── streamlit/ (prototyping dashboard)
-└── test/ (test scripts including OpenAI key verification)
+## Live Demo
+
+**Frontend (Vercel):** https://1421-foundation-ai-final-project.vercel.app
 
 ---
 
 ## Technology Stack
 
 | Component | Technology |
-|-----------|------------|
+|----------|------------|
 | Frontend | React, TypeScript, Tailwind CSS, Leaflet.js, Vite |
 | Backend | FastAPI (Python), LangChain |
 | Database | PostgreSQL with PostGIS |
@@ -65,77 +26,135 @@
 
 ---
 
-## Installation & Testing Instructions
+## Installation and Local Development
 
 ### Prerequisites
-- Node.js (v18+)
-- Python (3.10+)
-- OpenAI API key
+- Node.js (v18+)  
+- Python (3.10+)  
+- OpenAI API key  
 
-### Run Locally
+---
 
-**1. Backend**
+## 1. Backend Setup (FastAPI)
 
+```bash
+# Navigate to backend folder
 cd backend
+
+# Create and activate virtual environment
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+source venv/bin/activate    # Windows: venv\Scripts\activate
+
+# Install dependencies
 pip install -r requirements.txt
+
+# Create environment file
 cp .env.example .env
-# Add your OPENAI_API_KEY to .env
+```
+
+Add your OpenAI key to `.env`:
+
+```bash
+OPENAI_API_KEY=your_api_key_here
+```
+
+Run the server:
+
+```bash
 uvicorn main:app --reload
-Backend runs at http://localhost:8000 | API docs: http://localhost:8000/docs
+```
 
-2. Frontend
+Backend runs at:  
+http://localhost:8000  
+API documentation:  
+http://localhost:8000/docs
 
+---
+
+## 2. Frontend Setup (React + Vite)
+
+```bash
 cd frontend
+
+# Install dependencies
 npm install
+
+# Create environment file
 cp .env.example .env
-# Set VITE_API_URL=http://localhost:8000
+```
+
+Edit `.env`:
+
+```bash
+VITE_API_URL=http://localhost:8000
+```
+
+Start the development server:
+
+```bash
 npm run dev
-Frontend runs at http://localhost:5173
+```
 
-Run Tests
+Frontend runs at:  
+http://localhost:5173
 
+---
+
+## Running Tests
+
+```bash
 cd test
-python test_openai_connection.py   # Verifies API key works
-Deployment
-Service	Platform	Status
-Frontend	Vercel	✅ Live
-Backend	Koyeb	✅ Deployed
+python test_openai_connection.py
+```
 
-Reuse Summary (Appendix B)
-Component	Written by me?	Notes
-backend/main.py	✅ Yes	All original code
-frontend/src/pages/Chat.tsx	✅ Yes	Original
-frontend/src/pages/DataMap.tsx	✅ Yes	Original
-frontend/src/lib/api.ts	✅ Yes	Original
-scraping_scripts/	✅ Yes	Original scraping code
-test/	✅ Yes	Original test scripts
-data/vector_databases/	❌ No	Generated FAISS index (processed data)
-raw_csvs/	❌ No	Client-provided source data
-node_modules/, venv/	❌ No	Excluded via .gitignore
+This verifies that the OpenAI API key is working.
+
+---
+
+## Deployment Overview
+
+| Service | Platform | Status |
+|---------|----------|--------|
+| Frontend | Vercel | Live |
+| Backend | Koyeb | Deployed |
+
+---
+
+## Reuse Summary (Appendix B)
+
+| Component | Written by me? | Notes |
+|-----------|----------------|-------|
+| backend/main.py | Yes | Original code |
+| frontend/src/pages/Chat.tsx | Yes | Original code |
+| frontend/src/pages/DataMap.tsx | Yes | Original code |
+| frontend/src/lib/api.ts | Yes | Original code |
+| scraping_scripts/ | Yes | Original scraping code |
+| test/ | Yes | Original test scripts |
+| data/vector_databases/ | Yes | Generated via code |
+| raw_csvs/ | No | Client-provided source data |
+| node_modules/, venv/ | No | Standard ignored directories |
+
 AI Tools Used: None. All code written by Ibrahim Mohammed.
 
-Confidentiality & Access
-Repository access: Public 
+---
 
-Live site: Publicly accessible (no sensitive data exposed)
+## Confidentiality and Access
 
-Client data: Raw CSV files and FAISS index stored securely; not all data is public
+- Repository access: Public  
+- Live site: Publicly accessible (no sensitive data exposed)  
+- Client data: Raw CSV files and FAISS index stored securely 
 
-Notes for Markers
+---
 
-.gitignore excludes node_modules/, venv/, __pycache__/, .env files
+## Notes for Markers
 
-.env.example files are provided as templates
+- `.gitignore` excludes `node_modules/`, `venv/`, `__pycache__/`, and `.env`  
+- `.env.example` files are included as templates    
+- `raw_csvs/` contains client-provided data  
 
-The streamlit/ folder contains an optional prototyping dashboard (not required for core functionality)
+---
 
-The raw_csvs/ folder contains client-provided source data
+## Contact
 
-Contact
-Ibrahim Mohammed: Ibrahim.mohammed.4@city.ac.uk
-
-
-
-
+**Ibrahim Mohammed**  
+Email: ibrahim.mohammed.4@city.ac.uk
