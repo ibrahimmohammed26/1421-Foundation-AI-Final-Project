@@ -1,4 +1,3 @@
-```markdown
 # 1421 Foundation AncientWave AI Project
 
 **Student:** Ibrahim Mohammed  
@@ -10,48 +9,61 @@
 
 🌐 **Frontend (Vercel):** https://1421-foundation-ai-final-project.vercel.app
 
-## Repository Structure
+---
 
-```
-
+## GitHub Repository Structure
 1421-Foundation-AI-Final-Project/
-├── backend/
-│   ├── main.py              # FastAPI app + LangChain chat
-│   ├── requirements.txt     # Python dependencies
-│   ├── Dockerfile
-│   └── .env.example
-├── frontend/
-│   ├── src/
-│   │   ├── App.tsx          # Layout + routing
-│   │   ├── pages/
-│   │   │   ├── Chat.tsx     # AI chat interface
-│   │   │   ├── DataMap.tsx  # Leaflet interactive map
-│   │   │   └── Feedback.tsx
-│   │   └── lib/
-│   │       └── api.ts       # API client
-│   ├── package.json
-│   └── .env.example
-├── data/
-│   └── vector_databases/
-│       └── main_index/
-│           └── faiss_index.bin
-├── Procfile
-├── requirements.txt          # Root-level dependencies
+├── .gitignore
 ├── .python-version
-└── README.md
+├── LICENSE
+├── Procfile
+├── README.md
+├── package.json
+├── package-lock.json
+├── requirements.txt
+├── backend/
+│ ├── main.py
+│ ├── requirements.txt
+│ └── .env.example
+├── data/
+│ └── vector_databases/
+│ └── main_index/
+│ └── faiss_index.bin
+├── frontend/
+│ ├── src/
+│ │ ├── App.tsx
+│ │ ├── pages/
+│ │ │ ├── Chat.tsx
+│ │ │ ├── DataMap.tsx
+│ │ │ └── Feedback.tsx
+│ │ └── lib/
+│ │ └── api.ts
+│ ├── index.html
+│ ├── package.json
+│ ├── package-lock.json
+│ ├── vite.config.js
+│ ├── postcss.config.js
+│ ├── tailwind.config.js
+│ └── .env.example
+├── raw_csvs/ (source data files)
+├── scraping_scripts/ (scripts used to collect data)
+├── streamlit/ (prototyping dashboard)
+└── test/ (test scripts including OpenAI key verification)
 
-```
+---
 
 ## Technology Stack
 
 | Component | Technology |
 |-----------|------------|
-| Frontend | React, TypeScript, Tailwind CSS, Leaflet.js |
+| Frontend | React, TypeScript, Tailwind CSS, Leaflet.js, Vite |
 | Backend | FastAPI (Python), LangChain |
 | Database | PostgreSQL with PostGIS |
 | LLM | OpenAI GPT-4 (via API) |
 | Deployment | Vercel (frontend), Koyeb (backend) |
 | Version Control | Git + GitHub |
+
+---
 
 ## Installation & Testing Instructions
 
@@ -63,7 +75,7 @@
 ### Run Locally
 
 **1. Backend**
-```bash
+
 cd backend
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
@@ -71,61 +83,59 @@ pip install -r requirements.txt
 cp .env.example .env
 # Add your OPENAI_API_KEY to .env
 uvicorn main:app --reload
-```
-
 Backend runs at http://localhost:8000 | API docs: http://localhost:8000/docs
 
 2. Frontend
 
-```bash
 cd frontend
 npm install
 cp .env.example .env
 # Set VITE_API_URL=http://localhost:8000
 npm run dev
-```
-
 Frontend runs at http://localhost:5173
 
-Test the System
+Run Tests
 
-1. Open chat interface → ask: "What evidence suggests Chinese contact with Panama?"
-2. Open map → verify voyage routes and location markers appear
-3. Test all 3 client UAT tasks (per PDD)
-
+cd test
+python test_openai_connection.py   # Verifies API key works
 Deployment
+Service	Platform	Status
+Frontend	Vercel	✅ Live
+Backend	Koyeb	✅ Deployed
 
-Service Platform Status
-Frontend Vercel ✅ Live
-Backend Koyeb ✅ Deployed
-
-Reuse Summary (Appendix B requirement)
-
-Component Source Lines (approx) Written by me
-Chat.tsx Original 320 ✅ Yes
-DataMap.tsx Original 280 ✅ Yes
-API client (api.ts) Original 150 ✅ Yes
-FastAPI main.py Original with LangChain reference 420 ✅ Yes (LangChain used as library)
-Tailwind config Generated via npm create vite 15 ❌ No (template)
-Leaflet CSS CDN library N/A ❌ No (external library)
-
+Reuse Summary (Appendix B)
+Component	Written by me?	Notes
+backend/main.py	✅ Yes	All original code
+frontend/src/pages/Chat.tsx	✅ Yes	Original
+frontend/src/pages/DataMap.tsx	✅ Yes	Original
+frontend/src/lib/api.ts	✅ Yes	Original
+scraping_scripts/	✅ Yes	Original scraping code
+test/	✅ Yes	Original test scripts
+data/vector_databases/	❌ No	Generated FAISS index (processed data)
+raw_csvs/	❌ No	Client-provided source data
+node_modules/, venv/	❌ No	Excluded via .gitignore
 AI Tools Used: None. All code written by Ibrahim Mohammed.
 
 Confidentiality & Access
+Repository access: Public 
 
-· Repository access: Private (share with markers: @city.ac.uk email required)
-· Live site: Publicly accessible (no sensitive data exposed)
-· Client data: Stored in password-protected OneDrive; not included in public repo
+Live site: Publicly accessible (no sensitive data exposed)
 
-Markers' Instructions
+Client data: Raw CSV files and FAISS index stored securely; not all data is public
 
-1. View live demo: https://1421-foundation-ai-final-project.vercel.app
-2. Access source code: Grant @city.ac.uk read access to this GitHub repo
-3. Test backend API: (deployed on Koyeb) contact student for URL
-4. Contact for issues: Ibrahim.mohammed.4@city.ac.uk
+Notes for Markers
 
-Related Documents
+.gitignore excludes node_modules/, venv/, __pycache__/, .env files
 
-· Project Definition Document (Appendix A of final report)
-· Minutes of supervisory meetings (Appendix C)
-· Client Information Sheet (Appendix B of PDD)
+.env.example files are provided as templates
+
+The streamlit/ folder contains an optional prototyping dashboard (not required for core functionality)
+
+The raw_csvs/ folder contains client-provided source data
+
+Contact
+Ibrahim Mohammed: Ibrahim.mohammed.4@city.ac.uk
+
+
+
+
