@@ -1,131 +1,160 @@
-```markdown
-# 1421 Foundation AncientWave AI Project
+# 1421 Foundation – AncientWave AI Project
 
 **Student:** Ibrahim Mohammed  
-**Project Supervisor:** Martin Walter  
+**Project Supervisor:** Edward Anstead  
 **Client:** Ian Hudson, The 1421 Research, Education and Exploration Foundation  
-**Degree:** BSc Computer Science (Hons), City St George's, University of London
+**Degree:** BSc Computer Science (Hons), City St George’s, University of London  
+
+---
 
 ## Live Demo
 
-🌐 **Frontend (Vercel):** https://1421-foundation-ai-final-project.vercel.app
+**Frontend (Vercel):** https://1421-foundation-ai-final-project.vercel.app
 
-## Repository Structure
-
-```
-
-1421-Foundation-AI-Final-Project/
-├── backend/
-│   ├── main.py              # FastAPI app + LangChain chat
-│   ├── requirements.txt     # Python dependencies
-│   ├── Dockerfile
-│   └── .env.example
-├── frontend/
-│   ├── src/
-│   │   ├── App.tsx          # Layout + routing
-│   │   ├── pages/
-│   │   │   ├── Chat.tsx     # AI chat interface
-│   │   │   ├── DataMap.tsx  # Leaflet interactive map
-│   │   │   └── Feedback.tsx
-│   │   └── lib/
-│   │       └── api.ts       # API client
-│   ├── package.json
-│   └── .env.example
-├── data/
-│   └── vector_databases/
-│       └── main_index/
-│           └── faiss_index.bin
-├── Procfile
-├── requirements.txt          # Root-level dependencies
-├── .python-version
-└── README.md
-
-```
+---
 
 ## Technology Stack
 
 | Component | Technology |
-|-----------|------------|
-| Frontend | React, TypeScript, Tailwind CSS, Leaflet.js |
+|----------|------------|
+| Frontend | React, TypeScript, Tailwind CSS, Leaflet.js, Vite |
 | Backend | FastAPI (Python), LangChain |
 | Database | PostgreSQL with PostGIS |
 | LLM | OpenAI GPT-4 (via API) |
 | Deployment | Vercel (frontend), Koyeb (backend) |
 | Version Control | Git + GitHub |
 
-## Installation & Testing Instructions
+---
+
+## Installation and Local Development
 
 ### Prerequisites
-- Node.js (v18+)
-- Python (3.10+)
-- OpenAI API key
+- Node.js (v18+)  
+- Python (3.10+)  
+- OpenAI API key  
 
-### Run Locally
+---
 
-**1. Backend**
+## 1. Backend Setup (FastAPI)
+
 ```bash
+# Navigate to backend folder
 cd backend
+
+# Create and activate virtual environment
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+source venv/bin/activate    # Windows: venv\Scripts\activate
+
+# Install dependencies
 pip install -r requirements.txt
+
+# Create environment file
 cp .env.example .env
-# Add your OPENAI_API_KEY to .env
+```
+
+Add your OpenAI key to `.env`:
+
+```bash
+OPENAI_API_KEY=your_api_key_here
+```
+
+Run the server:
+
+```bash
 uvicorn main:app --reload
 ```
 
-Backend runs at http://localhost:8000 | API docs: http://localhost:8000/docs
+Backend runs at:  
+http://localhost:8000  
+API documentation:  
+http://localhost:8000/docs
 
-2. Frontend
+---
+
+## 2. Frontend Setup (React + Vite)
 
 ```bash
 cd frontend
+
+# Install dependencies
 npm install
+
+# Create environment file
 cp .env.example .env
-# Set VITE_API_URL=http://localhost:8000
+```
+
+Edit `.env`:
+
+```bash
+VITE_API_URL=http://localhost:8000
+```
+
+Start the development server:
+
+```bash
 npm run dev
 ```
 
-Frontend runs at http://localhost:5173
+Frontend runs at:  
+http://localhost:5173
 
-Test the System
+---
 
-1. Open chat interface → ask: "What evidence suggests Chinese contact with Panama?"
-2. Open map → verify voyage routes and location markers appear
-3. Test all 3 client UAT tasks (per PDD)
+## Running Tests
 
-Deployment
+```bash
+cd test
+python test_openai_connection.py
+```
 
-Service Platform Status
-Frontend Vercel ✅ Live
-Backend Koyeb ✅ Deployed
+This verifies that the OpenAI API key is working.
 
-Reuse Summary (Appendix B requirement)
+---
 
-Component Source Lines (approx) Written by me
-Chat.tsx Original 320 ✅ Yes
-DataMap.tsx Original 280 ✅ Yes
-API client (api.ts) Original 150 ✅ Yes
-FastAPI main.py Original with LangChain reference 420 ✅ Yes (LangChain used as library)
-Tailwind config Generated via npm create vite 15 ❌ No (template)
-Leaflet CSS CDN library N/A ❌ No (external library)
+## Deployment Overview
+
+| Service | Platform | Status |
+|---------|----------|--------|
+| Frontend | Vercel | Live |
+| Backend | Koyeb | Deployed |
+
+---
+
+## Reuse Summary (Appendix B)
+
+| Component | Written by me? | Notes |
+|-----------|----------------|-------|
+| backend/main.py | Yes | Original code |
+| frontend/src/pages/Chat.tsx | Yes | Original code |
+| frontend/src/pages/DataMap.tsx | Yes | Original code |
+| frontend/src/lib/api.ts | Yes | Original code |
+| scraping_scripts/ | Yes | Original scraping code |
+| test/ | Yes | Original test scripts |
+| data/vector_databases/ | Yes | Generated via code |
+| raw_csvs/ | No | Client-provided source data |
+| node_modules/, venv/ | No | Standard ignored directories |
 
 AI Tools Used: None. All code written by Ibrahim Mohammed.
 
-Confidentiality & Access
+---
 
-· Repository access: Private (share with markers: @city.ac.uk email required)
-· Live site: Publicly accessible (no sensitive data exposed)
-· Client data: Stored in password-protected OneDrive; not included in public repo
+## Confidentiality and Access
 
-Markers' Instructions
+- Repository access: Public  
+- Live site: Publicly accessible (no sensitive data exposed)  
+- Client data: Raw CSV files and FAISS index stored securely 
 
-1. View live demo: https://1421-foundation-ai-final-project.vercel.app
-2. Access source code: Grant @city.ac.uk read access to this GitHub repo
-3. Test backend API: (deployed on Koyeb) contact student for URL
-4. Contact for issues: Ibrahim.mohammed.4@city.ac.uk
+---
 
-Related Documents
+## Notes for Markers
 
-· Project Definition Document (Appendix A of final report)
-· Minutes of supervisory meetings (Appendix C)
-· Client Information Sheet (Appendix B of PDD)
+- `.gitignore` excludes `node_modules/`, `venv/`, `__pycache__/`, and `.env`  
+- `.env.example` files are included as templates    
+- `raw_csvs/` contains client-provided data  
+
+---
+
+## Contact
+
+**Ibrahim Mohammed**  
+Email: ibrahim.mohammed.4@city.ac.uk
