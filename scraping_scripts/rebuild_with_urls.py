@@ -6,6 +6,12 @@ Author assignment per source:
   1421_foundation_scraped.zip                  → "1421 Foundation (Website)"
   All Gavin Menzies ZIPs + pdf_evidence        → "Gavin Menzies"
 
+URL assignment:
+  Facebook posts: always use post_url (the Facebook post's own permalink),
+  NOT any generic 'url' column (which is the external link shared IN the post).
+  Facebook pages: use page_url.
+  All other sources: use source_url / url / link in that priority order.
+
 Run:  python rebuild_with_urls.py
 """
 
@@ -47,6 +53,7 @@ OUTPUT_DIR = Path(r"C:\Users\ibrah\PycharmProjects\PythonProject12\scripts\vecto
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 BOOK_ZIP_NAME   = "pdf_evidence_scraped.zip"
 
+# Facebook nav pages — excluded (not content)
 EXCLUDED_URLS = {
     "https://www.facebook.com/1421foundation/",
     "https://www.facebook.com/1421foundation/about",
@@ -65,7 +72,7 @@ EXCLUDED_URLS = {
     "https://www.facebook.com/1421foundation/map",
     "https://www.facebook.com/1421foundation/likes",
     "https://www.facebook.com/1421foundation/reviews_given",
-    "https://www.gavinmenzies.net/china/gallery/shipwreck/"
+    "https://www.gavinmenzies.net/china/gallery/shipwreck/",
 }
 
 def is_excluded_url(url: str) -> bool:
@@ -74,49 +81,45 @@ def is_excluded_url(url: str) -> bool:
     clean = url.strip().rstrip("/")
     return any(clean == ex.rstrip("/") for ex in EXCLUDED_URLS)
 
-# ── Author defaults per ZIP ───────────────────────────────────────────────────
+# ── Source classification ─────────────────────────────────────────────────────
+
+def _is_facebook_posts_zip(zip_name: str) -> bool:
+    return "facebook_posts" in zip_name.lower()
+
+def _is_facebook_pages_zip(zip_name: str) -> bool:
+    z = zip_name.lower()
+    return "facebook" in z and "pages" in z
+
+def _is_facebook_zip(zip_name: str) -> bool:
+    return "facebook" in zip_name.lower()
 
 def _default_author(zip_name: str) -> str:
-    """
-    Three distinct authors based on source:
-      - Facebook ZIPs           → "1421 Foundation (Facebook)"
-      - 1421 Foundation website → "1421 Foundation (Website)"
-      - Gavin Menzies / books   → "Gavin Menzies"
-    """
     z = zip_name.lower()
     if "facebook" in z:
         return "1421 Foundation (Facebook)"
     if "1421_foundation" in z:
         return "1421 Foundation (Website)"
-    # All Gavin Menzies evidence ZIPs and books
     return "Gavin Menzies"
 
 # ── Title cleaning ────────────────────────────────────────────────────────────
 
 def _clean_title(raw: str) -> str:
-    """
-    Remove scraper artefacts:
-    - Repeated author names (e.g. "Gavin MenziesGavin Menzies")
-    - Author-name-only titles
-    - Pathologically long strings
-    """
     if not raw:
         return ""
-
     t = raw.strip()
 
-    # Detect back-to-back duplicate (no space): "Gavin MenziesGavin Menzies"
+    # Back-to-back duplicate without space: "Gavin MenziesGavin Menzies"
     half = len(t) // 2
     if half > 10 and t[:half] == t[half:]:
         t = t[:half].strip()
 
-    # Detect word-level duplicate: "Gavin Menzies Gavin Menzies"
+    # Word-level duplicate: "Gavin Menzies Gavin Menzies"
     words = t.split()
     mid = len(words) // 2
     if mid > 0 and words[:mid] == words[mid:]:
         t = " ".join(words[:mid]).strip()
 
-    # Title that IS just an author name → discard, let content generate title
+    # Title that is just an author name → discard
     if re.fullmatch(
         r"(Gavin Menzies|1421 Foundation|The 1421 Foundation|"
         r"1421 Foundation \(Facebook\)|1421 Foundation \(Website\))",
@@ -128,26 +131,20 @@ def _clean_title(raw: str) -> str:
     return t[:400] if t else ""
 
 def _title_from_content(content: str, fallback: str) -> str:
-    """Derive a readable title from the first meaningful sentence."""
     if not content or not content.strip():
         return fallback[:400]
-
     text = re.sub(
         r"^(Title|Author|Content|Source|Type|Tags)\s*:\s*",
         "", content.strip(), flags=re.IGNORECASE
     ).strip()
-
     if not text:
         return fallback[:400]
-
     parts = re.split(r"(?<=[.!?])\s+", text, maxsplit=1)
     first = parts[0].strip()
-
     if len(first) < 15:
         first = text[:200].strip()
     elif len(first) > 300:
         first = first[:300].strip()
-
     first = first.rstrip(".,;:")
     return first[:400] if first else fallback[:400]
 
@@ -163,9 +160,13 @@ def _read_csv(zip_ref, csv_filename: str):
     return None
 
 def _find_col(columns, *keywords):
+    """Return the first column whose lowercase name contains any keyword (exact priority order)."""
     for kw in keywords:
         for col in columns:
-            if kw in str(col).lower():
+            if str(col).lower() == kw:        # exact match first
+                return col
+        for col in columns:
+            if kw in str(col).lower():         # then substring match
                 return col
     return None
 
@@ -177,6 +178,50 @@ def _val(row, col) -> str:
         return ""
     return str(v).strip()
 
+def _valid_url(raw: str) -> str:
+    """Return the URL if it starts with http, else empty string."""
+    s = raw.strip()
+    return s if s.startswith(("http://", "https://")) else ""
+
+# ── URL column selection per source ──────────────────────────────────────────
+
+def _pick_url_col(cols: list, zip_name: str) -> str | None:
+    """
+    For Facebook posts: return post_url column (the permalink to the post itself).
+    For Facebook pages: return page_url column.
+    For everything else: use source_url > url > link > document_url order.
+
+    This prevents the generic 'url' column (which holds the external link
+    shared inside a post) from being used as the document's source URL.
+    """
+    col_names_lower = {str(c).lower(): c for c in cols}
+
+    if _is_facebook_posts_zip(zip_name):
+        # Explicit priority: post_url only.
+        # The 'url' column in facebook_posts contains the external shared link,
+        # which is NOT the permalink to the post — we deliberately skip it.
+        for candidate in ("post_url",):
+            if candidate in col_names_lower:
+                return col_names_lower[candidate]
+        # Fallback: any column with 'post' and 'url' in the name
+        for col in cols:
+            c = str(col).lower()
+            if "post" in c and "url" in c:
+                return col
+        return None  # No post URL found — better to have no URL than wrong URL
+
+    if _is_facebook_pages_zip(zip_name):
+        for candidate in ("page_url", "post_url", "source_url", "url"):
+            if candidate in col_names_lower:
+                return col_names_lower[candidate]
+        return None
+
+    # Non-Facebook: standard priority
+    for candidate in ("source_url", "document_url", "url", "link"):
+        if candidate in col_names_lower:
+            return col_names_lower[candidate]
+    return None
+
 # ── Process one CSV ───────────────────────────────────────────────────────────
 
 def process_csv(df, csv_filename: str, zip_name: str) -> list:
@@ -184,26 +229,29 @@ def process_csv(df, csv_filename: str, zip_name: str) -> list:
     if df is None or len(df) == 0:
         return docs
 
-    cols     = list(df.columns)
-    is_book  = zip_name == BOOK_ZIP_NAME
+    cols    = list(df.columns)
+    is_book = zip_name == BOOK_ZIP_NAME
 
     content_col = _find_col(cols, "full_content", "content", "post_content", "page_content", "text", "body")
     title_col   = _find_col(cols, "title", "document_title", "name", "post_title", "page_title")
-    url_col     = _find_col(cols, "source_url", "url", "link", "document_url", "post_url", "page_url", "source")
-    author_col  = _find_col(cols, "author", "posted_by", "creator")
+    author_col  = _find_col(cols, "author", "posted_by", "creator", "post_author")
+
+    # ── URL column — the key fix ──────────────────────────────────────
+    url_col = _pick_url_col(cols, zip_name)
 
     if is_book:
         print(f"      [BOOKS] Columns in {csv_filename}: {cols}")
+    elif _is_facebook_posts_zip(zip_name):
+        print(f"      [FB POSTS] URL col → '{url_col}' | Columns: {cols}")
+    elif _is_facebook_pages_zip(zip_name):
+        print(f"      [FB PAGES] URL col → '{url_col}' | Columns: {cols}")
 
     default_author = _default_author(zip_name)
-    skipped        = {"excluded": 0, "empty": 0}
+    skipped = {"excluded": 0, "empty": 0}
 
     for idx, row in df.iterrows():
         content = _val(row, content_col)
-        url     = _val(row, url_col)
-
-        if url and not url.startswith(("http://", "https://")):
-            url = ""
+        url     = _valid_url(_val(row, url_col))
 
         if is_excluded_url(url):
             skipped["excluded"] += 1
@@ -214,9 +262,6 @@ def process_csv(df, csv_filename: str, zip_name: str) -> list:
             continue
 
         # ── Author ────────────────────────────────────────────────────
-        # The CSV author column is rarely populated for scraped pages,
-        # so we always fall back to the per-source default, which is
-        # now properly differentiated.
         raw_author = _val(row, author_col)
         if raw_author and len(raw_author) > 1:
             cleaned_author = _clean_title(raw_author)
@@ -237,7 +282,7 @@ def process_csv(df, csv_filename: str, zip_name: str) -> list:
             fallback = f"Document from {Path(csv_filename).stem}"
             title = _title_from_content(content, fallback)
 
-        # ── Content text ──────────────────────────────────────────────
+        # ── Content ───────────────────────────────────────────────────
         content_text = content if content else (f"Source: {url}" if url else "[No content available]")
 
         docs.append({
@@ -321,7 +366,7 @@ def deduplicate(documents: list) -> list:
 
 def build_index(documents: list, output_dir: Path) -> None:
     """
-    Pickle format that main.py expects:
+    Pickle format main.py expects:
         {"documents": [raw_content_str, ...], "metadatas": [{...}, ...]}
     """
     print(f"\n  Loading embedding model: {EMBEDDING_MODEL}")
@@ -364,11 +409,11 @@ def build_index(documents: list, output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     faiss.write_index(index, str(output_dir / "faiss_index.bin"))
-    print(f"  Saved FAISS index     → {output_dir / 'faiss_index.bin'}")
+    print(f"  Saved FAISS index  → {output_dir / 'faiss_index.bin'}")
 
     with open(output_dir / "faiss_metadata.pkl", "wb") as f:
         pickle.dump({"documents": raw_texts, "metadatas": metadatas}, f)
-    print(f"  Saved metadata        → {output_dir / 'faiss_metadata.pkl'}")
+    print(f"  Saved metadata     → {output_dir / 'faiss_metadata.pkl'}")
 
     source_breakdown: dict = {}
     for doc in documents:
@@ -383,7 +428,7 @@ def build_index(documents: list, output_dir: Path) -> None:
             "created_at":          datetime.now().isoformat(),
             "source_breakdown":    source_breakdown,
         }, f, indent=2)
-    print(f"  Saved stats           → {output_dir / 'database_stats.json'}")
+    print(f"  Saved stats        → {output_dir / 'database_stats.json'}")
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
@@ -405,11 +450,10 @@ def main():
     all_docs = deduplicate(all_docs)
     print(f"Total after deduplication:  {len(all_docs)}")
 
-    # Author coverage report
+    # ── Diagnostics ───────────────────────────────────────────────────
     by_author: dict = {}
     for d in all_docs:
-        a = d["author"]
-        by_author[a] = by_author.get(a, 0) + 1
+        by_author[d["author"]] = by_author.get(d["author"], 0) + 1
     print("\nAuthor breakdown:")
     for a, n in sorted(by_author.items()):
         print(f"  {a}: {n}")
@@ -417,10 +461,21 @@ def main():
     no_author = [d for d in all_docs if not d["author"]]
     print(f"\nDocuments with no author: {len(no_author)} (should be 0)")
 
+    # Spot-check Facebook post URLs
+    fb_posts = [d for d in all_docs if "facebook_posts" in d["source_zip"].lower()]
+    fb_with_url = [d for d in fb_posts if d["url"]]
+    fb_non_fb_url = [d for d in fb_with_url if "facebook.com" not in d["url"]]
+    print(f"\nFacebook posts:          {len(fb_posts)}")
+    print(f"  With a URL:            {len(fb_with_url)}")
+    print(f"  Non-Facebook URLs:     {len(fb_non_fb_url)}  ← should be 0 or very low")
+    if fb_non_fb_url:
+        print("  Sample non-FB URLs (first 3):")
+        for d in fb_non_fb_url[:3]:
+            print(f"    {d['url'][:100]}")
+
     breakdown: dict = {}
     for d in all_docs:
-        k = d["source_zip"]
-        breakdown[k] = breakdown.get(k, 0) + 1
+        breakdown[d["source_zip"]] = breakdown.get(d["source_zip"], 0) + 1
     print("\nSource breakdown:")
     for k, v in sorted(breakdown.items()):
         print(f"  {k}: {v}")
