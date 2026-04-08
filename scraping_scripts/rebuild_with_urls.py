@@ -1,20 +1,3 @@
-"""
-rebuild_with_urls.py — FINAL VERSION
----------------------------------------
-Author assignment per source:
-  facebook_pages_csv.zip / facebook_posts.zip  → "1421 Foundation (Facebook)"
-  1421_foundation_scraped.zip                  → "1421 Foundation (Website)"
-  All Gavin Menzies ZIPs + pdf_evidence        → "Gavin Menzies"
-
-URL assignment:
-  Facebook posts: always use post_url (the Facebook post's own permalink),
-  NOT any generic 'url' column (which is the external link shared IN the post).
-  Facebook pages: use page_url.
-  All other sources: use source_url / url / link in that priority order.
-
-Run:  python rebuild_with_urls.py
-"""
-
 import os
 import re
 import sys
