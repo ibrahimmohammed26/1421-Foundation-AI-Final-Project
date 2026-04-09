@@ -1,13 +1,10 @@
-# 1421_geo_research_app.py
+
 """
 1421 Research AI with Geographical Mapping using Plotly
 - Answers questions about your research data
 - Extracts locations from text and queries
 - Generates interactive maps with Plotly (no extra installation needed)
 - Shows relevant documents with locations highlighted
-
-Run:
-    streamlit run 1421_geo_research_app.py
 """
 
 import streamlit as st
