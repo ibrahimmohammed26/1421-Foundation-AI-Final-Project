@@ -1,0 +1,29 @@
+# ─────────────────────────────────────────────────────────────────────
+# requirements-local.txt  —  LOCAL MACHINE ONLY
+# Install with:  pip install -r requirements-local.txt
+#
+# Used by:
+#   • rebuild_with_urls.py      (builds the FAISS index)
+#   • build_database.py         (SQLite + FAISS pipeline)
+#   • Any Streamlit analysis/prototype scripts
+#
+# Do NOT deploy this to Koyeb — sentence-transformers pulls in
+# PyTorch (~1.5 GB) which breaks the 2 GB image size limit.
+# ─────────────────────────────────────────────────────────────────────
+
+# Everything from the backend (so local testing of main.py works too)
+-r requirements.txt
+
+# ── Local-only heavy dependencies ────────────────────────────────────
+
+# Embedding model used by rebuild_with_urls.py to build the FAISS index
+sentence-transformers==3.3.1
+
+# Streamlit — prototype/analysis scripts
+streamlit>=1.32.0
+
+# Plotting — Streamlit analysis scripts
+plotly==5.24.1
+
+# SQLite pipeline (build_database.py)
+tqdm==4.66.5
