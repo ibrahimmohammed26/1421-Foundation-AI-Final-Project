@@ -28,3 +28,6 @@ tiktoken
 
 # Email
 resend
+
+# Streamlit
+streamlit>=1.32.0

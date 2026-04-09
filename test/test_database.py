@@ -3,10 +3,10 @@ import sqlite3
 import pandas as pd
 
 
-def verify_database():
+def test_database():
     """Verify your current SQLite database"""
 
-    db_path = 'knowledge_base_clean.db'
+    db_path = 'data\\knowledge_base.db'
 
     print("=" * 70)
     print("🔍 VERIFYING YOUR SQLITE DATABASE")
@@ -63,4 +63,4 @@ def verify_database():
 
 
 if __name__ == "__main__":
-    verify_database()
+    test_database()
