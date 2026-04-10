@@ -11,7 +11,7 @@
 # PyTorch (~1.5 GB) which breaks the 2 GB image size limit.
 # ─────────────────────────────────────────────────────────────────────
 
-# Everything from the backend (so local testing of main.py works too)
+# local testing
 -r requirements.txt
 
 # ── Local-only heavy dependencies ────────────────────────────────────
