@@ -255,8 +255,6 @@ export default function Settings() {
               {[
                 { keys: ["Enter"],           action: "Send chat message" },
                 { keys: ["Shift", "Enter"],  action: "New line in chat" },
-                { keys: ["Escape"],          action: "Close modals / panels" },
-                { keys: ["Ctrl", "K"],       action: "Focus search (Documents page)" },
               ].map(({ keys, action }) => (
                 <div key={action} className="flex items-center justify-between py-1.5">
                   <span className="text-sm text-gray-600">{action}</span>

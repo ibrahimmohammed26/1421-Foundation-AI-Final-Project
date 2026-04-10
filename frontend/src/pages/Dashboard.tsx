@@ -34,7 +34,7 @@ export default function Dashboard() {
   const [stats, setStats] = useState<Stats>({
     feedback_count: 0,
     locations_count: 52,
-    documents_count: 889,
+    documents_count: 870,
   });
   const [loading, setLoading] = useState(true);
   const [conversationCount, setConversationCount] = useState(getConversationCount);
