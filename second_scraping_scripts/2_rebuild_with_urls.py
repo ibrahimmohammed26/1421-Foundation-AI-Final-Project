@@ -1,3 +1,15 @@
+"""
+rebuild_with_urls.py
+Builds the FAISS index from all scraped ZIP files.
+
+Rules:
+- Only index rows that have a valid URL (http/https)
+- Skip excluded Facebook navigation URLs
+- No content-only rows (no URL = skip)
+- Global URL deduplication across all non-book sources
+- Books (pdf_evidence_scraped.zip) are never deduplicated
+"""
+
 import re
 import sys
 import zipfile
@@ -15,25 +27,24 @@ except ImportError:
     print("ERROR: pip install sentence-transformers")
     sys.exit(1)
 
-# Which zip files to read
+# ── Paths ─────────────────────────────────────────────────────────────────────
 ZIP_FILES = [
-        r"C:\Users\ibrah\1421-Foundation-AI-Final-Project\scraped_csvs\1421FacebookWebsite\facebook_pages_csv.zip",
-        r"C:\Users\ibrah\1421-Foundation-AI-Final-Project\scraped_csvs\1421FacebookWebsite\facebook_posts.zip",
-        r"C:\Users\ibrah\1421-Foundation-AI-Final-Project\scraped_csvs\1421FoundationWebsite\1421_foundation_scraped.zip",
-        r"C:\Users\ibrah\1421-Foundation-AI-Final-Project\scraped_csvs\GavinMenziesWebsite\1421_evidence_scraped.zip",
-        r"C:\Users\ibrah\1421-Foundation-AI-Final-Project\scraped_csvs\GavinMenziesWebsite\1434_evidence_scraped.zip",
-        r"C:\Users\ibrah\1421-Foundation-AI-Final-Project\scraped_csvs\GavinMenziesWebsite\america_evidence_scraped.zip",
-        r"C:\Users\ibrah\1421-Foundation-AI-Final-Project\scraped_csvs\GavinMenziesWebsite\atlantis_evidence_scraped.zip",
-        r"C:\Users\ibrah\1421-Foundation-AI-Final-Project\scraped_csvs\GavinMenziesWebsite\gavin_menzies_scraped.zip",
-        r"C:\Users\ibrah\1421-Foundation-AI-Final-Project\scraped_csvs\3BooksAndMore\pdf_evidence_scraped.zip"
-    ]
+    r"C:\Users\ibrah\1421-Foundation-AI-Final-Project\scraped_csvs\1421FacebookWebsite\facebook_pages_csv.zip",
+    r"C:\Users\ibrah\1421-Foundation-AI-Final-Project\scraped_csvs\1421FacebookWebsite\facebook_posts.zip",
+    r"C:\Users\ibrah\1421-Foundation-AI-Final-Project\scraped_csvs\1421FoundationWebsite\1421_foundation_scraped.zip",
+    r"C:\Users\ibrah\1421-Foundation-AI-Final-Project\scraped_csvs\GavinMenziesWebsite\1421_evidence_scraped.zip",
+    r"C:\Users\ibrah\1421-Foundation-AI-Final-Project\scraped_csvs\GavinMenziesWebsite\1434_evidence_scraped.zip",
+    r"C:\Users\ibrah\1421-Foundation-AI-Final-Project\scraped_csvs\GavinMenziesWebsite\america_evidence_scraped.zip",
+    r"C:\Users\ibrah\1421-Foundation-AI-Final-Project\scraped_csvs\GavinMenziesWebsite\atlantis_evidence_scraped.zip",
+    r"C:\Users\ibrah\1421-Foundation-AI-Final-Project\scraped_csvs\GavinMenziesWebsite\gavin_menzies_scraped.zip",
+    r"C:\Users\ibrah\1421-Foundation-AI-Final-Project\scraped_csvs\3BooksAndMore\pdf_evidence_scraped.zip",
+]
 
-# Where to save the output
-OUTPUT_DIR = Path(r"C:\Users\ibrah\1421-Foundation-AI-Final-Project\data\vector_databases\main_index")
+OUTPUT_DIR      = Path(r"C:\Users\ibrah\1421-Foundation-AI-Final-Project\data\vector_databases\main_index")
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
-BOOK_ZIP_NAME = "pdf_evidence_scraped.zip"
+BOOK_ZIP_NAME   = "pdf_evidence_scraped.zip"
 
-# Facebook pages we don't want to index
+# ── Excluded Facebook nav URLs ────────────────────────────────────────────────
 EXCLUDED_URLS = {
     "https://www.facebook.com/1421foundation/",
     "https://www.facebook.com/1421foundation/about",
@@ -52,417 +63,313 @@ EXCLUDED_URLS = {
     "https://www.facebook.com/1421foundation/map",
     "https://www.facebook.com/1421foundation/likes",
     "https://www.facebook.com/1421foundation/reviews_given",
-    "https://www.gavinmenzies.net/china/gallery/shipwreck/",
 }
 
 URL_RE = re.compile(r'https?://\S+|www\.\S+', re.IGNORECASE)
 
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
-def is_excluded_url(url):
+def is_excluded(url):
     if not url:
         return False
-    url_clean = url.strip().rstrip("/")
-    for ex in EXCLUDED_URLS:
-        if url_clean == ex.rstrip("/"):
-            return True
-    return False
+    return url.strip().rstrip("/") in {u.rstrip("/") for u in EXCLUDED_URLS}
 
-
-def clean_url(raw):
+def valid_url(raw):
     s = (raw or "").strip()
-    if s.startswith(("http://", "https://")):
-        return s
-    return ""
+    return s if s.startswith(("http://", "https://")) else ""
 
+def is_fb_posts(z): return "facebook_posts" in z.lower()
+def is_fb_pages(z): return "facebook" in z.lower() and "page" in z.lower()
+def is_fb_any(z):   return "facebook" in z.lower()
 
-def is_fb_posts(zip_name):
-    return "facebook_posts" in zip_name.lower()
-
-
-def is_fb_pages(zip_name):
-    return "facebook" in zip_name.lower() and "page" in zip_name.lower()
-
-
-def is_fb_any(zip_name):
-    return "facebook" in zip_name.lower()
-
-
-def is_links_csv(filename):
-    return filename.lower().endswith("_links.csv")
-
-
-def get_default_author(zip_name):
+def default_author(zip_name):
     z = zip_name.lower()
-    if "facebook" in z:
-        return "1421 Foundation (Facebook)"
-    if "1421_foundation" in z:
-        return "1421 Foundation (Website)"
+    if "facebook" in z:        return "1421 Foundation (Facebook)"
+    if "1421_foundation" in z: return "1421 Foundation (Website)"
     return "Gavin Menzies"
 
+def col_map(cols):
+    return {str(c).lower(): c for c in cols}
 
-def get_column_map(cols):
-    result = {}
-    for c in cols:
-        result[str(c).lower()] = c
-    return result
-
-
-def pick_url_column(cols, zip_name, csv_filename):
-    """
-    Which column has the URL? Depends on what kind of file we're reading.
-    """
-    col_map = get_column_map(cols)
-    fname_lower = csv_filename.lower()
-
-
-    # For _links.csv files (external articles linked from Facebook posts)
-    if is_links_csv(fname_lower):
-        for col_name in ["link_url", "url", "link", "source_url"]:
-            if col_name in col_map:
-                return col_map[col_name], f"link article url ({col_map[col_name]})"
-        return None, "NONE — no url col in links csv"
-
-    # For Facebook posts main CSV files
-    if is_fb_posts(zip_name):
-        for col_name in ["post_url", "permalink", "post_link"]:
-            if col_name in col_map:
-                return col_map[col_name], f"post permalink ({col_map[col_name]})"
-        return None, "NONE — no post_url"
-
-    # For Facebook pages CSV files
-    if is_fb_pages(zip_name):
-        for col_name in ["page_url", "source_url", "url", "link"]:
-            if col_name in col_map:
-                return col_map[col_name], f"page url ({col_map[col_name]})"
-        for col in cols:
-            if "url" in str(col).lower():
-                return col, f"url fallback ({col})"
-        return None, "NONE"
-
-    # For everything else (books, evidence pages, etc.)
-    for col_name in ["source_url", "document_url", "url", "link", "page_url", "post_url"]:
-        if col_name in col_map:
-            return col_map[col_name], f"standard ({col_map[col_name]})"
-    
-    for col in cols:
-        if "url" in str(col).lower():
-            return col, f"url fallback ({col})"
-    
-    return None, "NONE"
-
-
-def find_column(cols, *keywords):
-    col_map = get_column_map(cols)
+def find_col(cols, *keywords):
+    cm = col_map(cols)
     for kw in keywords:
-        if kw in col_map:
-            return col_map[kw]
+        if kw in cm:
+            return cm[kw]
     for kw in keywords:
-        for col in cols:
-            if kw in str(col).lower():
-                return col
+        for c in cols:
+            if kw in str(c).lower():
+                return c
     return None
 
-
-
-def get_value(row, col):
+def get_val(row, col):
     if col is None:
         return ""
-    val = row.get(col, "")
-    if pd.isna(val):
+    v = row.get(col, "")
+    if pd.isna(v):
         return ""
-    return str(val).strip()
+    return str(v).strip()
 
+def pick_url_col(cols, zip_name):
+    """
+    Facebook posts  → post_url (the post permalink, not the shared link)
+    Facebook pages  → page_url / source_url / url
+    Everything else → source_url / url / link
+    """
+    cm = col_map(cols)
 
-def remove_urls(text):
+    if is_fb_posts(zip_name):
+        for name in ("post_url", "permalink", "post_link", "post_permalink"):
+            if name in cm:
+                return cm[name], f"post permalink ({cm[name]})"
+        for c in cols:
+            if "post" in str(c).lower() and "url" in str(c).lower():
+                return c, f"post+url fallback ({c})"
+        return None, "NONE — no post_url col"
+
+    if is_fb_pages(zip_name):
+        for name in ("page_url", "source_url", "url", "link", "page_link", "permalink"):
+            if name in cm:
+                return cm[name], f"page url ({cm[name]})"
+        for c in cols:
+            if "url" in str(c).lower():
+                return c, f"url fallback ({c})"
+        return None, "NONE"
+
+    # Non-Facebook (books, evidence sites, 1421 Foundation website)
+    for name in ("source_url", "document_url", "url", "link", "page_url", "post_url", "source"):
+        if name in cm:
+            return cm[name], f"standard ({cm[name]})"
+    for c in cols:
+        if "url" in str(c).lower():
+            return c, f"url fallback ({c})"
+    return None, "NONE"
+
+def strip_urls(text):
     cleaned = URL_RE.sub("", text or "")
     cleaned = re.sub(r'\s*[:|]\s*$', '', cleaned)
     cleaned = re.sub(r'\s{2,}', ' ', cleaned)
     return cleaned.strip().rstrip(".,;:-\u2013\u2014")
 
-
 def clean_title(raw):
     if not raw:
         return ""
-    
-    t = remove_urls(raw.strip())
+    t = strip_urls(raw.strip())
     if not t:
         return ""
-    
-    # Remove duplicate halves if present
-    half_len = len(t) // 2
-    if half_len > 10 and t[:half_len] == t[half_len:]:
-        t = t[:half_len].strip()
-    
+    # Remove back-to-back duplicate: "Gavin MenziesGavin Menzies"
+    half = len(t) // 2
+    if half > 10 and t[:half] == t[half:]:
+        t = t[:half].strip()
+    # Remove word-level duplicate: "Gavin Menzies Gavin Menzies"
     words = t.split()
     mid = len(words) // 2
     if mid > 0 and words[:mid] == words[mid:]:
         t = " ".join(words[:mid]).strip()
-    # Skip if it's just an author name
-    author_patterns = [
-        "Gavin Menzies", "1421 Foundation", "The 1421 Foundation",
-        "1421 Foundation (Facebook)", "1421 Foundation (Website)"
-    ]
-    for pattern in author_patterns:
-        if re.fullmatch(pattern, t, re.IGNORECASE):
-            return ""
-    
-    t = t.strip(".,;:-\u2013\u2014")
-    return t[:400] if t else ""
+    # Discard if it is just an author name
+    if re.fullmatch(
+        r"(Gavin Menzies|1421 Foundation|The 1421 Foundation|"
+        r"1421 Foundation \(Facebook\)|1421 Foundation \(Website\))",
+        t, re.IGNORECASE
+    ):
+        return ""
+    return t.strip(".,;:-\u2013\u2014")[:400] or ""
 
-
-def extract_title_from_content(content, fallback):
+def title_from_content(content, fallback):
     if not content or not content.strip():
         return fallback[:400]
-    
-    # Remove common prefix patterns
     text = re.sub(
         r"^(Title|Author|Content|Source|Type|Tags)\s*:\s*",
         "", content.strip(), flags=re.IGNORECASE
     ).strip()
-    
     if not text:
         return fallback[:400]
-    
-    # Take first sentence
     parts = re.split(r"(?<=[.!?])\s+", text, maxsplit=1)
     first = parts[0].strip()
-    
     if len(first) < 15:
         first = text[:200].strip()
     elif len(first) > 300:
         first = first[:300].strip()
-    
-
-    first = remove_urls(first).rstrip(".,;:")
-    
+    first = strip_urls(first).rstrip(".,;:")
     if not first or len(first) < 5:
         return fallback[:400]
-    
     return first[:400]
 
-
-def read_csv_from_zip(zip_ref, csv_filename):
-    for encoding in ["utf-8-sig", "utf-8", "latin-1"]:
+def read_csv(zip_ref, name):
+    for enc in ("utf-8-sig", "utf-8", "latin-1"):
         try:
-            with zip_ref.open(csv_filename) as f:
-                return pd.read_csv(f, encoding=encoding)
+            with zip_ref.open(name) as f:
+                return pd.read_csv(f, encoding=enc)
         except Exception:
             continue
     return None
 
+# ── Process one CSV ───────────────────────────────────────────────────────────
 
-def process_csv(df, csv_filename, zip_name, seen_titles):
+def process_csv(df, csv_filename, zip_name):
     """
-    seen_titles: keeps track of titles we've already seen within this zip file
+    Returns a list of document dicts.
+    Only rows with a valid URL are kept — no URL = skip.
+    No within-zip deduplication here; global URL dedup happens later.
+    Books get no dedup at all.
     """
     docs = []
-    
     if df is None or len(df) == 0:
         return docs
-    
-    cols = list(df.columns)
-    is_book = (zip_name == BOOK_ZIP_NAME)
-    is_fb = is_fb_any(zip_name)
-    is_links = is_links_csv(csv_filename)
-    
-    # Find the right columns
-    content_col = find_column(cols,
-        "full_content", "content", "post_content", "page_content",
-        "link_content", "text", "body", "section")
-    
-    title_col = find_column(cols,
-        "title", "document_title", "name", "post_title", "page_title",
-        "link_title")
-    
-    author_col = find_column(cols,
-        "author", "posted_by", "creator", "post_author")
-    
-    page_col = find_column(cols, "page_number", "page")
-    
-    url_col, url_desc = pick_url_column(cols, zip_name, csv_filename)
-    
-    default_author = get_default_author(zip_name)
-    
-    # Print debug info for Facebook and book files
-    if is_fb or is_book:
-        if is_book:
-            tag = "[BOOKS]"
-        elif is_links:
-            tag = "[FB-LINKS]"
-        elif is_fb_posts(zip_name):
-            tag = "[FB-POSTS]"
-        else:
-            tag = "[FB-PAGES]"
-        
-        print(f"      {tag} {Path(csv_filename).name}")
-        print(f"        cols: {cols}")
-        print(f"        content={content_col} | title={title_col} | url={url_desc}")
-    
 
-    skipped = {"no_url": 0, "excluded": 0, "dup": 0}
-    
-    for idx, row in df.iterrows():
-        content = get_value(row, content_col)
-        url = clean_url(get_value(row, url_col))
-        
-        # Need a URL to index
+    cols    = list(df.columns)
+    is_book = zip_name == BOOK_ZIP_NAME
+    is_fb   = is_fb_any(zip_name)
+
+    content_col = find_col(cols, "full_content", "content", "post_content",
+                            "page_content", "text", "body", "section")
+    title_col   = find_col(cols, "title", "document_title", "name",
+                            "post_title", "page_title")
+    author_col  = find_col(cols, "author", "posted_by", "creator", "post_author")
+    url_col, url_desc = pick_url_col(cols, zip_name)
+
+    auth_default = default_author(zip_name)
+
+    if is_fb or is_book:
+        tag = ("[BOOKS]"    if is_book
+               else "[FB-POSTS]" if is_fb_posts(zip_name)
+               else "[FB-PAGES]")
+        print(f"      {tag} {Path(csv_filename).name}")
+        print(f"        cols   : {cols}")
+        print(f"        content: {content_col} | title: {title_col} | url: {url_desc}")
+
+    skipped = {"no_url": 0, "excluded": 0}
+
+    for _, row in df.iterrows():
+        url = valid_url(get_val(row, url_col))
+
+        # No URL → skip
         if not url:
             skipped["no_url"] += 1
             continue
-        
-        # Skip Facebook navigation pages
-        if is_excluded_url(url):
+
+        # Excluded nav page → skip
+        if is_excluded(url):
             skipped["excluded"] += 1
             continue
-        
-        # Figure out author
-        raw_author = get_value(row, author_col)
-        if raw_author and len(raw_author) > 1:
-            cleaned_author = clean_title(raw_author)
-            if cleaned_author:
-                author = cleaned_author
-            else:
-                author = default_author
-        else:
-            author = default_author
-        
-        # Figure out title
-        raw_title = get_value(row, title_col)
-        cleaned = clean_title(raw_title)
-        
 
-        # Skip titles that are too long or have "Evidence" in them
+        content = get_val(row, content_col)
+
+        # Author
+        raw_author = get_val(row, author_col)
+        if raw_author and len(raw_author) > 1:
+            author = clean_title(raw_author) or auth_default
+        else:
+            author = auth_default
+
+        # Title
+        raw_title = get_val(row, title_col)
+        cleaned   = clean_title(raw_title)
         if len(cleaned) > 300 or (len(cleaned.split()) > 40 and "Evidence" in cleaned):
             cleaned = ""
-        
         if cleaned:
             title = cleaned
         else:
-            fallback = f"Document from {Path(csv_filename).stem}"
-            title = extract_title_from_content(content, fallback)
-        
-        # Create a deduplication key
-        if is_book:
-            page_num = get_value(row, page_col)
-            dedup_key = f"{title.strip().lower()}|||page={page_num}"
-        elif is_links:
-            dedup_key = url
-        else:
-            dedup_key = title.strip().lower()
-        
-        # Check if we've seen this document already in this zip
-        if dedup_key and dedup_key in seen_titles:
-            skipped["dup"] += 1
-            continue
-        
-        if dedup_key:
-            seen_titles.add(dedup_key)
-        
-        # Prepare the content text
+            title = title_from_content(content, f"Document from {Path(csv_filename).stem}")
+
         content_text = content if content else f"Source: {url}"
-        
+
         docs.append({
-            "title": title,
-            "url": url[:500],
-            "author": author[:200],
-            "source_type": "book" if is_book else "web",
-            "source_file": Path(csv_filename).name,
-            "source_zip": zip_name,
+            "title":        title,
+            "url":          url[:500],
+            "author":       author[:200],
+            "source_type":  "book" if is_book else "web",
+            "source_file":  Path(csv_filename).name,
+            "source_zip":   zip_name,
             "content_text": content_text,
-            "row_index": idx,
         })
-    
-    print(f"        kept={len(docs)} | no_url={skipped['no_url']} | "
-          f"excluded={skipped['excluded']} | dup={skipped['dup']}")
-    
+
+    print(f"        kept={len(docs)} | no_url={skipped['no_url']} | excluded={skipped['excluded']}")
     return docs
 
+# ── Process one ZIP ───────────────────────────────────────────────────────────
 
-def process_zip_file(zip_path):
+def process_zip(zip_path):
     docs = []
     if not Path(zip_path).exists():
-        print(f"  WARNING: ZIP not found — {Path(zip_path).name}")
-        print(f"  Full path: {zip_path}")
+        print(f"  WARNING: not found — {zip_path}")
         return docs
-    
+
     zip_name = Path(zip_path).name
     print(f"\n  Processing {zip_name}...")
-    
-    seen_titles = set()
-    
+
     with zipfile.ZipFile(zip_path, "r") as zf:
-        # Find all CSV files (skip summary/error files)
-        csv_files = []
-        for f in zf.namelist():
-            if f.lower().endswith(".csv"):
-                skip = False
-                for skip_word in ["summary", "error", "mapping", "log", "all_books"]:
-                    if skip_word in f.lower():
-                        skip = True
-                        break
-                if not skip:
-                    csv_files.append(f)
-        
+        csv_files = [
+            f for f in zf.namelist()
+            if f.lower().endswith(".csv")
+            and not any(x in f.lower() for x in
+                        ["summary", "error", "mapping", "log", "all_books"])
+        ]
         print(f"    {len(csv_files)} CSV file(s)")
-        
+
         for csv_file in csv_files:
-            df = read_csv_from_zip(zf, csv_file)
+            df = read_csv(zf, csv_file)
             if df is not None and len(df) > 0:
-                file_docs = process_csv(df, csv_file, zip_name, seen_titles)
+                file_docs = process_csv(df, csv_file, zip_name)
+                print(f"      -> {len(file_docs)} rows from {Path(csv_file).name}")
                 docs.extend(file_docs)
-    
+
     print(f"    Total from {zip_name}: {len(docs)}")
     return docs
 
+# ── Global URL deduplication ──────────────────────────────────────────────────
 
-def deduplicate_by_url(documents):
-    seen_urls = set()
+def deduplicate(documents):
+    """
+    Deduplicate by URL across all non-book sources.
+    Books are kept as-is (multiple pages per book, same base URL is fine).
+    """
+    seen = set()
     unique = []
-    dup_count = 0
-    
+    dropped = 0
+
     for doc in documents:
-        # Books are already deduplicated by title+page, skip URL dedup for them
         if doc["source_zip"] == BOOK_ZIP_NAME:
             unique.append(doc)
             continue
-        
         url = doc["url"]
-        if url not in seen_urls:
-            seen_urls.add(url)
+        if url not in seen:
+            seen.add(url)
             unique.append(doc)
         else:
-            dup_count += 1
-    
-    print(f"  Global URL dedup: removed {dup_count}, kept {len(unique)}")
+            dropped += 1
+
+    print(f"  Global dedup: removed {dropped}, kept {len(unique)}")
     return unique
 
+# ── Build FAISS index ─────────────────────────────────────────────────────────
 
-def build_faiss_index(documents, output_dir):
-    print(f"\n  Loading embedding model: {EMBEDDING_MODEL}")
+def build_index(documents, output_dir):
+    print(f"\n  Loading model: {EMBEDDING_MODEL}")
     model = SentenceTransformer(EMBEDDING_MODEL)
-    
-    raw_texts = []
-    metadatas = []
+
+    raw_texts   = []
+    metadatas   = []
     embed_texts = []
-    
+
     for doc in documents:
         raw_texts.append(doc["content_text"])
         metadatas.append({
-            "title": doc["title"],
-            "url": doc["url"],
-            "author": doc["author"],
+            "title":       doc["title"],
+            "url":         doc["url"],
+            "author":      doc["author"],
             "source_type": doc["source_type"],
             "source_file": doc["source_file"],
-            "year": 0,
-            "tags": [],
-            "page": None,
+            "year":        0,
+            "tags":        [],
+            "page":        None,
         })
         embed_texts.append(
-            f"Title: {doc['title']} Author: {doc['author']} Content: {doc['content_text'][:500]}"
+            f"Title: {doc['title']} Author: {doc['author']} "
+            f"Content: {doc['content_text'][:500]}"
         )
-    
 
-    print(f"  Creating embeddings for {len(embed_texts)} documents...")
+    print(f"  Embedding {len(embed_texts)} documents...")
     embeddings = model.encode(
         embed_texts,
         show_progress_bar=True,
@@ -470,93 +377,86 @@ def build_faiss_index(documents, output_dir):
         normalize_embeddings=True,
         batch_size=64,
     ).astype("float32")
-    
-    dimension = embeddings.shape[1]
-    index = faiss.IndexFlatL2(dimension)
+
+    dim   = embeddings.shape[1]
+    index = faiss.IndexFlatL2(dim)
     index.add(embeddings)
-    
+
     output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Save FAISS index
+
     faiss.write_index(index, str(output_dir / "faiss_index.bin"))
-    print(f"  Saved FAISS index  -> {output_dir / 'faiss_index.bin'}")
-    
-    # Save metadata
+    print(f"  Saved index    -> {output_dir / 'faiss_index.bin'}")
+
     with open(output_dir / "faiss_metadata.pkl", "wb") as f:
         pickle.dump({"documents": raw_texts, "metadatas": metadatas}, f)
-    print(f"  Saved metadata     -> {output_dir / 'faiss_metadata.pkl'}")
-    
-    # Save statistics
+    print(f"  Saved metadata -> {output_dir / 'faiss_metadata.pkl'}")
+
     breakdown = {}
     for doc in documents:
         breakdown[doc["source_zip"]] = breakdown.get(doc["source_zip"], 0) + 1
-    
+
     with open(output_dir / "database_stats.json", "w") as f:
         json.dump({
-            "document_count": len(documents),
-            "embedding_dimension": dimension,
-            "embedding_model": EMBEDDING_MODEL,
-            "created_at": datetime.now().isoformat(),
-            "source_breakdown": breakdown,
+            "document_count":      len(documents),
+            "embedding_dimension": dim,
+            "embedding_model":     EMBEDDING_MODEL,
+            "created_at":          datetime.now().isoformat(),
+            "source_breakdown":    breakdown,
         }, f, indent=2)
-    
-    print(f"  Saved stats        -> {output_dir / 'database_stats.json'}")
+    print(f"  Saved stats    -> {output_dir / 'database_stats.json'}")
 
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     print("=" * 60)
     print("  REBUILD INDEX")
     print("=" * 60)
-    
+
     all_docs = []
-    
-    print("\nStep 1: Reading ZIP files...")
+
+    print("\nStep 1: Reading ZIPs...")
     for zip_path in ZIP_FILES:
-        docs = process_zip_file(zip_path)
+        docs = process_zip(zip_path)
         all_docs.extend(docs)
         print(f"  Running total: {len(all_docs)}")
-    
-    print(f"\nTotal before URL dedup: {len(all_docs)}")
-    
-    print("\nStep 2: Global URL deduplication...")
-    all_docs = deduplicate_by_url(all_docs)
-    print(f"Total after URL dedup:  {len(all_docs)}")
-    
-    # Print some diagnostics
+
+    print(f"\nBefore dedup: {len(all_docs)}")
+    print("\nStep 2: Deduplication...")
+    all_docs = deduplicate(all_docs)
+    print(f"After dedup:  {len(all_docs)}")
+
+    # Diagnostics
     by_author = {}
     for d in all_docs:
         by_author[d["author"]] = by_author.get(d["author"], 0) + 1
-    
     print("\nAuthor breakdown:")
-    for author_name, count in sorted(by_author.items()):
-        print(f"  {author_name}: {count}")
-    
+    for a, n in sorted(by_author.items()):
+        print(f"  {a}: {n}")
+
     no_url = [d for d in all_docs if not d["url"]]
     print(f"\nDocuments with no URL: {len(no_url)}  (should be 0)")
-    
+
     url_in_title = [d for d in all_docs
                     if "http" in d["title"].lower() or "www." in d["title"].lower()]
-    print(f"Titles still containing URLs: {len(url_in_title)}  (should be 0)")
-    
+    print(f"URLs in titles: {len(url_in_title)}  (should be 0)")
     for d in url_in_title[:5]:
         print(f"  [{d['source_zip']}] {d['title'][:100]}")
-    
+
     breakdown = {}
     for d in all_docs:
         breakdown[d["source_zip"]] = breakdown.get(d["source_zip"], 0) + 1
-    
     print("\nSource breakdown:")
-    for zip_name, count in sorted(breakdown.items()):
-        print(f"  {zip_name}: {count}")
+    for z, n in sorted(breakdown.items()):
+        print(f"  {z}: {n}")
+
     print("\nStep 3: Building FAISS index...")
-    build_faiss_index(all_docs, OUTPUT_DIR)
-    
+    build_index(all_docs, OUTPUT_DIR)
+
     print("\n" + "=" * 60)
-    print(f"  DONE — {len(all_docs)} documents indexed")
+    print(f"  DONE — {len(all_docs)} documents")
     print("=" * 60)
     print(f"\nOutput: {OUTPUT_DIR}")
-    print("\nNext: copy faiss_index.bin + faiss_metadata.pkl to")
-    print("      backend/data/vector_databases/main_index/ and redeploy Koyeb.")
+    print("Copy faiss_index.bin + faiss_metadata.pkl to")
 
 
 if __name__ == "__main__":

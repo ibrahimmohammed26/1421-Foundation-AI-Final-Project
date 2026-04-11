@@ -1,6 +1,9 @@
 """
-Builds the SQLite database in the data folder, using the scraped csv files
+build_database.py
+Builds the SQLite knowledge base from all scraped ZIP files.
+Output: data/knowledge_base.db  +  vector_databases/main_index/
 """
+
 import os
 import sys
 import zipfile
@@ -14,18 +17,15 @@ from sentence_transformers import SentenceTransformer
 import json
 from datetime import datetime
 import re
-from tqdm import tqdm
 import warnings
 
 warnings.filterwarnings("ignore")
 
 
-# =========================================================
-# Simple entity extraction (regex only)
-# =========================================================
+# ── Entity extraction (regex only) ───────────────────────────────────────────
+
 class SimpleEntityExtractor:
     def __init__(self):
-        # These are just practical patterns
         self.patterns = {
             "PERSON": [
                 r"\b(Zheng He|Hong Bao|Zhou Man|Kublai Khan|Emperor Yongle|Zhu Di)\b",
@@ -50,7 +50,7 @@ class SimpleEntityExtractor:
             "DATE": [
                 r"\b(1[3-9]\d{2}|20[0-2]\d)\b",
                 r"\b(\d{1,2}(?:st|nd|rd|th)?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)[,.]?\s+\d{4})\b",
-                r"\b(\d{4})\s*[-–]\s*(\d{4})\b",
+                r"\b(\d{4})\s*[-\u2013]\s*(\d{4})\b",
                 r"\b(\d+(?:st|nd|rd|th)?\s+century)\b",
             ],
             "BOOK": [
@@ -69,112 +69,78 @@ class SimpleEntityExtractor:
 
     def extract_entities(self, text):
         entities = []
-
         for entity_type, patterns in self.patterns.items():
             for pattern in patterns:
                 for match in re.finditer(pattern, text, re.IGNORECASE):
-                    if match.groups():
-                        value = match.group(1) or match.group()
-                    else:
-                        value = match.group()
-
+                    value = match.group(1) if match.groups() else match.group()
                     if len(value.strip()) < 2:
                         continue
-
                     entities.append({
-                        "text": value,
-                        "type": entity_type,
-                        "start": match.start(),
-                        "end": match.end(),
+                        "text":       value,
+                        "type":       entity_type,
+                        "start":      match.start(),
+                        "end":        match.end(),
                         "confidence": 0.8,
                     })
-
-        # dedupe (basic)
-        seen = set()
-        unique = []
+        # Basic dedup
+        seen, unique = set(), []
         for e in entities:
             key = (e["text"], e["start"], e["type"])
             if key not in seen:
                 seen.add(key)
                 unique.append(e)
-
         return unique
 
-    def extract_dates(self, text):
-        dates = []
-        pattern = r"\b(1[3-9]\d{2}|20[0-2]\d)\b"
 
-        for m in re.finditer(pattern, text):
-            year = int(m.group())
+# ── Database ──────────────────────────────────────────────────────────────────
 
-            start = max(0, m.start() - 50)
-            end = min(len(text), m.end() + 100)
-
-            context = text[start:end]
-            context = re.sub(r"\s+", " ", context).strip()
-
-            dates.append({
-                "year": year,
-                "text": str(year),
-                "context": context[:200],
-            })
-
-        return dates
-
-
-# =========================================================
-# Database
-# =========================================================
 class DatabaseManager:
     def __init__(self, db_path="data/knowledge_base.db"):
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(db_path)
         self.conn.row_factory = sqlite3.Row
 
     def create_tables(self):
         c = self.conn.cursor()
         c.execute("""
-        CREATE TABLE IF NOT EXISTS documents (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            source_type TEXT,
-            source_file TEXT,
-            title TEXT,
-            content TEXT,
-            url TEXT,
-            author TEXT,
-            word_count INTEGER,
-            source_zip TEXT,
-            content_length INTEGER,
-            book_title TEXT,
-            import_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
+            CREATE TABLE IF NOT EXISTS documents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_type TEXT,
+                source_file TEXT,
+                title TEXT,
+                content TEXT,
+                url TEXT,
+                author TEXT,
+                word_count INTEGER,
+                source_zip TEXT,
+                content_length INTEGER,
+                book_title TEXT,
+                import_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
         """)
-
         c.execute("""
-        CREATE TABLE IF NOT EXISTS entities (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            doc_id INTEGER,
-            entity_text TEXT,
-            entity_type TEXT,
-            start_pos INTEGER,
-            end_pos INTEGER,
-            confidence REAL
-        )
+            CREATE TABLE IF NOT EXISTS entities (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                doc_id INTEGER,
+                entity_text TEXT,
+                entity_type TEXT,
+                start_pos INTEGER,
+                end_pos INTEGER,
+                confidence REAL
+            )
         """)
-
         c.execute("CREATE INDEX IF NOT EXISTS idx_doc_source ON documents(source_type)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(entity_type)")
-
         self.conn.commit()
         print("Database ready")
 
     def insert_document(self, doc):
         c = self.conn.cursor()
-
         c.execute("""
-        INSERT INTO documents 
-        (source_type, source_file, title, content, url, author,
-         word_count, source_zip, content_length, book_title)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO documents
+            (source_type, source_file, title, content, url, author,
+             word_count, source_zip, content_length, book_title)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             doc.get("source_type"),
             doc.get("source_file"),
@@ -187,77 +153,56 @@ class DatabaseManager:
             doc.get("content_length", 0),
             doc.get("book_title", "")[:200],
         ))
-
         doc_id = c.lastrowid
-
         for e in doc.get("entities", []):
             c.execute("""
-            INSERT INTO entities (doc_id, entity_text, entity_type, start_pos, end_pos, confidence)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """, (
-                doc_id,
-                e["text"][:200],
-                e["type"],
-                e["start"],
-                e["end"],
-                e["confidence"],
-            ))
-
+                INSERT INTO entities
+                (doc_id, entity_text, entity_type, start_pos, end_pos, confidence)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (doc_id, e["text"][:200], e["type"], e["start"], e["end"], e["confidence"]))
         self.conn.commit()
         return doc_id
 
     def get_stats(self):
         c = self.conn.cursor()
-
-
-        total_docs = c.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
-        total_entities = c.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
-
         return {
-            "total_documents": total_docs,
-            "total_entities": total_entities,
+            "total_documents": c.execute("SELECT COUNT(*) FROM documents").fetchone()[0],
+            "total_entities":  c.execute("SELECT COUNT(*) FROM entities").fetchone()[0],
         }
 
 
-# =========================================================
-# Vector DB
-# =========================================================
+# ── Vector DB ─────────────────────────────────────────────────────────────────
 
 class VectorDatabaseCreator:
     def __init__(self, db):
-        self.db = db
+        self.db   = db
         self.model = SentenceTransformer("all-MiniLM-L6-v2")
-        self.base = Path("vector_databases")
+        self.base  = Path("data/vector_databases")
         self.base.mkdir(exist_ok=True)
 
     def create_vector_database(self):
-        c = self.db.conn.cursor()
-        rows = c.execute(
+        rows = self.db.conn.cursor().execute(
             "SELECT id, title, content FROM documents WHERE LENGTH(content) > 100"
         ).fetchall()
 
         if not rows:
-            print("No docs to embed")
+            print("No documents to embed.")
             return
 
-        docs = []
-        meta = []
-
-        for r in rows:
-            doc_id, title, content = r
-            text = f"{title or 'Untitled'}\n{content}"
-            docs.append(text)
+        docs, meta = [], []
+        for doc_id, title, content in rows:
+            docs.append(f"{title or 'Untitled'}\n{content}")
             meta.append({"id": doc_id})
 
-        print("Embedding... this might take a bit")
-
+        print(f"Embedding {len(docs)} documents...")
         embeddings = self.model.encode(
             docs,
             convert_to_numpy=True,
             normalize_embeddings=True,
+            show_progress_bar=True,
         ).astype("float32")
 
-        dim = embeddings.shape[1]
+        dim   = embeddings.shape[1]
         index = faiss.IndexFlatL2(dim)
         index.add(embeddings)
 
@@ -265,71 +210,115 @@ class VectorDatabaseCreator:
         out.mkdir(exist_ok=True)
 
         faiss.write_index(index, str(out / "faiss_index.bin"))
-
         with open(out / "faiss_metadata.pkl", "wb") as f:
             pickle.dump(meta, f)
 
-        print(f"Saved {len(docs)} vectors")
+        print(f"Saved {len(docs)} vectors to {out}")
 
 
+# ── ZIP processing ────────────────────────────────────────────────────────────
 
-# =========================================================
-# Processing
-# =========================================================
+EXCLUDED_URLS = {
+    "https://www.facebook.com/1421foundation/",
+    "https://www.facebook.com/1421foundation/about",
+    "https://www.facebook.com/1421foundation/directory_category",
+    "https://www.facebook.com/1421foundation/directory_basic_info",
+    "https://www.facebook.com/1421foundation/directory_links",
+    "https://www.facebook.com/1421foundation/directory_contact_info",
+    "https://www.facebook.com/1421foundation/directory_privacy_and_legal_info",
+    "https://www.facebook.com/1421foundation/followers",
+    "https://www.facebook.com/1421foundation/following",
+    "https://www.facebook.com/1421foundation/photos",
+    "https://www.facebook.com/1421foundation/photos_of",
+    "https://www.facebook.com/1421foundation/photos_albums",
+    "https://www.facebook.com/1421foundation/mentions",
+    "https://www.facebook.com/1421foundation/live_videos",
+    "https://www.facebook.com/1421foundation/map",
+    "https://www.facebook.com/1421foundation/likes",
+    "https://www.facebook.com/1421foundation/reviews_given",
+}
+
+def is_excluded(url):
+    if not url:
+        return False
+    return url.strip().rstrip("/") in {u.rstrip("/") for u in EXCLUDED_URLS}
+
+def valid_url(raw):
+    s = (raw or "").strip()
+    return s if s.startswith(("http://", "https://")) else ""
+
 
 def process_zip(zip_path, db, extractor):
-    zip_path = Path("data") / zip_path  # will be saved in the data folder
-
+    zip_path = Path(zip_path)
     if not zip_path.exists():
-        print(f"Missing: {zip_path}")
+        print(f"  Missing: {zip_path}")
         return 0
 
+    zip_name = zip_path.name
     count = 0
 
     with zipfile.ZipFile(zip_path, "r") as z:
-        csvs = [f for f in z.namelist() if f.endswith(".csv")]
+        # No [:50] cap — process ALL CSV files
+        csv_files = [
+            f for f in z.namelist()
+            if f.lower().endswith(".csv")
+            and not any(x in f.lower() for x in
+                        ["summary", "error", "mapping", "log", "all_books"])
+        ]
 
-        for name in csvs[:50]:
+        print(f"  {zip_name}: {len(csv_files)} CSV file(s)")
+
+        for name in csv_files:
             with z.open(name) as f:
                 try:
                     df = pd.read_csv(f)
-                except:
-                    f.seek(0)
-                    df = pd.read_csv(f, encoding="latin-1")
+                except Exception:
+                    try:
+                        df = pd.read_csv(f, encoding="latin-1")
+                    except Exception:
+                        continue
 
             for _, row in df.iterrows():
-                content = str(row.get("content", ""))
-                if len(content) < 50:
+                # Must have a valid URL
+                url = valid_url(str(row.get("url", "") or row.get("source_url", "") or ""))
+                if not url:
+                    continue
+                if is_excluded(url):
+                    continue
+
+                content = str(row.get("content", "") or
+                              row.get("full_content", "") or
+                              row.get("post_content", "") or "")
+                if not content.strip():
                     continue
 
                 entities = extractor.extract_entities(content)
 
-                doc = {
-                    "source_type": "general",
-                    "source_file": name,
-                    "title": str(row.get("title", "")),
-                    "content": content,
-                    "url": str(row.get("url", "")),
-                    "author": str(row.get("author", "")),
-                    "word_count": len(content.split()),
-                    "source_zip": zip_path.name,
+                db.insert_document({
+                    "source_type":    "general",
+                    "source_file":    name,
+                    "title":          str(row.get("title", "") or row.get("post_title", "") or ""),
+                    "content":        content,
+                    "url":            url,
+                    "author":         str(row.get("author", "") or ""),
+                    "word_count":     len(content.split()),
+                    "source_zip":     zip_name,
                     "content_length": len(content),
-                    "entities": entities,
-                }
-
-                db.insert_document(doc)
+                    "entities":       entities,
+                })
                 count += 1
 
+    print(f"  -> {count} documents inserted from {zip_name}")
     return count
 
-# =========================================================
-# main
-# =========================================================
+
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     print("Starting pipeline...")
 
     ZIP_FILES = [
+        
         r"C:\Users\ibrah\1421-Foundation-AI-Final-Project\scraped_csvs\1421FacebookWebsite\facebook_pages_csv.zip",
         r"C:\Users\ibrah\1421-Foundation-AI-Final-Project\scraped_csvs\1421FacebookWebsite\facebook_posts.zip",
         r"C:\Users\ibrah\1421-Foundation-AI-Final-Project\scraped_csvs\1421FoundationWebsite\1421_foundation_scraped.zip",
@@ -338,25 +327,22 @@ def main():
         r"C:\Users\ibrah\1421-Foundation-AI-Final-Project\scraped_csvs\GavinMenziesWebsite\america_evidence_scraped.zip",
         r"C:\Users\ibrah\1421-Foundation-AI-Final-Project\scraped_csvs\GavinMenziesWebsite\atlantis_evidence_scraped.zip",
         r"C:\Users\ibrah\1421-Foundation-AI-Final-Project\scraped_csvs\GavinMenziesWebsite\gavin_menzies_scraped.zip",
-        r"C:\Users\ibrah\1421-Foundation-AI-Final-Project\scraped_csvs\3BooksAndMore\pdf_evidence_scraped.zip"
+        r"C:\Users\ibrah\1421-Foundation-AI-Final-Project\scraped_csvs\BooksAndMore\pdf_evidence_scraped.zip",
     ]
-
     extractor = SimpleEntityExtractor()
-    db = DatabaseManager()
-
+    db        = DatabaseManager()
     db.create_tables()
-
     total = 0
     for z in ZIP_FILES:
         total += process_zip(z, db, extractor)
 
-    print(f"Imported {total} docs")
+    print(f"\nTotal documents inserted: {total}")
 
     vec = VectorDatabaseCreator(db)
     vec.create_vector_database()
 
-    stats = db.get_stats()
-    print(stats)
+    print(db.get_stats())
+
 
 if __name__ == "__main__":
     main()
