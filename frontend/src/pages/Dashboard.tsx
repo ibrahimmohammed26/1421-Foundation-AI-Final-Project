@@ -8,6 +8,7 @@ import {
   Compass,
   Database,
   Globe,
+  PlusCircle,
 } from "lucide-react";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
@@ -72,7 +73,7 @@ export default function Dashboard() {
     {
       icon: FileText,
       title: "Browse Research Documents",
-      description: `Access the full knowledge base of ${stats.documents_count} documents from the 1421 Foundation, Gavin Menzies' research site, and related sources. Each document links directly to its original source.`,
+      description: `Access the full knowledge base of ${stats.documents_count} documents from the 1421 Foundation, Gavin Menzies' research site, and related sources. Each document links directly to its original source. Filter by document type or author to narrow your search.`,
       example: "Search by title, author, or document number",
     },
     {
@@ -90,10 +91,17 @@ export default function Dashboard() {
       example: "Click [Document 1] badges in chat responses to view sources",
     },
     {
+      icon: PlusCircle,
+      title: "Request Additional Data",
+      description:
+        "Know of a webpage, article, or online resource related to Chinese maritime history or the 1421 hypothesis that isn't in the knowledge base? Submit a Data Request via the Feedback page with the URL of the source. The research team reviews all submissions and approved sources are added to the knowledge base in future updates.",
+      example: "Go to Feedback → select 'Data Request' → paste the URL of the source",
+    },
+    {
       icon: Send,
       title: "Submit Feedback",
       description:
-        "Share your thoughts, report issues, or suggest new features to improve the platform.",
+        "Share your thoughts, report issues, or suggest new features to improve the platform. Feedback is sent directly to the development and research team.",
       example: "Let us know what historical topics you'd like to learn more about",
     },
   ];
@@ -166,7 +174,7 @@ export default function Dashboard() {
                   Welcome to the 1421 Foundation Research System
                 </h2>
                 <p className="text-gray-600 text-sm leading-relaxed">
-                  This platform provides AI-assisted access to the 1421 Foundation's knowledge base, covering Chinese maritime exploration during the Ming dynasty (1368–1644), the voyages of Admiral Zheng He, and the research of Gavin Menzies. All AI responses and Data Map Locations are sourced exclusively from indexed documents.
+                  This platform provides AI-assisted access to the 1421 Foundation's knowledge base, covering Chinese maritime exploration during the Ming dynasty (1368–1644), the voyages of Admiral Zheng He, and the research of Gavin Menzies. All AI responses and Data Map locations are sourced exclusively from indexed documents. If you know of a relevant online source that is not yet in the knowledge base, you can request it be added via the Feedback page.
                 </p>
               </div>
             </div>
