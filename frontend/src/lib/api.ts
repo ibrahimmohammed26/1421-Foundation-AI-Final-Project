@@ -1,25 +1,51 @@
 /// <reference types="vite/client" />
 
+// Use local dev server or production URL
 const API = import.meta.env.DEV ? "http://localhost:8000" : "";
 
 // ── Types ─────────────────────────────────────────────────────────────
-
+// All export functions
 export interface Location {
-  name: string; lat: number; lon: number; year: number; event: string;
+  name: string;
+  lat: number;
+  lon: number;
+  year: number;
+  event: string;
 }
+
 export interface Stats {
-  feedback_count: number; locations_count: number; documents_count: number;
+  feedback_count: number;
+  locations_count: number;
+  documents_count: number;
 }
+
 export interface Document {
-  id: string; title: string; author: string; year: number; type: string;
-  description: string; tags: string[]; content_preview: string;
-  source_file: string; url?: string; page_number?: number; similarity_score?: number;
+  id: string;
+  title: string;
+  author: string;
+  year: number;
+  type: string;
+  description: string;
+  tags: string[];
+  content_preview: string;
+  source_file: string;
+  url?: string;
+  page_number?: number;
+  similarity_score?: number;
 }
+
 export interface DocumentsResponse {
-  documents: Document[]; total: number; limit: number; offset: number;
+  documents: Document[];
+  total: number;
+  limit: number;
+  offset: number;
 }
+
 export interface ChatSource {
-  title: string; author: string; year: number; type: string;
+  title: string;
+  author: string;
+  year: number;
+  type: string;
 }
 export interface ChatResponse {
   content: string;
@@ -28,53 +54,63 @@ export interface ChatResponse {
   used_web_fallback?: boolean;
 }
 
-// ── Documents ─────────────────────────────────────────────────────────
+// ── Documents API ─────────────────────────────────────────────────────
 
 export async function getAllDocuments(limit = 10000, offset = 0): Promise<DocumentsResponse> {
   const res = await fetch(`${API}/api/documents?limit=${limit}&offset=${offset}`);
   if (!res.ok) throw new Error("Failed to fetch documents");
   return res.json();
 }
+
 export async function searchDocuments(query: string, limit = 200) {
   const res = await fetch(`${API}/api/documents/search?q=${encodeURIComponent(query)}&limit=${limit}`);
   if (!res.ok) throw new Error("Failed to search documents");
   return res.json();
 }
+
 export async function getDocumentById(id: string): Promise<Document | null> {
   const res = await fetch(`${API}/api/documents/${id}`);
   if (!res.ok) return null;
   return res.json();
 }
+
 export async function getDocumentTypes(): Promise<string[]> {
   const res = await fetch(`${API}/api/documents/types`);
   if (!res.ok) throw new Error("Failed to fetch document types");
-  return (await res.json()).types;
+  const data = await res.json();
+  return data.types;
 }
+
 export async function getDocumentYears(): Promise<number[]> {
   const res = await fetch(`${API}/api/documents/years`);
   if (!res.ok) throw new Error("Failed to fetch document years");
-  return (await res.json()).years;
+  const data = await res.json();
+  return data.years;
+
+
 }
+
 export async function getDocumentAuthors(): Promise<string[]> {
   const res = await fetch(`${API}/api/documents/authors`);
   if (!res.ok) throw new Error("Failed to fetch document authors");
-  return (await res.json()).authors;
+  const data = await res.json();
+  return data.authors;
 }
 
-// ── Locations / Stats ─────────────────────────────────────────────────
+// ── Locations & Stats ─────────────────────────────────────────────────
 
 export async function fetchLocations(maxYear = 1433): Promise<Location[]> {
   const res = await fetch(`${API}/api/locations?max_year=${maxYear}`);
   if (!res.ok) throw new Error("Failed to fetch locations");
   return res.json();
 }
+
 export async function fetchStats(): Promise<Stats> {
   const res = await fetch(`${API}/api/stats`);
   if (!res.ok) throw new Error("Failed to fetch stats");
   return res.json();
 }
-
-// ── Chat ──────────────────────────────────────────────────────────────
+// ── Chat API ──────────────────────────────────────────────────────────
 
 export async function sendChatMessage(
   messages: { role: string; content: string }[],
@@ -86,13 +122,13 @@ export async function sendChatMessage(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ messages, session_id: sessionId, use_documents: useDocuments }),
   });
+  
   if (!res.ok) {
     const error = await res.json().catch(() => ({ detail: "Request failed" }));
     throw new Error(error.detail || `Error ${res.status}`);
   }
   return res.json();
 }
-
 export async function streamChat(
   messages: { role: string; content: string }[],
   onDelta: (text: string) => void,
@@ -106,41 +142,51 @@ export async function streamChat(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ messages, use_documents: useDocuments }),
     });
+    
     if (!res.ok) {
       const body = await res.json().catch(() => ({ detail: "Request failed" }));
       onError(body.detail || `Error ${res.status}`);
       return;
     }
+    
     const data: ChatResponse = await res.json();
     const fullText = data.content || "";
+    
+    // Remove duplicate sources by title
     const seen = new Set<string>();
     const uniqueSources = (data.sources || []).filter((s) => {
       if (seen.has(s.title)) return false;
       seen.add(s.title);
       return true;
     });
+    // Stream words one by one 
     const words = fullText.split(" ");
     for (let i = 0; i < words.length; i++) {
       await new Promise((resolve) => setTimeout(resolve, 8));
       onDelta(i === 0 ? words[i] : " " + words[i]);
     }
-    // Pass usedWebFallback flag from backend response
+    
     onDone(uniqueSources, data.used_web_fallback ?? false);
   } catch (error) {
     onError(error instanceof Error ? error.message : "Request failed");
   }
 }
 
-// ── Feedback ──────────────────────────────────────────────────────────
+// ── Feedback API ──────────────────────────────────────────────────────
 
 export async function submitFeedback(data: {
-  name?: string; email: string; feedback_type: string; message: string;
+  name?: string;
+  email: string;
+  feedback_type: string;
+  message: string;
 }) {
   const res = await fetch(`${API}/api/feedback`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
+  
   if (!res.ok) throw new Error("Failed to submit feedback");
   return res.json();
+  
 }

@@ -1,3 +1,7 @@
+"""
+Scrape all the evidence pages from Gavin Menzies' website, specifically the 1421 evidence section.
+"""
+
 from playwright.sync_api import sync_playwright
 import os
 import time
@@ -16,7 +20,6 @@ from queue import Queue
 import json
 from collections import OrderedDict
 
-
 class EvidenceScraper:
     def __init__(self, max_workers=5):
         self.headers = {
@@ -30,68 +33,56 @@ class EvidenceScraper:
         self.page_counter = 1
         self.max_workers = max_workers
 
-        # Thread-safe data structures
+        # Thread-safe stuff
         self.errors_lock = threading.Lock()
         self.log_lock = threading.Lock()
         self.counter_lock = threading.Lock()
         self.mapping_lock = threading.Lock()
         self.summary_lock = threading.Lock()
-
-        # For maintaining order
-        self.section_order_data = {}  # Store data by section to maintain order
-        self.chapter_numbers = {}  # Track chapter numbers per section
+        # Keep track of order
+        self.section_order_data = {}
+        self.chapter_numbers = {}
 
     def create_folder_name(self, url, section_name, position_in_section):
-        """Create readable folder name with proper chapter ordering"""
-        # Extract chapter number from URL
+        """Make a sensible folder name so we can find things later"""
         path = urlparse(url).path.strip('/').split('/')[-1]
-        chapter_match = re.search(r'(\d+)-', path)  # Match number at start
+        chapter_match = re.search(r'(\d+)-', path)
         if chapter_match:
             chapter_num = chapter_match.group(1)
         else:
-            # Try to extract number from any position
             num_match = re.search(r'(\d+)', path)
             chapter_num = num_match.group(1) if num_match else str(position_in_section).zfill(2)
 
-        # Extract title from URL
+        # Clean up the title part
         title_part = path
-        # Remove chapter number patterns
-        title_part = re.sub(r'^\d+[-%]', '', title_part)  # Remove leading number-
-        title_part = re.sub(r'[-%]\d+$', '', title_part)  # Remove trailing -number
+        title_part = re.sub(r'^\d+[-%]', '', title_part)
+        title_part = re.sub(r'[-%]\d+$', '', title_part)
         title_part = re.sub(r'chapter-\d+[-%]?', '', title_part, flags=re.IGNORECASE)
-        title_part = re.sub(r'[%-]', ' ', title_part)  # Replace hyphens and percent signs with spaces
-
-        # Clean and format title
+        title_part = re.sub(r'[%-]', ' ', title_part)
         title_words = title_part.title()
         title_words = re.sub(r'^\s*', '', title_words)
         title_words = re.sub(r'\s+', ' ', title_words)
-
-        # Use section counter for folder numbering
         if section_name not in self.section_counter:
+
             self.section_counter[section_name] = 0
         self.section_counter[section_name] += 1
 
-        # Store chapter number
         if section_name not in self.chapter_numbers:
             self.chapter_numbers[section_name] = {}
-        self.chapter_numbers[section_name][position_in_section] = chapter_num.zfill(3)  # Pad to 3 digits
+        self.chapter_numbers[section_name][position_in_section] = chapter_num.zfill(3)
 
-        # Format: SectionNumber_ChapterNumber_Title_Sequence
-        section_num = section_name.split('_')[0]  # Get "01" from "01_frontispiece"
+        section_num = section_name.split('_')[0]
         folder_name = f"{section_num}_Chapter{chapter_num.zfill(3)}_{title_words}_{position_in_section:03d}"
 
-        # Truncate if too long
+        # Don't let folder names get too long
         if len(folder_name) > 60:
-            # Keep section and chapter info, truncate title
             parts = folder_name.split('_')
             if len(parts) >= 3:
                 folder_name = f"{parts[0]}_{parts[1]}_{parts[2][:40]}_{parts[3]}"
 
-        # Add short hash for uniqueness
+        # Add a short hash so we don't get name collisions
         url_hash = hashlib.md5(url.encode()).hexdigest()[:4]
         folder_name = f"{folder_name}_{url_hash}"
-
-        # Replace any remaining problematic characters
         folder_name = re.sub(r'[<>:"/\\|?*]', '_', folder_name)
         folder_name = re.sub(r'\s+', '_', folder_name)
 
@@ -105,39 +96,34 @@ class EvidenceScraper:
 
         return folder_name, chapter_num
 
+
     def scrape_all_evidence(self):
-        """Main function to scrape all evidence pages with threading but maintain order"""
-        print("🚀 Starting 1421 Evidence Scraping - THREADED WITH ORDER PRESERVATION")
+        """Main scraping function - runs everything"""
+        print("🚀 Starting 1421 Evidence Scraping")
         print("=" * 70)
 
         evidence_structure = self.get_evidence_structure()
         total_urls = sum(len(urls) for urls in evidence_structure.values())
 
-        print(f"📊 Total Evidence Pages: {total_urls}")
-        print(f"🧵 Using {self.max_workers} threads for faster scraping")
-        print("📚 Order will be preserved within each section")
+        print(f"Total pages to scrape: {total_urls}")
+        print(f"Using {self.max_workers} threads")
         print("=" * 70)
 
         successful = 0
         start_time = time.time()
 
-        # Initialize section order data storage
         for section_name in evidence_structure.keys():
             self.section_order_data[section_name] = []
 
-        # Process sections sequentially, but URLs within each section in parallel
         completed = 0
         failed = 0
 
-        print(f"\n⏳ Starting parallel scraping with {self.max_workers} workers...")
-        print("📊 Progress will be shown below:")
+        print(f"\n⏳ Starting scrape with {self.max_workers} workers...")
 
-        # Process each section one at a time to maintain section order
         for section_idx, (section_name, urls) in enumerate(evidence_structure.items(), 1):
-            print(f"\n📁 SECTION {section_idx}/19: {section_name.upper()}")
+            print(f"\n Section {section_idx}/20: {section_name}")
             print("-" * 50)
 
-            # Create tasks for this section
             tasks = []
             for idx, url in enumerate(urls, 1):
                 folder_name, chapter_num = self.create_folder_name(url, section_name, idx)
@@ -153,14 +139,12 @@ class EvidenceScraper:
                 }
                 tasks.append(task)
 
-            # Process this section's URLs in parallel
             section_successful = 0
             section_failed = 0
 
             with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
                 future_to_task = {executor.submit(self.scrape_single_url_threaded, task): task for task in tasks}
 
-                # Collect results as they complete
                 for future in as_completed(future_to_task):
                     task = future_to_task[future]
                     try:
@@ -177,71 +161,54 @@ class EvidenceScraper:
                                 status = "❌"
                             completed += 1
 
-                        # Store result in order based on position_in_section
                         with self.summary_lock:
-                            # Initialize list for this position if needed
                             while len(self.section_order_data[section_name]) < task['position_in_section']:
                                 self.section_order_data[section_name].append(None)
 
-                            # Store at correct position (0-based index)
                             self.section_order_data[section_name][task['position_in_section'] - 1] = {
                                 'task': task,
                                 'result': result
                             }
 
-                        # Print progress
                         progress_percent = (completed / total_urls) * 100
-                        print(
-                            f"  [{completed}/{total_urls}] {progress_percent:.1f}% - {status} Page {task['position_in_section']}: {result.get('title', '')[:50]}...")
+                        print(f"  [{completed}/{total_urls}] {progress_percent:.1f}% - {status} Page {task['position_in_section']}: {result.get('title', '')[:50]}...")
 
                     except Exception as e:
                         with self.counter_lock:
                             failed += 1
                             completed += 1
-                        print(f"  ⚠️ Task failed with exception: {e}")
+                        print(f"  ⚠️ Task failed: {e}")
 
-            print(f"  📊 Section complete: {section_successful}/{len(urls)} successful")
+            print(f"  Section done: {section_successful}/{len(urls)} okay")
 
-            # Small delay between sections
             if section_idx < len(evidence_structure):
                 time.sleep(1)
 
         elapsed = time.time() - start_time
 
         print("\n" + "=" * 70)
-        print(f"🎉 SCRAPING COMPLETED!")
+        print(f"   SCRAPING DONE!")
         print(f"   Successful: {successful}/{total_urls}")
         print(f"   Failed: {failed}/{total_urls}")
         print(f"   Time: {int(elapsed / 60)}m {int(elapsed % 60)}s")
-        print(f"   Speed: {total_urls / elapsed:.2f} pages/second")
         print("=" * 70)
 
-        # Compile summary data in correct order
         all_summary_data = self.compile_ordered_summary_data()
-
-        # Save all CSVs
         self.save_all_csvs(all_summary_data, successful, total_urls, elapsed)
-
-        # Create zip file
         zip_path = self.create_zip_file()
 
         return successful, zip_path
 
     def compile_ordered_summary_data(self):
-        """Compile summary data in correct order from stored results"""
+        """Put everything back in the right order"""
         summary_data = []
 
-        # Sort sections by their numeric prefix
         sorted_sections = sorted(self.section_order_data.keys(),
                                  key=lambda x: int(x.split('_')[0]))
 
         for section_name in sorted_sections:
             section_results = self.section_order_data[section_name]
-
-            # Filter out None values (failed tasks that weren't stored)
             valid_results = [r for r in section_results if r is not None]
-
-            # Sort by position_in_section to ensure correct order
             valid_results.sort(key=lambda x: x['task']['position_in_section'])
 
             for item in valid_results:
@@ -272,29 +239,24 @@ class EvidenceScraper:
         return summary_data
 
     def scrape_single_url_threaded(self, task):
-        """Threaded version of scrape_single_url"""
+        """Scrape one page - used by threads"""
         url = task['url']
         section_name = task['section_name']
         folder_name = task['folder_name']
         position = task['position_in_section']
-
         try:
-            # Add small delay to avoid overwhelming the server
             time.sleep(task['delay'])
-
-            base_dir = "1421_evidence_scraped"
-            # Create folder structure
+            base_dir = "scraped_csvs\\GavinMenziesWebsite"
             page_dir = os.path.join(base_dir, section_name, folder_name)
             data_dir = os.path.join(page_dir, "data")
             os.makedirs(data_dir, exist_ok=True)
 
-            # Try scraping with requests first
+            # Try requests first, fall back to playwright if needed
             try:
                 response = requests.get(url, headers=self.headers, timeout=30)
                 response.raise_for_status()
                 soup = BeautifulSoup(response.text, 'html.parser')
             except Exception as e:
-                # Fallback to Playwright
                 try:
                     soup = self.scrape_playwright(url)
                 except Exception as playwright_error:
@@ -303,13 +265,11 @@ class EvidenceScraper:
             title = self.clean_text(self.extract_title(soup, url))
             content = self.clean_text(self.extract_content(soup))
             author = self.extract_author(soup)
-
-            # Get metadata
+            # get the word count
             word_count = len(content.split())
 
-            # Create CSV data
             csv_data = {
-                'page_number': position,  # Use position in section for ordering
+                'page_number': position,
                 'folder_name': folder_name,
                 'url': url,
                 'title': title[:1000],
@@ -318,7 +278,6 @@ class EvidenceScraper:
                 'word_count': word_count
             }
 
-            # Save CSV
             csv_path = os.path.join(data_dir, f"{folder_name}.csv")
             success = self.save_page_to_csv(csv_data, csv_path)
 
@@ -371,53 +330,37 @@ class EvidenceScraper:
             }
 
     def save_all_csvs(self, summary_data, successful, total, elapsed):
-        """Save all CSV files"""
-        print("\n💾 Saving all CSV files...")
+        """Save all the CSV files we need"""
+        print("\n Saving CSV files...")
 
-        # 1. Main summary CSV
         self.save_summary_csv(summary_data)
-
-        # 2. URL mapping CSV
         self.save_url_mapping_csv(summary_data)
-
-        # 3. Scraping summary CSV
         self.save_scraping_summary_csv(successful, total, elapsed)
-
-        # 4. Section summary CSV
         self.save_section_summary_csv(summary_data)
 
-        # 5. Errors CSV (if any)
         if self.errors:
             self.save_errors_csv()
 
     def save_summary_csv(self, data):
-        """Save main summary CSV"""
+        """Save the main summary file"""
         csv_path = "1421_evidence_scraped/all_evidence_summary.csv"
         try:
             os.makedirs(os.path.dirname(csv_path), exist_ok=True)
 
             with open(csv_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
-                fieldnames = [
-                    'page_number',
-                    'folder_name',
-                    'url',
-                    'title',
-                    'word_count',
-                    'section'
-                ]
+                fieldnames = ['page_number', 'folder_name', 'url', 'title', 'word_count', 'section']
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 writer.writeheader()
                 writer.writerows(data)
 
-            print(f"✅ Main summary CSV saved: {csv_path}")
+            print(f"  Main summary saved: {csv_path}")
             return True
-
         except Exception as e:
-            print(f"❌ Error saving main summary CSV: {e}")
+            print(f"  Error saving summary: {e}")
             return False
 
     def save_url_mapping_csv(self, summary_data):
-        """Save URL mapping CSV"""
+        """Save the URL mapping file"""
         csv_path = "1421_evidence_scraped/url_mapping.csv"
         try:
             os.makedirs(os.path.dirname(csv_path), exist_ok=True)
@@ -426,13 +369,12 @@ class EvidenceScraper:
                 fieldnames = ['folder_name', 'url', 'title', 'section', 'position', 'chapter']
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 writer.writeheader()
-
-                # Sort by section and position
-                sorted_data = sorted(summary_data,
-                                     key=lambda x: (x['section'], x['page_number']))
+                sorted_data = sorted(summary_data, key=lambda x: (x['section'], x['page_number']))
 
                 for item in sorted_data:
                     writer.writerow({
+
+
                         'folder_name': item['folder_name'],
                         'url': item['url'],
                         'title': item['title'],
@@ -441,32 +383,24 @@ class EvidenceScraper:
                         'chapter': item.get('chapter', '')
                     })
 
-            print(f"✅ URL mapping CSV saved: {csv_path}")
+            print(f"✅ URL mapping saved: {csv_path}")
             return True
-
         except Exception as e:
-            print(f"❌ Error saving URL mapping CSV: {e}")
+            print(f"❌ Error saving URL mapping: {e}")
             return False
 
     def save_scraping_summary_csv(self, successful, total, elapsed):
-        """Save scraping summary CSV"""
+        """Save the overall stats"""
         csv_path = "1421_evidence_scraped/scraping_summary.csv"
         try:
             os.makedirs(os.path.dirname(csv_path), exist_ok=True)
 
             with open(csv_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
-                fieldnames = [
-                    'total_pages',
-                    'successful',
-                    'failed',
-                    'success_rate',
-                    'time_elapsed_minutes',
-                    'pages_per_minute',
-                    'date_completed'
-                ]
+                fieldnames = ['total_pages', 'successful', 'failed', 'success_rate', 'time_elapsed_minutes', 'pages_per_minute', 'date_completed']
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 writer.writeheader()
                 writer.writerow({
+
                     'total_pages': total,
                     'successful': successful,
                     'failed': len(self.errors),
@@ -476,22 +410,20 @@ class EvidenceScraper:
                     'date_completed': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 })
 
-            print(f"✅ Scraping summary CSV saved: {csv_path}")
+            print(f"  Scraping summary saved: {csv_path}")
             return True
-
         except Exception as e:
-            print(f"❌ Error saving scraping summary CSV: {e}")
+            print(f"  Error saving summary: {e}")
             return False
 
     def save_section_summary_csv(self, summary_data):
-        """Save section summary CSV"""
+        """Save per-section stats"""
         csv_path = "1421_evidence_scraped/section_summary.csv"
         try:
             os.makedirs(os.path.dirname(csv_path), exist_ok=True)
 
             section_stats = {}
 
-            # Calculate section statistics
             for item in summary_data:
                 section = item['section']
                 if section not in section_stats:
@@ -508,9 +440,7 @@ class EvidenceScraper:
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 writer.writeheader()
 
-                # Sort sections numerically
-                sorted_sections = sorted(section_stats.items(),
-                                         key=lambda x: int(x[0].split('_')[0]))
+                sorted_sections = sorted(section_stats.items(), key=lambda x: int(x[0].split('_')[0]))
 
                 for section, stats in sorted_sections:
                     writer.writerow({
@@ -518,19 +448,17 @@ class EvidenceScraper:
                         'total_pages': stats['total'],
                         'successful': stats['success'],
                         'failed': stats['failed'],
-                        'success_rate': f"{(stats['success'] / stats['total'] * 100):.1f}%" if stats[
-                                                                                                   'total'] > 0 else "0%"
+                        'success_rate': f"{(stats['success'] / stats['total'] * 100):.1f}%" if stats['total'] > 0 else "0%"
                     })
 
-            print(f"✅ Section summary CSV saved: {csv_path}")
+            print(f"  Section summary saved: {csv_path}")
             return True
-
         except Exception as e:
-            print(f"❌ Error saving section summary CSV: {e}")
+            print(f"  Error saving section summary: {e}")
             return False
 
     def save_errors_csv(self):
-        """Save errors CSV"""
+        """Save the error log"""
         csv_path = "1421_evidence_scraped/scraping_errors.csv"
         try:
             os.makedirs(os.path.dirname(csv_path), exist_ok=True)
@@ -540,9 +468,7 @@ class EvidenceScraper:
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 writer.writeheader()
 
-                # Sort errors by section and position
-                sorted_errors = sorted(self.errors,
-                                       key=lambda x: (x['section'], x.get('position', 0)))
+                sorted_errors = sorted(self.errors, key=lambda x: (x['section'], x.get('position', 0)))
 
                 for err in sorted_errors:
                     writer.writerow({
@@ -553,19 +479,15 @@ class EvidenceScraper:
                         'error': err['error'][:500]
                     })
 
-            print(f"✅ Errors CSV saved: {csv_path}")
+            print(f"  Errors saved: {csv_path}")
             return True
-
         except Exception as e:
-            print(f"❌ Error saving errors CSV: {e}")
+            print(f"  Error saving errors: {e}")
             return False
-            # Your existing structure from the first code
 
+    # All the URLs we want to scrape, organised by section and in the right order
     def get_evidence_structure(self):
-        """Evidence URLs - ALL URLs from the 1421 evidence page"""
         structure = OrderedDict()
-
-        # FRONTISPIECE - Using your verified URLs
         structure["01_frontispiece"] = [
             "https://www.gavinmenzies.net/Evidence/1-synopsis-of-evidence-exclusive-2/",
             "https://www.gavinmenzies.net/Evidence/2-research-methods-and-equipment-deployed-2/",
@@ -573,14 +495,12 @@ class EvidenceScraper:
             "https://www.gavinmenzies.net/Evidence/4-summary-of-interesting-information-received-recently-via-www-gavinmenzies-net/"
         ]
 
-        # PART I.i – The Europeans Reached the New World with Copies of Chinese Maps
         structure["02_part_1i_european_maps"] = [
             "https://www.gavinmenzies.net/Evidence/1-evidence-provided-at-the-royal-geographical-society-on-march-15th-2002-2/",
             "https://www.gavinmenzies.net/Evidence/2-the-whole-world-was-charted-by-1423-%e2%80%93-before-the-european-voyages-of-discovery-started-2/",
             "https://www.gavinmenzies.net/Evidence/3-the-europeans-set-sail-with-accurate-maps-that-showed-their-destinations-2/"
         ]
 
-        # PART I.ii – The Discovery of the World
         structure["03_part_1ii_discovery_of_world"] = [
             "https://www.gavinmenzies.net/Evidence/1-the-discovery-of-the-master-charts-of-the-world-2/",
             "https://www.gavinmenzies.net/Evidence/2-the-eastern-hemisphere-%e2%80%93-albertin-de-virgas-map/",
@@ -599,7 +519,6 @@ class EvidenceScraper:
             "https://www.gavinmenzies.net/Evidence/15-the-world-shown-on-the-waldseemueller-western-hemisphere-and-the-albertin-di-virga-eastern-hemisphere-combined/"
         ]
 
-        # PART I.iii – Zheng He's Integrated Map of the World, 1418
         structure["04_part_1iii_zheng_he_map_1418"] = [
             "https://www.gavinmenzies.net/Evidence/1-zheng-hes-integrated-map-of-the-world-1418-press-release/",
             "https://www.gavinmenzies.net/Evidence/2-liu-gangs-paper-chinese-bi-hemispherical-world-maps/",
@@ -632,7 +551,6 @@ class EvidenceScraper:
             "https://www.gavinmenzies.net/Evidence/30-extracts-from-early-chinese-records-concerning-the-deveolpment-and-use-of-the-magnetic-compass/"
         ]
 
-        # PART II – Medieval Chinese Knowledge and the Fleets
         structure["05_part_ii_medieval_chinese_knowledge"] = [
             "https://www.gavinmenzies.net/Evidence/1-at-the-time-only-the-chinese-had-the-capacity-and-knowledge-to-explore-and-chart-the-world/",
             "https://www.gavinmenzies.net/Evidence/2-chinese-knowledge-of-the-world-in-1421/",
@@ -644,7 +562,6 @@ class EvidenceScraper:
             "https://www.gavinmenzies.net/Evidence/8-the-chinese-fleet/"
         ]
 
-        # PART III – Evidence of the Voyages of Zheng He Fleets
         structure["06_part_iii_zheng_he_evidence"] = [
             "https://www.gavinmenzies.net/Evidence/1-introduction-2/",
             "https://www.gavinmenzies.net/Evidence/2-chinese-maps-star-charts-and-records-which-escaped-destruction/",
@@ -676,17 +593,14 @@ class EvidenceScraper:
             "https://www.gavinmenzies.net/Evidence/28-selected-bibliography/"
         ]
 
-        # PART IV - Papers Referred to in Genetics Study
         structure["07_part_iv_genetics_papers"] = [
             "https://www.gavinmenzies.net/Evidence/1-papers-referred-to-in-genetics-study/"
         ]
 
-        # PART V - The Trading System Created by the Chinese and Taken Over by the Europeans
         structure["08_part_v_trading_system"] = [
             "https://www.gavinmenzies.net/Evidence/1-the-trading-system-created-by-the-chinese-which-was-taken-over-by-the-europeans/"
         ]
 
-        # PART VI - Annexes: Evidence of Chinese Fleets Visiting Specific Places Worldwide
         structure["09_part_vi_annexes_worldwide"] = [
             "https://www.gavinmenzies.net/Evidence/1-annex-1-evidence-of-chinese-fleets-visit-to-calicut/",
             "https://www.gavinmenzies.net/Evidence/2-annex-2-evidence-of-the-chinese-fleets-visiting-the-indian-ocean/",
@@ -721,7 +635,6 @@ class EvidenceScraper:
             "https://www.gavinmenzies.net/Evidence/31-annexes-30-31-32-evidence-of-chinese-fleets-to-northern-europe-%e2%80%93-vice-admiral-chou-wen/"
         ]
 
-        # PART VII Appendices – The Genetic Legacy of the Zheng He Fleets
         structure["10_part_vii_genetic_legacy"] = [
             "https://www.gavinmenzies.net/Evidence/1-the-genetic-legacy-of-zheng-he%e2%80%99s-fleets/",
             "https://www.gavinmenzies.net/Evidence/2-hong-bao-and-zhou-man-voyages-to-south-america-the-genetic-legacy/",
@@ -767,7 +680,6 @@ class EvidenceScraper:
             "https://www.gavinmenzies.net/Evidence/42-dna-evidence-of-miskito-and-sumo-also-spelt-suma-indians-of-nicaragua/"
         ]
 
-        # PART VIII Appendices – Work in Progress
         structure["11_part_viii_work_in_progress"] = [
             "https://www.gavinmenzies.net/Evidence/1-analysis-of-mortar-and-cement/",
             "https://www.gavinmenzies.net/Evidence/2-ship-construction/",
@@ -779,7 +691,6 @@ class EvidenceScraper:
             "https://www.gavinmenzies.net/Evidence/8-a-chinese-junk-in-the-great-dismal-swamp-gm-memo-13th-march-2006/"
         ]
 
-        # PART IX – Independent Research
         structure["12_part_ix_independent_research"] = [
             "https://www.gavinmenzies.net/Evidence/1-rosa-mui-and-paul-dong-ancient-chinese-astronomer-gan-de-discovered-jupiter%e2%80%99s-satellites-2000-years-earlier-than-galileo/",
             "https://www.gavinmenzies.net/Evidence/2-chinese-herbal-medicine-mackay-rippey/",
@@ -795,7 +706,6 @@ class EvidenceScraper:
             "https://www.gavinmenzies.net/Evidence/13-prof-han-zheng-hua-nanhai-a-chinese-territory-boundary-as-surveyed-by-the-%e2%80%9cfour-seas-sunshadow/"
         ]
 
-        # Independent Research - Cedric Bells survey of New Zealand
         structure["13_independent_cedric_bells_survey"] = [
             "https://www.gavinmenzies.net/Evidence/1-introduction/",
             "https://www.gavinmenzies.net/Evidence/2-map-geographical-representation-of-evidence/",
@@ -852,7 +762,6 @@ class EvidenceScraper:
             "https://www.gavinmenzies.net/Evidence/53-bibliography/"
         ]
 
-        # Independent Research - New Zealand Update – Antonia Bowen-Jones
         structure["14_independent_nz_update"] = [
             "https://www.gavinmenzies.net/Evidence/1-the-waitaha-people-%e2%80%93-a-chinese-colony-that-settled-in-new-zealand-2000-years-ago/",
             "https://www.gavinmenzies.net/Evidence/2-ruins-may-show-incas-beat-maoris-to-new-zealand/",
@@ -878,17 +787,14 @@ class EvidenceScraper:
             "https://www.gavinmenzies.net/Evidence/22-new-zealand-update-summary/"
         ]
 
-        # Independent Research - Alaska and the Bering Straits – Joseph Davis
         structure["15_independent_alaska"] = [
             "https://www.gavinmenzies.net/Evidence/1-alaska-and-the-bering-straits-local-support/",
             "https://www.gavinmenzies.net/Evidence/2-my-questions-for-alaskans/",
             "https://www.gavinmenzies.net/Evidence/3-note-from-reader-concerning-native-americans/"
         ]
 
-        # Independent Research - New Zealand (empty section from your structure)
-        structure["16_independent_new_zealand_empty"] = []  # Empty as per your structure
+        structure["16_independent_new_zealand_empty"] = []
 
-        # Independent Research - The Piasa
         structure["17_independent_piasa"] = [
             "https://www.gavinmenzies.net/Evidence/1-evidence-of-ming-era-exploration-in-the-central-mississippi-valley/",
             "https://www.gavinmenzies.net/Evidence/2-the-illustrated-mississippi-valley/",
@@ -900,7 +806,6 @@ class EvidenceScraper:
             "https://www.gavinmenzies.net/Evidence/8-the-piasa-and-the-city-of-the-dead-mark-and-laurie-nickless/"
         ]
 
-        # Independent Research - Colombia and its environs
         structure["18_independent_colombia"] = [
             "https://www.gavinmenzies.net/Evidence/1-penetracion-y-mestizaje-por-el-rio-atrato-adn/",
             "https://www.gavinmenzies.net/Evidence/2-canal-de-la-raspadura-atrato-san-juan/",
@@ -910,7 +815,6 @@ class EvidenceScraper:
             "https://www.gavinmenzies.net/Evidence/6-extrana-enfermedad-entre-indigenas-paeces-cauca-colombia/"
         ]
 
-        # Independent Research - Wang Tai Peng
         structure["19_independent_wang_tai_peng"] = [
             "https://www.gavinmenzies.net/Evidence/1-biography-of-wang-tai-peng/",
             "https://www.gavinmenzies.net/Evidence/2-tai-peng-wangs-zheng-he-project-report/",
@@ -922,15 +826,15 @@ class EvidenceScraper:
             "https://www.gavinmenzies.net/Evidence/8-a-tale-of-globalisation-in-ancient-asia/"
         ]
 
-        # Independent Research - Liu Gang - The Ancient Map code
         structure["20_independent_liu_gang"] = [
             "https://www.gavinmenzies.net/Evidence/1-the-ancient-map-code/"
         ]
 
         return structure
-
+    
+    # Helper functions to scrape
     def scrape_playwright(self, url):
-        """Fallback scraping with Playwright"""
+        """Fallback to Playwright if requests fails"""
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             page = browser.new_page()
@@ -941,7 +845,7 @@ class EvidenceScraper:
             return BeautifulSoup(content, 'html.parser')
 
     def extract_title(self, soup, url):
-        """Extract page title"""
+        """Get the page title"""
         t = soup.find('title')
         if t:
             title_text = t.get_text().strip()
@@ -962,14 +866,10 @@ class EvidenceScraper:
         return title.replace('Chapter ', 'Chapter ')
 
     def extract_author(self, soup):
-        """Extract author from page"""
+        """Figure out who wrote this page"""
         author_selectors = [
-            '.author',
-            '.byline',
-            '.post-author',
-            '.entry-author',
-            'meta[name="author"]',
-            'meta[property="article:author"]'
+            '.author', '.byline', '.post-author', '.entry-author',
+            'meta[name="author"]', 'meta[property="article:author"]'
         ]
 
         for sel in author_selectors:
@@ -982,22 +882,13 @@ class EvidenceScraper:
         return "Gavin Menzies"
 
     def extract_content(self, soup):
-        """Extract main content from page"""
+        """Pull out the main text"""
         for s in soup(["script", "style", "nav", "header", "footer", "iframe", "form", "button"]):
             s.decompose()
 
         content_selectors = [
-            'main',
-            'article',
-            '.content',
-            '#content',
-            '.entry-content',
-            'section',
-            '.post-content',
-            '.article-content',
-            '.page-content',
-            'div.content',
-            'div.article'
+            'main', 'article', '.content', '#content', '.entry-content',
+            'section', '.post-content', '.article-content', '.page-content'
         ]
 
         for sel in content_selectors:
@@ -1017,32 +908,20 @@ class EvidenceScraper:
         return "Content not found"
 
     def clean_content(self, text):
-        """Clean extracted content"""
+        """Clean up the extracted text"""
         text = re.sub(r'\n\s*\n', '\n\n', text)
         text = re.sub(r'[ \t]+', ' ', text)
         return text.strip()
 
     def clean_text(self, text):
-        """Clean text for safe CSV storage"""
+        """Make text safe for CSV"""
         if not text:
             return ""
 
         replacements = {
-            '\u2022': '•',
-            '\u2013': '-',
-            '\u2014': '-',
-            '\u2018': "'",
-            '\u2019': "'",
-            '\u201c': '"',
-            '\u201d': '"',
-            '\u00a0': ' ',
-            '\u200b': '',
-            '\ufffd': '',
-            '\u2026': '...',
-            '\u00a9': '(c)',
-            '\u00ae': '(R)',
-            '\u2122': '(TM)',
-            '"': '""',
+            '\u2022': '•', '\u2013': '-', '\u2014': '-', '\u2018': "'", '\u2019': "'",
+            '\u201c': '"', '\u201d': '"', '\u00a0': ' ', '\u200b': '', '\ufffd': '',
+            '\u2026': '...', '\u00a9': '(c)', '\u00ae': '(R)', '\u2122': '(TM)', '"': '""',
         }
 
         cleaned = text
@@ -1053,17 +932,9 @@ class EvidenceScraper:
         return cleaned.strip()
 
     def save_page_to_csv(self, page_data, csv_path):
-        """Save page data to CSV with simplified columns"""
+        """Save one page's data to CSV"""
         try:
-            fieldnames = [
-                'page_number',
-                'folder_name',
-                'url',
-                'title',
-                'content',
-                'author',
-                'word_count'
-            ]
+            fieldnames = ['page_number', 'folder_name', 'url', 'title', 'content', 'author', 'word_count']
 
             with open(csv_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
@@ -1071,39 +942,33 @@ class EvidenceScraper:
                 writer.writerow(page_data)
 
             return True
-
         except Exception as e:
             print(f"    ⚠️ Error saving CSV: {e}")
             return False
 
     def create_zip_file(self):
-        """Create a zip file of all scraped evidence in order"""
+        """Zip everything up when we're done"""
         try:
-            zip_path = "1421_evidence_scraped.zip"
+            zip_path = "scraped_csvs\GavinMenziesWebsite"
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                # Walk through directories in proper order
                 evidence_structure = self.get_evidence_structure()
 
                 for section_name in evidence_structure.keys():
                     section_path = os.path.join("1421_evidence_scraped", section_name)
                     if os.path.exists(section_path):
-                        # Get all chapter folders and sort them by position
                         chapter_folders = []
                         for item in os.listdir(section_path):
                             item_path = os.path.join(section_path, item)
                             if os.path.isdir(item_path):
-                                # Extract position from folder name (last part before hash)
                                 pos_match = re.search(r'_(\d{3})_[a-f0-9]{4}$', item)
                                 if pos_match:
                                     position = int(pos_match.group(1))
                                     chapter_folders.append((position, item, item_path))
                                 else:
-                                    chapter_folders.append((999, item, item_path))  # Default sort
+                                    chapter_folders.append((999, item, item_path))
 
-                        # Sort by position
                         chapter_folders.sort(key=lambda x: x[0])
 
-                        # Add to zip in sorted order
                         for position, folder_name, folder_path in chapter_folders:
                             for root, dirs, files in os.walk(folder_path):
                                 for file in files:
@@ -1111,7 +976,6 @@ class EvidenceScraper:
                                     arcname = os.path.relpath(file_path, ".")
                                     zipf.write(file_path, arcname)
 
-                # Add CSV files
                 csv_dir = "1421_evidence_scraped"
                 if os.path.exists(csv_dir):
                     for file in os.listdir(csv_dir):
@@ -1122,80 +986,35 @@ class EvidenceScraper:
 
             print(f"✅ Zip file created: {zip_path}")
             return zip_path
-
         except Exception as e:
             print(f"⚠️ Could not create zip file: {e}")
             return None
 
 
 def main():
-    """Run the evidence scraper"""
+    """Run the scraper"""
     print("=" * 70)
-    print("📚 1421 EVIDENCE SCRAPER - THREADED WITH ORDER PRESERVATION")
-    print("   ✓ Threaded scraping (5x faster)")
-    print("   ✓ Pages processed IN ORDER within each section")
-    print("   ✓ Folder names preserve chapter/position numbers")
-    print("   ✓ Clean CSV columns (no timestamps, links, or unnecessary metadata)")
+    print("   ✓ Multi-threaded for speed")
+    print("   ✓ Keeps pages in order within sections")
     print("=" * 70)
-
-    print("\n📊 CSV COLUMNS FOR EVIDENCE PAGES:")
-    print("   page_number - Sequential number in section (1, 2, 3, etc.)")
-    print("   folder_name - Readable folder name with position number")
-    print("   url - Page URL")
-    print("   title - Page title")
-    print("   content - Main text content")
-    print("   author - Author name")
-    print("   word_count - Number of words")
-
-    print("\n📁 Output structure (PROPERLY ORDERED):")
-    print("   1421_evidence_scraped/")
-    print("   ├── 01_frontispiece/")
-    print("   │   ├── 01_Chapter001_Synopsis_Of_Evidence_Exclusive_2_001_hash/")
-    print("   │   │   └── data/01_Chapter001_Synopsis_Of_Evidence_Exclusive_2_001_hash.csv")
-    print("   │   ├── 02_Chapter002_Research_Methods_And_Equipment_Deployed_2_002_hash/")
-    print("   │   │   └── data/02_Chapter002_Research_Methods_And_Equipment_Deployed_2_002_hash.csv")
-    print("   │   └── ... (in order 1, 2, 3, 4)")
-    print("   ├── 02_part_1i_european_maps/")
-    print("   │   ├── 02_Chapter001_Evidence_Provided_At_The_Royal_Geographical_Society_On_March_15th_2002_2_001_hash/")
-    print(
-        "   │   │   └── data/02_Chapter001_Evidence_Provided_At_The_Royal_Geographical_Society_On_March_15th_2002_2_001_hash.csv")
-    print(
-        "   │   ├── 02_Chapter002_The_Whole_World_Was_Charted_By_1423_Before_The_European_Voyages_Of_Discovery_Started_2_002_hash/")
-    print(
-        "   │   │   └── data/02_Chapter002_The_Whole_World_Was_Charted_By_1423_Before_The_European_Voyages_Of_Discovery_Started_2_002_hash.csv")
-    print("   │   └── ... (in order 1, 2, 3)")
-    print("   └── ... (19 sections, all in order)")
-
-    print(f"\n📊 Total sections: 19")
-    print(f"📊 Total evidence pages: 283")
-
-    print("\n⚡ Performance optimization:")
-    print(f"   • Sections processed sequentially (to maintain order)")
-    print(f"   • URLs within each section processed in parallel (5 threads)")
-    print(f"   • Estimated time: 10-15 minutes (vs 45-90 minutes single-threaded)")
-    print(f"   • Random delays between requests to avoid rate limiting")
 
     os.makedirs("1421_evidence_scraped", exist_ok=True)
 
-    print(f"\n⚠️  WARNING: This will scrape 283 evidence pages from gavinmenzies.net!")
-    print("   Threaded mode - faster but maintains order within sections")
-    print("   Estimated time: 10-15 minutes")
-    print("   Estimated storage: ~50-100MB")
+    print(f"\n  This will scrape ~283 pages from gavinmenzies.net")
+    print("   Takes about 10-15 minutes")
 
-    proceed = input("\nProceed with scraping? (y/n): ").strip().lower()
+    proceed = input("\nGo ahead? (y/n): ").strip().lower()
     if proceed != 'y':
-        print("Scraping cancelled.")
+        print("Cancelled.")
         exit(0)
 
     print("\n" + "=" * 70)
-    print("🚀 Starting 1421 evidence scraping with threading and order preservation...")
-    print("⏳ This will be faster than single-threaded but maintains order.")
-    print("📝 All data will be saved as CSV files IN PROPER ORDER.")
+    print("  Starting scrape...")
     print("=" * 70)
 
     max_workers = 5
     try:
-        workers_input = input(f"\nEnter number of threads per section (1-10, default {max_workers}): ").strip()
+        workers_input = input(f"\nHow many threads? (1-10, default {max_workers}): ").strip()
         if workers_input:
             max_workers = min(max(1, int(workers_input)), 10)
     except:
@@ -1204,26 +1023,18 @@ def main():
     scraper = EvidenceScraper(max_workers=max_workers)
     success_count, zip_file = scraper.scrape_all_evidence()
 
-    print("\n📊 FINAL SUMMARY")
-    print(f"✅ Successfully scraped: {success_count}/283 pages")
-    print(f"📂 Output folder: 1421_evidence_scraped/")
+    print("\n  FINAL SUMMARY")
+    print(f"  Successfully scraped: {success_count}/~283 pages")
+    print(f"  Output folder: 1421_evidence_scraped/")
 
     if zip_file:
-        print(f"📦 Zip file: {zip_file}")
-
-    print("\n📄 Output CSV files (ALL IN CORRECT ORDER):")
-    print("   - all_evidence_summary.csv (main index sorted by section and position)")
-    print("   - url_mapping.csv (folder name to URL mapping with sections/positions)")
-    print("   - scraping_summary.csv (overall statistics with performance metrics)")
-    print("   - section_summary.csv (per-section statistics)")
+        print(f"  Zip file: {zip_file}")
 
     if scraper.errors:
-        print("   - scraping_errors.csv (error details, sorted by section/position)")
-        print(f"\n⚠️  {len(scraper.errors)} pages failed to scrape")
-        print("💡 Check scraping_errors.csv for details")
+        print(f"\n  {len(scraper.errors)} pages failed")
+        print("   Check scraping_errors.csv for details")
 
-    print("\n✨ All data saved in clean CSV format and in the correct order!")
-    print("   Each page folder contains a CSV with page_number = position in section")
+    print("\n  Done!")
 
 
 if __name__ == "__main__":

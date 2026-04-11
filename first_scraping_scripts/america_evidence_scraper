@@ -1,8 +1,5 @@
 """
-"Who Discovered America?" Evidence Scraper - SIMPLIFIED VERSION
-- Scrapes all chapter evidence from Gavin Menzies' America book
-- Readable folder names based on page titles
-- Clean CSV columns (no links, timestamps, or unnecessary metadata)
+- Scrapes all chapter evidence from Gavin Menzies' Website, specifically the America evidence pages
 """
 from playwright.sync_api import sync_playwright
 import os
@@ -17,7 +14,6 @@ import csv
 from datetime import datetime
 import zipfile
 
-
 class AmericaEvidenceScraper:
     def __init__(self):
         self.headers = {
@@ -26,40 +22,29 @@ class AmericaEvidenceScraper:
         }
         self.errors = []
         self.scrape_log = []
-        self.url_mapping = {}  # Store URL to folder name mapping
+        self.url_mapping = {}
         self.section_counter = {}
-        self.page_counter = 1  # Global page counter
+        self.page_counter = 1
+        self.base_dir = "scraped_csvs/GavinMenziesWebsite"
 
     def create_folder_name(self, url, section_name):
         """Create readable folder name based on page title"""
-        # Get the title from URL path
         path = urlparse(url).path.strip('/').split('/')[-1]
-        # Decode URL encoded characters
         path = path.replace('%e2%80%93', '-').replace('%e2%80%99', "'")
 
-        # Convert to readable format
         title_words = path.replace('-', ' ').replace('chapter', 'Chapter').title()
 
-        # Add section counter for uniqueness
         if section_name not in self.section_counter:
             self.section_counter[section_name] = 0
         self.section_counter[section_name] += 1
-
-        # Extract section number (e.g., "01" from "01_prologue")
         section_num = section_name.split('_')[0]
-
-        # Create folder name: SectionNumber_Title_Number
         folder_name = f"{section_num}_{title_words}_{self.section_counter[section_name]:02d}"
 
-        # Truncate if too long
         if len(folder_name) > 60:
             folder_name = folder_name[:55]
 
-        # Add short hash for uniqueness
         url_hash = hashlib.md5(url.encode()).hexdigest()[:4]
         folder_name = f"{folder_name}_{url_hash}"
-
-        # Replace any remaining problematic characters
         folder_name = re.sub(r'[<>:"/\\|?*]', '_', folder_name)
 
         self.url_mapping[folder_name] = url
@@ -67,23 +52,22 @@ class AmericaEvidenceScraper:
 
     def scrape_all_evidence(self):
         """Main function to scrape all evidence pages"""
-        print("🚀 Starting 'Who Discovered America?' Evidence Scraping...")
+        print("Starting 'Who Discovered America?' Evidence Scraping...")
         print("=" * 70)
 
         evidence_structure = self.get_evidence_structure()
         total_urls = sum(len(urls) for urls in evidence_structure.values())
 
-        print(f"📊 Total Evidence Pages: {total_urls}")
+        print(f"Total Evidence Pages: {total_urls}")
         print("=" * 70)
 
         successful = 0
         start_time = time.time()
 
-        # Create main summary CSV data
         main_summary_data = []
 
         for section_name, urls in evidence_structure.items():
-            print(f"\n📁 SECTION: {section_name.upper()}")
+            print(f"\nSECTION: {section_name.upper()}")
             print("-" * 50)
 
             for idx, url in enumerate(urls, 1):
@@ -95,9 +79,8 @@ class AmericaEvidenceScraper:
 
                 if result['success']:
                     successful += 1
-                    print(f"  ✅ Success ({result.get('word_count', 0)} words)")
+                    print(f"  SUCCESS ({result.get('word_count', 0)} words)")
 
-                    # Add to main summary data
                     main_summary_data.append({
                         'page_number': result.get('page_number', 0),
                         'folder_name': folder_name,
@@ -114,7 +97,7 @@ class AmericaEvidenceScraper:
                         'words': result.get('word_count', 0)
                     })
                 else:
-                    print(f"  ❌ Failed: {result.get('error', 'Unknown')}")
+                    print(f"  FAILED: {result.get('error', 'Unknown')}")
                     self.errors.append({
                         'section': section_name,
                         'url': url,
@@ -122,7 +105,6 @@ class AmericaEvidenceScraper:
                         'error': result.get('error', 'Unknown')
                     })
 
-                    # Add failed entry to summary
                     main_summary_data.append({
                         'page_number': self.page_counter,
                         'folder_name': folder_name,
@@ -145,43 +127,32 @@ class AmericaEvidenceScraper:
         elapsed = time.time() - start_time
 
         print("\n" + "=" * 70)
-        print(f"🎉 SCRAPING COMPLETED!")
-        print(f"   Successful: {successful}/{total_urls}")
-        print(f"   Failed: {len(self.errors)}/{total_urls}")
-        print(f"   Time: {int(elapsed / 60)}m {int(elapsed % 60)}s")
+        print(f"SCRAPING COMPLETED")
+        print(f"  Successful: {successful}/{total_urls}")
+        print(f"  Failed: {len(self.errors)}/{total_urls}")
+        print(f"  Time: {int(elapsed / 60)}m {int(elapsed % 60)}s")
         print("=" * 70)
 
-        # Save all CSVs
         self.save_all_csvs(main_summary_data, successful, total_urls, elapsed)
-
-        # Create zip file
         zip_path = self.create_zip_file()
 
         return successful, zip_path
 
     def save_all_csvs(self, summary_data, successful, total, elapsed):
         """Save all CSV files"""
-        print("\n💾 Saving all CSV files...")
+        print("\nSaving all CSV files...")
 
-        # 1. Main summary CSV
         self.save_summary_csv(summary_data)
-
-        # 2. URL mapping CSV
         self.save_url_mapping_csv(summary_data)
-
-        # 3. Scraping summary CSV
         self.save_scraping_summary_csv(successful, total, elapsed)
-
-        # 4. Section summary CSV
         self.save_section_summary_csv(summary_data)
 
-        # 5. Errors CSV (if any)
         if self.errors:
             self.save_errors_csv()
 
     def save_summary_csv(self, data):
         """Save main summary CSV"""
-        csv_path = "america_evidence_scraped/all_evidence_summary.csv"
+        csv_path = os.path.join(self.base_dir, "america_evidence_summary.csv")
         try:
             os.makedirs(os.path.dirname(csv_path), exist_ok=True)
 
@@ -198,16 +169,16 @@ class AmericaEvidenceScraper:
                 writer.writeheader()
                 writer.writerows(data)
 
-            print(f"✅ Main summary CSV saved: {csv_path}")
+            print(f"Main summary CSV saved: {csv_path}")
             return True
 
         except Exception as e:
-            print(f"❌ Error saving main summary CSV: {e}")
+            print(f"Error saving main summary CSV: {e}")
             return False
 
     def save_url_mapping_csv(self, summary_data):
         """Save URL mapping CSV"""
-        csv_path = "america_evidence_scraped/url_mapping.csv"
+        csv_path = os.path.join(self.base_dir, "america_url_mapping.csv")
         try:
             os.makedirs(os.path.dirname(csv_path), exist_ok=True)
 
@@ -216,25 +187,24 @@ class AmericaEvidenceScraper:
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 writer.writeheader()
 
-                # Create mapping from summary data
                 for item in summary_data:
-                    if item['title']:  # Only include successful scrapes
+                    if item['title']:
                         writer.writerow({
                             'folder_name': item['folder_name'],
                             'url': item['url'],
                             'title': item['title']
                         })
 
-            print(f"✅ URL mapping CSV saved: {csv_path}")
+            print(f"URL mapping CSV saved: {csv_path}")
             return True
 
         except Exception as e:
-            print(f"❌ Error saving URL mapping CSV: {e}")
+            print(f"Error saving URL mapping CSV: {e}")
             return False
 
     def save_scraping_summary_csv(self, successful, total, elapsed):
         """Save scraping summary CSV"""
-        csv_path = "america_evidence_scraped/scraping_summary.csv"
+        csv_path = os.path.join(self.base_dir, "america_scraping_summary.csv")
         try:
             os.makedirs(os.path.dirname(csv_path), exist_ok=True)
 
@@ -258,22 +228,21 @@ class AmericaEvidenceScraper:
                     'date_completed': datetime.now().strftime("%Y-%m-%d")
                 })
 
-            print(f"✅ Scraping summary CSV saved: {csv_path}")
+            print(f"Scraping summary CSV saved: {csv_path}")
             return True
 
         except Exception as e:
-            print(f"❌ Error saving scraping summary CSV: {e}")
+            print(f"Error saving scraping summary CSV: {e}")
             return False
 
     def save_section_summary_csv(self, summary_data):
         """Save section summary CSV"""
-        csv_path = "america_evidence_scraped/section_summary.csv"
+        csv_path = os.path.join(self.base_dir, "america_section_summary.csv")
         try:
             os.makedirs(os.path.dirname(csv_path), exist_ok=True)
 
             section_stats = {}
 
-            # Calculate section statistics
             for item in summary_data:
                 section = item['section']
                 if section not in section_stats:
@@ -299,16 +268,16 @@ class AmericaEvidenceScraper:
                         'success_rate': f"{(stats['success'] / stats['total'] * 100):.1f}%" if stats['total'] > 0 else "0%"
                     })
 
-            print(f"✅ Section summary CSV saved: {csv_path}")
+            print(f"Section summary CSV saved: {csv_path}")
             return True
 
         except Exception as e:
-            print(f"❌ Error saving section summary CSV: {e}")
+            print(f"Error saving section summary CSV: {e}")
             return False
 
     def save_errors_csv(self):
         """Save errors CSV"""
-        csv_path = "america_evidence_scraped/scraping_errors.csv"
+        csv_path = os.path.join(self.base_dir, "america_scraping_errors.csv")
         try:
             os.makedirs(os.path.dirname(csv_path), exist_ok=True)
 
@@ -324,142 +293,117 @@ class AmericaEvidenceScraper:
                         'error': err['error'][:500]
                     })
 
-            print(f"✅ Errors CSV saved: {csv_path}")
+            print(f"Errors CSV saved: {csv_path}")
             return True
 
         except Exception as e:
-            print(f"❌ Error saving errors CSV: {e}")
+            print(f"Error saving errors CSV: {e}")
             return False
 
+    # Get evidence structure with all URLs to scrape
     def get_evidence_structure(self):
-        """Evidence URLs - ALL URLs from the America book evidence page"""
         from collections import OrderedDict
 
         structure = OrderedDict()
 
-        # Prologue
         structure["01_prologue"] = [
             "https://www.gavinmenzies.net/Evidence/prologue-%e2%80%93-life-at-sea/"
         ]
 
-        # Chapter 1
         structure["02_chapter_01"] = [
             "https://www.gavinmenzies.net/Evidence/chapter-1-%e2%80%93-a-land-bridge-too-far/"
         ]
 
-        # Chapter 2
         structure["03_chapter_02"] = [
             "https://www.gavinmenzies.net/Evidence/chapter-2-%e2%80%93-along-the-silk-road/"
         ]
 
-        # Chapter 3
         structure["04_chapter_03"] = [
             "https://www.gavinmenzies.net/Evidence/chapter-3-plants-between-continents/"
         ]
 
-        # Chapter 4
         structure["05_chapter_04"] = [
             "https://www.gavinmenzies.net/Evidence/chapter-4-%e2%80%93-european-seafaring-100-000-bc/"
         ]
 
-        # Chapter 5
         structure["06_chapter_05"] = [
             "https://www.gavinmenzies.net/Evidence/chapter-5-%e2%80%93-mastery-of-the-oceans-before-columbus/"
         ]
 
-        # Chapter 6
         structure["07_chapter_06"] = [
             "https://www.gavinmenzies.net/Evidence/chapter-6-the-genetic-evidence/"
         ]
 
-        # Chapter 7
         structure["08_chapter_07"] = [
             "https://www.gavinmenzies.net/Evidence/chapter-7-%e2%80%93-in-search-of-lost-civilisations-2/"
         ]
 
-        # Chapter 8
         structure["09_chapter_08"] = [
             "https://www.gavinmenzies.net/Evidence/chapter-8-%e2%80%93-the-olmec-the-foundation-culture-of-central-america/"
         ]
 
-        # Chapter 9
         structure["10_chapter_09"] = [
             "https://www.gavinmenzies.net/Evidence/chapter-9-%e2%80%93-pyramids-in-mexico-and-central-america/"
         ]
 
-        # Chapter 10
         structure["11_chapter_10"] = [
             "https://www.gavinmenzies.net/Evidence/chapter-10-%e2%80%93-pyramid-builders-of-south-america/"
         ]
 
-        # Chapter 11
         structure["12_chapter_11"] = [
             "https://www.gavinmenzies.net/Evidence/chapter-11-kubilai-khan%e2%80%99s-lost-fleets/"
         ]
 
-        # Chapter 12
         structure["13_chapter_12"] = [
             "https://www.gavinmenzies.net/Evidence/chapter-12-the-1418-chinese-map-of-the-world/"
         ]
 
-        # Chapter 13
         structure["14_chapter_13"] = [
             "https://www.gavinmenzies.net/Evidence/chapter-13-north-carolina-and-the-virginias/"
         ]
 
-        # Chapter 14
         structure["15_chapter_14"] = [
             "https://www.gavinmenzies.net/Evidence/chapter-14-the-eastern-seaboard/"
         ]
 
-        # Chapter 15
         structure["16_chapter_15"] = [
             "https://www.gavinmenzies.net/Evidence/chapter-15-nova-cataia-the-island-of-seven-cities/"
         ]
 
-        # Chapter 16
         structure["17_chapter_16"] = [
             "https://www.gavinmenzies.net/Evidence/chapter-16-the-pacific-coast-of-north-america/"
         ]
 
-        # Chapter 17
         structure["18_chapter_17"] = [
             "https://www.gavinmenzies.net/Evidence/chapter-17-stone-age-sailors-%e2%80%93-the-%e2%80%9cwindover-bog%e2%80%9d-people-of-florida/"
         ]
 
-        # Conclusion
         structure["19_conclusion"] = [
             "https://www.gavinmenzies.net/Evidence/conclusion-%e2%80%93-who-discovered-america/"
         ]
 
         return structure
-
+    # Helper functions
     def scrape_single_url(self, url, section, folder_name, section_index):
         """Scrape a single URL and save as CSV"""
         try:
-            base_dir = "america_evidence_scraped"
-            # Create folder structure
-            page_dir = os.path.join(base_dir, section, folder_name)
+            page_dir = os.path.join(self.base_dir, section, folder_name)
             data_dir = os.path.join(page_dir, "data")
             os.makedirs(data_dir, exist_ok=True)
 
-            # Try scraping with requests first
             try:
                 response = requests.get(url, headers=self.headers, timeout=30)
                 response.raise_for_status()
                 soup = BeautifulSoup(response.text, 'html.parser')
             except:
-                # Fallback to Playwright
                 soup = self.scrape_playwright(url)
 
             title = self.clean_text(self.extract_title(soup, url))
             content = self.clean_text(self.extract_content(soup))
             author = self.extract_author(soup)
 
-            # Get metadata
             word_count = len(content.split())
 
-            # Create CSV data with simplified columns
             csv_data = {
                 'page_number': self.page_counter,
                 'folder_name': folder_name,
@@ -470,7 +414,6 @@ class AmericaEvidenceScraper:
                 'word_count': word_count
             }
 
-            # Save CSV with folder name as filename
             csv_path = os.path.join(data_dir, f"{folder_name}.csv")
             success = self.save_page_to_csv(csv_data, csv_path)
 
@@ -487,7 +430,7 @@ class AmericaEvidenceScraper:
                 return {'success': False, 'error': 'Failed to save CSV'}
 
         except Exception as e:
-            print(f"    ⚠️ Scraping error: {str(e)[:100]}")
+            print(f"    Scraping error: {str(e)[:100]}")
             return {'success': False, 'error': str(e)}
 
     def scrape_playwright(self, url):
@@ -506,7 +449,6 @@ class AmericaEvidenceScraper:
         t = soup.find('title')
         if t:
             title_text = t.get_text().strip()
-            # Clean up title
             title_text = title_text.replace(' – ', ' - ').replace(' | ', ' - ')
             return title_text
 
@@ -514,20 +456,17 @@ class AmericaEvidenceScraper:
         if h1:
             return h1.get_text().strip()
 
-        # Try other heading tags
         for tag in ['h2', 'h3', 'h4']:
             heading = soup.find(tag)
             if heading:
                 return heading.get_text().strip()
 
-        # Use URL as fallback
         path = urlparse(url).path.strip('/').split('/')[-1]
         title = path.replace('-', ' ').replace('%e2%80%93', '-').title()
         return title.replace('Chapter ', 'Chapter ')
 
     def extract_author(self, soup):
         """Extract author from page"""
-        # Try common author selectors
         author_selectors = [
             '.author',
             '.byline',
@@ -544,15 +483,13 @@ class AmericaEvidenceScraper:
                     return elem.get('content', '').strip()
                 return elem.get_text().strip()
 
-        return "Gavin Menzies"  # Default author for this site
+        return "Gavin Menzies"
 
     def extract_content(self, soup):
         """Extract main content from page"""
-        # Remove unwanted elements
         for s in soup(["script", "style", "nav", "header", "footer", "iframe", "form", "button"]):
             s.decompose()
 
-        # Try content selectors (priority order)
         content_selectors = [
             'main',
             'article',
@@ -574,10 +511,8 @@ class AmericaEvidenceScraper:
                 if len(text) > 200:
                     return self.clean_content(text)
 
-        # Fallback to body
         body = soup.find('body')
         if body:
-            # Remove navigation and other noise
             for noise in body.select('nav, .navigation, .menu, .sidebar, .footer'):
                 noise.decompose()
             text = body.get_text(separator='\n', strip=True)
@@ -587,7 +522,6 @@ class AmericaEvidenceScraper:
 
     def clean_content(self, text):
         """Clean extracted content"""
-        # Remove excessive whitespace
         text = re.sub(r'\n\s*\n', '\n\n', text)
         text = re.sub(r'[ \t]+', ' ', text)
         return text.strip()
@@ -597,7 +531,6 @@ class AmericaEvidenceScraper:
         if not text:
             return ""
 
-        # Replace problematic characters
         replacements = {
             '\u2022': '•',
             '\u2013': '-',
@@ -607,28 +540,25 @@ class AmericaEvidenceScraper:
             '\u201c': '"',
             '\u201d': '"',
             '\u00a0': ' ',
-            '\u200b': '',  # Zero-width space
-            '\ufffd': '',  # Replacement character
-            '\u2026': '...',  # Ellipsis
+            '\u200b': '',
+            '\ufffd': '',
+            '\u2026': '...',
             '\u00a9': '(c)',
             '\u00ae': '(R)',
             '\u2122': '(TM)',
-            '"': '""',  # Escape double quotes for CSV
+            '"': '""',
         }
 
         cleaned = text
         for char, replacement in replacements.items():
             cleaned = cleaned.replace(char, replacement)
 
-        # Remove excessive whitespace but keep newlines for readability
         cleaned = re.sub(r'[ \t]+', ' ', cleaned)
-
         return cleaned.strip()
 
     def save_page_to_csv(self, page_data, csv_path):
         """Save page data to CSV with simplified columns"""
         try:
-            # Simplified column order as requested
             fieldnames = [
                 'page_number',
                 'folder_name',
@@ -639,7 +569,6 @@ class AmericaEvidenceScraper:
                 'word_count'
             ]
 
-            # Write to CSV
             with open(csv_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 writer.writeheader()
@@ -648,66 +577,49 @@ class AmericaEvidenceScraper:
             return True
 
         except Exception as e:
-            print(f"    ⚠️ Error saving CSV: {e}")
+            print(f"    Error saving CSV: {e}")
             return False
 
     def create_zip_file(self):
         """Create a zip file of all scraped evidence"""
         try:
-            zip_path = "america_evidence_scraped.zip"
+            zip_path = "scraped_csvs\\GavinMenziesWebsite.zip"
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                for root, dirs, files in os.walk("america_evidence_scraped"):
+                for root, dirs, files in os.walk(self.base_dir):
                     for file in files:
                         file_path = os.path.join(root, file)
                         arcname = os.path.relpath(file_path, ".")
                         zipf.write(file_path, arcname)
 
-            print(f"✅ Zip file created: {zip_path}")
+            print(f"Zip file created: {zip_path}")
             return zip_path
 
         except Exception as e:
-            print(f"⚠️ Could not create zip file: {e}")
+            print(f"Could not create zip file: {e}")
             return None
 
 
 def main():
     """Run the evidence scraper"""
     print("=" * 70)
-    print("📚 WHO DISCOVERED AMERICA? EVIDENCE SCRAPER")
-    print("   ✓ Readable folder names based on page titles")
-    print("   ✓ Clean CSV columns (no timestamps, links, or unnecessary metadata)")
-    print("   ✓ Organized by chapter sections")
+    print("WHO DISCOVERED AMERICA? EVIDENCE SCRAPER")
+    print("  - Readable folder names based on page titles")
+    print("  - Clean CSV columns (no timestamps, links, or unnecessary metadata)")
+    print("  - Organized by chapter sections")
     print("=" * 70)
 
-    print("\n📊 CSV COLUMNS FOR EVIDENCE PAGES:")
-    print("   page_number - Sequential number in section")
-    print("   folder_name - Readable folder name (e.g., 01_Prologue_Life_At_Sea_01_hash)")
-    print("   url - Page URL")
-    print("   title - Page title")
-    print("   content - Main text content")
-    print("   author - Author name")
-    print("   word_count - Number of words")
+    print("\nCSV COLUMNS FOR EVIDENCE PAGES:")
+    print("  page_number - Sequential number in section")
+    print("  folder_name - Readable folder name")
+    print("  url - Page URL")
+    print("  title - Page title")
+    print("  content - Main text content")
+    print("  author - Author name")
+    print("  word_count - Number of words")
+    print(f"\nTotal sections: 19")
+    print(f"Total evidence pages: 19 (Prologue + 17 Chapters + Conclusion)")
 
-    print("\n📁 Output structure:")
-    print("   america_evidence_scraped/")
-    print("   ├── 01_prologue/")
-    print("   │   └── 01_Prologue_Life_At_Sea_01_hash/")
-    print("   │       └── data/01_Prologue_Life_At_Sea_01_hash.csv")
-    print("   ├── 02_chapter_01/")
-    print("   │   └── 02_Chapter_1_A_Land_Bridge_Too_Far_01_hash/")
-    print("   │       └── data/02_Chapter_1_A_Land_Bridge_Too_Far_01_hash.csv")
-    print("   ├── ... (17 chapters)")
-    print("   ├── 19_conclusion/")
-    print("   ├── all_evidence_summary.csv")
-    print("   ├── url_mapping.csv")
-    print("   ├── scraping_summary.csv")
-    print("   ├── section_summary.csv")
-    print("   └── scraping_errors.csv (if any errors)")
-
-    print(f"\n📊 Total sections: 19")
-    print(f"📊 Total evidence pages: 19 (Prologue + 17 Chapters + Conclusion)")
-
-    print("\n📄 Chapters to scrape:")
+    print("\nChapters to scrape:")
     chapters = [
         "Prologue - Life at Sea",
         "Chapter 1 - A Land Bridge Too Far",
@@ -733,12 +645,11 @@ def main():
     for i, chapter in enumerate(chapters, 1):
         print(f"   {i:2d}. {chapter}")
 
-    os.makedirs("america_evidence_scraped", exist_ok=True)
+    os.makedirs("scraped_csvs/GavinMenziesWebsite", exist_ok=True)
 
-    # Ask for confirmation before starting
-    print(f"\n⚠️  WARNING: This will scrape 19 evidence pages from gavinmenzies.net!")
-    print("   Estimated time: 3-5 minutes")
-    print("   Estimated storage: ~2-3MB")
+    print(f"\nWARNING: This will scrape 19 evidence pages from gavinmenzies.net")
+    print("  Estimated time: 3-5 minutes")
+    print("  Estimated storage: ~2-3MB")
 
     proceed = input("\nProceed with scraping? (y/n): ").strip().lower()
     if proceed != 'y':
@@ -746,34 +657,33 @@ def main():
         exit(0)
 
     print("\n" + "=" * 70)
-    print("🚀 Starting America evidence scraping...")
-    print("⏳ This will take a few minutes. Please be patient.")
-    print("📝 All data will be saved as CSV files.")
+    print("Starting America evidence scraping...")
+    print("This will take a few minutes. Please be patient.")
+    print("All data will be saved as CSV files.")
     print("=" * 70)
 
     scraper = AmericaEvidenceScraper()
     success_count, zip_file = scraper.scrape_all_evidence()
 
-    print("\n📊 FINAL SUMMARY")
-    print(f"✅ Successfully scraped: {success_count}/19 pages")
-    print(f"📂 Output folder: america_evidence_scraped/")
+    print("\nFINAL SUMMARY")
+    print(f"Successfully scraped: {success_count}/19 pages")
+    print(f"Output folder: scraped_csvs/GavinMenziesWebsite/")
 
     if zip_file:
-        print(f"📦 Zip file: {zip_file}")
+        print(f"Zip file: {zip_file}")
 
-    print("\n📄 Output CSV files:")
-    print("   - all_evidence_summary.csv (main index with page numbers, titles, word counts)")
-    print("   - url_mapping.csv (folder name to URL mapping)")
-    print("   - scraping_summary.csv (overall statistics)")
-    print("   - section_summary.csv (per-section statistics)")
+    print("\nOutput CSV files:")
+    print("  - america_evidence_summary.csv (main index with page numbers, titles, word counts)")
+    print("  - america_url_mapping.csv (folder name to URL mapping)")
+    print("  - america_scraping_summary.csv (overall statistics)")
+    print("  - america_section_summary.csv (per-section statistics)")
 
     if scraper.errors:
-        print("   - scraping_errors.csv (error details)")
-        print(f"\n⚠️  {len(scraper.errors)} pages failed to scrape")
-        print("💡 Check scraping_errors.csv for details")
-
-    print("\n✨ All data saved in clean CSV format!")
-    print("   Each page has its own folder with data.csv containing the content.")
+        print("  - america_scraping_errors.csv (error details)")
+        print(f"\nWarning: {len(scraper.errors)} pages failed to scrape")
+        print("Check scraping_errors.csv for details")
+    print("\nAll data saved in clean CSV format.")
+    print("Each page has its own folder with data.csv containing the content.")
 
 
 if __name__ == "__main__":

@@ -1,3 +1,7 @@
+"""
+Scrapes all pages from the 1421 Foundation website and saves as CSV files
+"""
+
 from playwright.sync_api import sync_playwright
 import os
 import time
@@ -12,6 +16,11 @@ from datetime import datetime
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
+from collections import OrderedDict
+
+
+OUTPUT_DIR = r"scraped_csvs\1421FoundationWebsite"
+ZIP_OUTPUT = "1421_foundation_scraped.zip"
 
 
 class FoundationScraper:
@@ -29,12 +38,10 @@ class FoundationScraper:
         self.lock = threading.Lock()
 
     def create_folder_name(self, url, section_name, title=""):
-        """Create readable folder name with date prefix for archives"""
-        is_archive_section = "archive" in section_name.lower()
+        is_archive = "archive" in section_name.lower()
 
-        # Extract date from URL for archive sections
         date_prefix = ""
-        if is_archive_section:
+        if is_archive:
             date_match = re.search(r'/archives/(\d{2})-(\d{4})', url)
             if date_match:
                 month, year = date_match.groups()
@@ -43,83 +50,69 @@ class FoundationScraper:
                     '05': 'May', '06': 'Jun', '07': 'Jul', '08': 'Aug',
                     '09': 'Sep', '10': 'Oct', '11': 'Nov', '12': 'Dec'
                 }
-                month_name = month_names.get(month, month)
-                date_prefix = f"{month_name}_{year}_"
+                date_prefix = f"{month_names.get(month, month)}_{year}_"
 
-        # Use title or URL path
         if title and len(title) > 5:
             title_words = title.strip()
         else:
             path = urlparse(url).path.strip('/').split('/')[-1]
             if not path or len(path) < 3:
-                title_words = "Archive Page" if is_archive_section else "Untitled Page"
+                title_words = "Archive Page" if is_archive else "Untitled Page"
             else:
-                title_words = path.replace('.html', '').replace('.php', '').replace('-', ' ').replace('_', ' ').title()
+                title_words = (path.replace('.html', '')
+                                   .replace('.php', '')
+                                   .replace('-', ' ')
+                                   .replace('_', ' ')
+                                   .title())
 
-        # Clean title
         folder_base = re.sub(r'[<>:"/\\|?*]', '_', title_words)
         folder_base = re.sub(r'\s+', ' ', folder_base).strip()
 
         if not folder_base or len(folder_base) < 2:
-            folder_base = "Archive Page" if is_archive_section else "Web Page"
+            folder_base = "Archive Page" if is_archive else "Web Page"
 
-        # Truncate if too long
-        max_length = 60 if is_archive_section else 80
-        if len(folder_base) > max_length:
-            folder_base = folder_base[:max_length - 3] + '...'
+        max_len = 60 if is_archive else 80
+        if len(folder_base) > max_len:
+            folder_base = folder_base[:max_len - 3] + '...'
 
-        # Thread-safe counter increment
         with self.lock:
             if section_name not in self.section_counter:
                 self.section_counter[section_name] = 0
             self.section_counter[section_name] += 1
             counter = self.section_counter[section_name]
 
-        # Section number
         section_num = section_name.split('_')[0]
-
-        # Add date prefix for archives
-        folder_name = f"{section_num}_{date_prefix}{folder_base}_{counter:02d}"
-
-        # Add hash for uniqueness
         url_hash = hashlib.md5(url.encode()).hexdigest()[:6]
-        folder_name = f"{folder_name}_{url_hash}"
-
-        # Final cleanup
+        folder_name = f"{section_num}_{date_prefix}{folder_base}_{counter:02d}_{url_hash}"
         folder_name = re.sub(r'[<>:"/\\|?*]', '_', folder_name)
 
-        # Store mapping
         self.url_mapping[folder_name] = {
             'url': url,
             'title': title_words[:100] if title_words else '',
-            'section': section_name
+            'section': section_name,
         }
-
         return folder_name
 
     def scrape_all_pages(self):
-        """Main function with parallel processing"""
-        print("🚀 Starting 1421 Foundation Website Scraping...")
-        print("=" * 70)
+        print("1421 Foundation Website Scraper")
+        print("=" * 60)
 
         page_structure = self.get_page_structure()
         total_urls = sum(len(urls) for urls in page_structure.values())
 
-        print(f"📊 Total Pages: {total_urls}")
-        print(f"⚡ Max Concurrent Workers: {self.max_workers}")
-        print("=" * 70)
+        print(f"Total pages to scrape: {total_urls}")
+        print(f"Concurrent workers:    {self.max_workers}")
+        print("=" * 60)
 
         successful = 0
         start_time = time.time()
-        main_summary_data = []
+        summary_data = []
 
-        # Process each section
         for section_name, urls in page_structure.items():
-            print(f"\n📁 SECTION: {section_name.upper()}")
-            print(f"   Processing {len(urls)} pages...")
-            print("-" * 50)
+            print(f"\nSection: {section_name.upper()}")
+            print(f"  {len(urls)} page(s)")
+            print("-" * 40)
 
-            # Parallel processing
             with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
                 future_to_url = {
                     executor.submit(self.scrape_url_wrapper, url, section_name, idx): url
@@ -131,284 +124,234 @@ class FoundationScraper:
                     try:
                         result = future.result()
 
-                        if result['success']:
-                            successful += 1
-                            print(f"  ✅ [{result['idx']}/{len(urls)}] {url[:50]}... ({result['word_count']} words)")
-
-                            with self.lock:
-                                main_summary_data.append({
+                        with self.lock:
+                            if result['success']:
+                                successful += 1
+                                print(f"  OK  [{result['idx']}/{len(urls)}] {url[:60]} ({result['word_count']} words)")
+                                summary_data.append({
                                     'page_number': self.page_counter,
                                     'folder_name': result['folder_name'],
                                     'url': url,
                                     'title': result.get('title', ''),
                                     'word_count': result.get('word_count', 0),
-                                    'section': section_name
+                                    'section': section_name,
                                 })
-
                                 self.scrape_log.append({
                                     'section': section_name,
                                     'url': url,
                                     'status': 'success',
-                                    'words': result.get('word_count', 0)
+                                    'words': result.get('word_count', 0),
                                 })
-
-                                self.page_counter += 1
-                        else:
-                            print(
-                                f"  ❌ [{result['idx']}/{len(urls)}] {url[:50]}... Failed: {result.get('error', 'Unknown')[:50]}")
-
-                            with self.lock:
+                            else:
+                                print(f"  FAIL[{result['idx']}/{len(urls)}] {url[:60]} — {result.get('error', 'unknown')[:60]}")
                                 self.errors.append({
                                     'section': section_name,
                                     'url': url,
                                     'folder_name': result.get('folder_name', 'unknown'),
-                                    'error': result.get('error', 'Unknown')
+                                    'error': result.get('error', 'unknown'),
                                 })
-
-                                main_summary_data.append({
+                                summary_data.append({
                                     'page_number': self.page_counter,
                                     'folder_name': result.get('folder_name', 'unknown'),
                                     'url': url,
                                     'title': '',
                                     'word_count': 0,
-                                    'section': section_name
+                                    'section': section_name,
                                 })
-
                                 self.scrape_log.append({
                                     'section': section_name,
                                     'url': url,
                                     'status': 'failed',
-                                    'error': result.get('error')
+                                    'error': result.get('error'),
                                 })
 
-                                self.page_counter += 1
+                            self.page_counter += 1
 
                     except Exception as e:
-                        print(f"  ❌ Error processing {url[:50]}...: {str(e)[:50]}")
+                        print(f"  ERROR {url[:60]}: {str(e)[:60]}")
 
         elapsed = time.time() - start_time
 
-        print("\n" + "=" * 70)
-        print(f"🎉 SCRAPING COMPLETED!")
-        print(f"   Successful: {successful}/{total_urls}")
-        print(f"   Failed: {len(self.errors)}/{total_urls}")
-        print(f"   Time: {int(elapsed / 60)}m {int(elapsed % 60)}s")
-        print(f"   Speed: {total_urls / elapsed:.2f} pages/second")
-        print("=" * 70)
+        print("\n" + "=" * 60)
+        print(f"Done. {successful}/{total_urls} pages scraped successfully.")
+        print(f"Failed: {len(self.errors)}")
+        print(f"Time:   {int(elapsed / 60)}m {int(elapsed % 60)}s")
+        print("=" * 60)
 
-        # Save all CSVs
-        self.save_all_csvs(main_summary_data, successful, total_urls, elapsed)
-
-        # Create zip file
-        zip_path = self.create_zip_file()
-
+        self._save_all_csvs(summary_data, successful, total_urls, elapsed)
+        zip_path = self._create_zip()
         return successful, zip_path
 
     def scrape_url_wrapper(self, url, section_name, idx):
-        """Wrapper for parallel scraping"""
         time.sleep(random.uniform(0.5, 1.5))
-        temp_folder_name = self.create_folder_name(url, section_name, "")
-        result = self.scrape_single_url(url, section_name, temp_folder_name)
+        folder_name = self.create_folder_name(url, section_name, "")
+        result = self._scrape_single_url(url, section_name, folder_name)
         result['idx'] = idx
         return result
 
-    def scrape_single_url(self, url, section, folder_name):
-        """Scrape a single URL and save as CSV"""
+    def _scrape_single_url(self, url, section, folder_name):
         try:
-            base_dir = "1421_foundation_scraped"
-
-            # Try requests first
             try:
                 response = requests.get(url, headers=self.headers, timeout=30)
                 response.raise_for_status()
                 soup = BeautifulSoup(response.text, 'html.parser')
             except Exception as e:
-                print(f"    ⚠️ Requests failed, trying Playwright: {str(e)[:80]}")
-                soup = self.scrape_playwright(url)
+                print(f"    requests failed, trying Playwright: {str(e)[:80]}")
+                soup = self._scrape_playwright(url)
 
-            # Extract content
-            title = self.clean_text(self.extract_title(soup, url))
-            content = self.clean_text(self.extract_content(soup))
-            author = self.extract_author(soup)
+            title   = self.clean_text(self._extract_title(soup, url))
+            content = self.clean_text(self._extract_content(soup))
+            author  = self._extract_author(soup)
 
-            # Extract date for archive sections
             date_found = ""
             if "archive" in section.lower():
-                date_match = re.search(r'/(\d{2})-(\d{4})/', url)
-                if date_match:
-                    month, year = date_match.groups()
+                m = re.search(r'/(\d{2})-(\d{4})/', url)
+                if m:
+                    month, year = m.groups()
                     date_found = f"{year}-{month}-01"
 
-            word_count = len(content.split()) if content else 0
-
-            # Update folder name with actual title
+            word_count  = len(content.split()) if content else 0
             folder_name = self.create_folder_name(url, section, title)
 
-            # Create folder structure
-            page_dir = os.path.join(base_dir, section, folder_name)
+            page_dir = os.path.join(OUTPUT_DIR, section, folder_name)
             data_dir = os.path.join(page_dir, "data")
             os.makedirs(data_dir, exist_ok=True)
 
-            # Create CSV data
             csv_data = {
                 'page_number': self.section_counter[section],
                 'folder_name': folder_name,
-                'url': url,
-                'title': title[:1000] if title else 'No Title',
-                'content': content[:50000] if content else 'No Content',
-                'author': author[:200] if author else '',
-                'word_count': word_count,
-                'date': date_found
+                'url':         url,
+                'title':       title[:1000] if title else 'No Title',
+                'content':     content[:50000] if content else 'No Content',
+                'author':      author[:200] if author else '',
+                'word_count':  word_count,
+                'date':        date_found,
             }
 
-            # Save CSV
             csv_path = os.path.join(data_dir, f"{folder_name}.csv")
-            success = self.save_page_to_csv(csv_data, csv_path)
-
-            if success:
-                return {
-                    'success': True,
-                    'word_count': word_count,
-                    'title': title,
-                    'folder_name': folder_name
-                }
-            else:
-                return {'success': False, 'error': 'Failed to save CSV', 'folder_name': folder_name}
+            if self._save_page_csv(csv_data, csv_path):
+                return {'success': True, 'word_count': word_count, 'title': title, 'folder_name': folder_name}
+            return {'success': False, 'error': 'Failed to save CSV', 'folder_name': folder_name}
 
         except Exception as e:
-            error_msg = str(e)[:200]
             if 'folder_name' not in locals() or not folder_name:
                 folder_name = self.create_folder_name(url, section, "Failed Page")
-            return {'success': False, 'error': error_msg, 'folder_name': folder_name}
+            return {'success': False, 'error': str(e)[:200], 'folder_name': folder_name}
 
-    def save_all_csvs(self, summary_data, successful, total, elapsed):
-        """Save all CSV files"""
-        print("\n💾 Saving all CSV files...")
-        self.save_summary_csv(summary_data)
-        self.save_url_mapping_csv()
-        self.save_scraping_summary_csv(successful, total, elapsed)
-        self.save_section_summary_csv(summary_data)
+    # ── CSV savers ────────────────────────────────────────────────────
+
+    def _save_all_csvs(self, summary_data, successful, total, elapsed):
+        print("\nSaving CSV files...")
+        self._save_summary_csv(summary_data)
+        self._save_url_mapping_csv()
+        self._save_scraping_summary_csv(successful, total, elapsed)
+        self._save_section_summary_csv(summary_data)
         if self.errors:
-            self.save_errors_csv()
+            self._save_errors_csv()
 
-    def save_summary_csv(self, data):
-        """Save main summary CSV"""
-        csv_path = "1421_foundation_scraped/all_pages_summary.csv"
-        try:
-            os.makedirs(os.path.dirname(csv_path), exist_ok=True)
-            with open(csv_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
-                fieldnames = ['page_number', 'folder_name', 'url', 'title', 'word_count', 'section']
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                writer.writeheader()
-                writer.writerows(data)
-            print(f"✅ Main summary CSV saved: {csv_path}")
-            return True
-        except Exception as e:
-            print(f"❌ Error saving main summary CSV: {e}")
-            return False
+    def _save_summary_csv(self, data):
+        path = os.path.join(OUTPUT_DIR, "all_pages_summary.csv")
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        with open(path, 'w', newline='', encoding='utf-8-sig') as f:
+            writer = csv.DictWriter(f, fieldnames=['page_number', 'folder_name', 'url', 'title', 'word_count', 'section'])
+            writer.writeheader()
+            writer.writerows(data)
+        print(f"  Saved: {path}")
 
-    def save_url_mapping_csv(self):
-        """Save URL mapping CSV"""
-        csv_path = "1421_foundation_scraped/url_mapping.csv"
-        try:
-            os.makedirs(os.path.dirname(csv_path), exist_ok=True)
-            with open(csv_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
-                fieldnames = ['folder_name', 'url', 'title']
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                writer.writeheader()
-                for folder_name, info in self.url_mapping.items():
-                    writer.writerow({
-                        'folder_name': folder_name,
-                        'url': info['url'],
-                        'title': info['title']
-                    })
-            print(f"✅ URL mapping CSV saved: {csv_path}")
-            return True
-        except Exception as e:
-            print(f"❌ Error saving URL mapping CSV: {e}")
-            return False
+    def _save_url_mapping_csv(self):
+        path = os.path.join(OUTPUT_DIR, "url_mapping.csv")
+        with open(path, 'w', newline='', encoding='utf-8-sig') as f:
+            writer = csv.DictWriter(f, fieldnames=['folder_name', 'url', 'title'])
+            writer.writeheader()
+            for folder, info in self.url_mapping.items():
+                writer.writerow({'folder_name': folder, 'url': info['url'], 'title': info['title']})
+        print(f"  Saved: {path}")
 
-    def save_scraping_summary_csv(self, successful, total, elapsed):
-        """Save scraping summary CSV"""
-        csv_path = "1421_foundation_scraped/scraping_summary.csv"
-        try:
-            with open(csv_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
-                fieldnames = ['total_pages', 'successful', 'failed', 'success_rate', 'time_elapsed_minutes',
-                              'date_completed']
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                writer.writeheader()
+    def _save_scraping_summary_csv(self, successful, total, elapsed):
+        path = os.path.join(OUTPUT_DIR, "scraping_summary.csv")
+        with open(path, 'w', newline='', encoding='utf-8-sig') as f:
+            writer = csv.DictWriter(f, fieldnames=['total_pages', 'successful', 'failed',
+                                                   'success_rate', 'time_elapsed', 'date_completed'])
+            writer.writeheader()
+            writer.writerow({
+                'total_pages':    total,
+                'successful':     successful,
+                'failed':         len(self.errors),
+                'success_rate':   f"{(successful / total * 100):.1f}%" if total else "0%",
+                'time_elapsed':   f"{int(elapsed / 60)}m {int(elapsed % 60)}s",
+                'date_completed': datetime.now().strftime("%Y-%m-%d"),
+            })
+        print(f"  Saved: {path}")
+
+    def _save_section_summary_csv(self, summary_data):
+        path = os.path.join(OUTPUT_DIR, "section_summary.csv")
+        stats = {}
+        for item in summary_data:
+            s = item['section']
+            if s not in stats:
+                stats[s] = {'total': 0, 'success': 0, 'failed': 0}
+            stats[s]['total'] += 1
+            if item['word_count'] > 0:
+                stats[s]['success'] += 1
+            else:
+                stats[s]['failed'] += 1
+        with open(path, 'w', newline='', encoding='utf-8-sig') as f:
+            writer = csv.DictWriter(f, fieldnames=['section', 'total_pages', 'successful', 'failed', 'success_rate'])
+            writer.writeheader()
+            for section, s in stats.items():
                 writer.writerow({
-                    'total_pages': total,
-                    'successful': successful,
-                    'failed': len(self.errors),
-                    'success_rate': f"{(successful / total * 100):.1f}%",
-                    'time_elapsed_minutes': f"{int(elapsed / 60)}m {int(elapsed % 60)}s",
-                    'date_completed': datetime.now().strftime("%Y-%m-%d")
+                    'section':      section,
+                    'total_pages':  s['total'],
+                    'successful':   s['success'],
+                    'failed':       s['failed'],
+                    'success_rate': f"{(s['success'] / s['total'] * 100):.1f}%" if s['total'] else "0%",
                 })
-            print(f"✅ Scraping summary CSV saved: {csv_path}")
-            return True
-        except Exception as e:
-            print(f"❌ Error saving scraping summary CSV: {e}")
-            return False
+        print(f"  Saved: {path}")
 
-    def save_section_summary_csv(self, summary_data):
-        """Save section summary CSV"""
-        csv_path = "1421_foundation_scraped/section_summary.csv"
+    def _save_errors_csv(self):
+        path = os.path.join(OUTPUT_DIR, "scraping_errors.csv")
+        with open(path, 'w', newline='', encoding='utf-8-sig') as f:
+            writer = csv.DictWriter(f, fieldnames=['section', 'url', 'folder_name', 'error'])
+            writer.writeheader()
+            for err in self.errors:
+                writer.writerow({
+                    'section':     err['section'],
+                    'url':         err['url'],
+                    'folder_name': err['folder_name'],
+                    'error':       err['error'][:500],
+                })
+        print(f"  Saved: {path}")
+
+    def _save_page_csv(self, page_data, csv_path):
         try:
-            section_stats = {}
-            for item in summary_data:
-                section = item['section']
-                if section not in section_stats:
-                    section_stats[section] = {'total': 0, 'success': 0, 'failed': 0}
-                section_stats[section]['total'] += 1
-                if item['word_count'] > 0:
-                    section_stats[section]['success'] += 1
-                else:
-                    section_stats[section]['failed'] += 1
-
-            with open(csv_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
-                fieldnames = ['section', 'total_pages', 'successful', 'failed', 'success_rate']
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            fieldnames = ['page_number', 'folder_name', 'url', 'title', 'content', 'author', 'word_count', 'date']
+            with open(csv_path, 'w', newline='', encoding='utf-8-sig') as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()
-                for section, stats in section_stats.items():
-                    writer.writerow({
-                        'section': section,
-                        'total_pages': stats['total'],
-                        'successful': stats['success'],
-                        'failed': stats['failed'],
-                        'success_rate': f"{(stats['success'] / stats['total'] * 100):.1f}%" if stats[
-                                                                                                   'total'] > 0 else "0%"
-                    })
-            print(f"✅ Section summary CSV saved: {csv_path}")
+                for field in fieldnames:
+                    if field not in page_data:
+                        page_data[field] = ''
+                writer.writerow(page_data)
             return True
         except Exception as e:
-            print(f"❌ Error saving section summary CSV: {e}")
+            print(f"    Error saving {csv_path}: {e}")
             return False
 
-    def save_errors_csv(self):
-        """Save errors CSV"""
-        csv_path = "1421_foundation_scraped/scraping_errors.csv"
+    def _create_zip(self):
         try:
-            with open(csv_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
-                fieldnames = ['section', 'url', 'folder_name', 'error']
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                writer.writeheader()
-                for err in self.errors:
-                    writer.writerow({
-                        'section': err['section'],
-                        'url': err['url'],
-                        'folder_name': err['folder_name'],
-                        'error': err['error'][:500]
-                    })
-            print(f"✅ Errors CSV saved: {csv_path}")
-            return True
+            with zipfile.ZipFile(ZIP_OUTPUT, 'w', zipfile.ZIP_DEFLATED) as zf:
+                for root, dirs, files in os.walk(OUTPUT_DIR):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        zf.write(file_path, os.path.relpath(file_path, "."))
+            print(f"\nZip created: {ZIP_OUTPUT}")
+            return ZIP_OUTPUT
         except Exception as e:
-            print(f"❌ Error saving errors CSV: {e}")
-            return False
+            print(f"Could not create zip: {e}")
+            return None
 
+    # URL pages
     def get_page_structure(self):
-        """1421 Foundation URLs - All Pages"""
-        from collections import OrderedDict
         structure = OrderedDict()
 
         structure["01_main_pages"] = [
@@ -419,16 +362,16 @@ class FoundationScraper:
             "https://www.1421foundation.org/explore.html",
             "https://www.1421foundation.org/news.html",
             "https://www.1421foundation.org/contact.html",
-            "https://www.1421foundation.org/donate.html"
+            "https://www.1421foundation.org/donate.html",
         ]
 
         structure["02_content_pages"] = [
             "https://www.1421foundation.org/who_discovered_america.html",
-            "https://www.1421foundation.org/christopher_columbus_legacy.html"
+            "https://www.1421foundation.org/christopher_columbus_legacy.html",
         ]
 
         structure["03_research_section"] = [
-            "https://www.1421foundation.org/research/"
+            "https://www.1421foundation.org/research/",
         ]
 
         structure["04_news_section"] = [
@@ -444,7 +387,7 @@ class FoundationScraper:
             "https://www.newasiacurrents.com/zheng-he-the-forgotten-discoverer-of-america-2/",
             "https://www.newasiacurrents.com/zheng-he-the-forgotten-discoverer-of-america-london-based-scholar-and-best-selling-author-ian-hudson-shares-his-views-and-researches-on-the-chinese-explorers-discoveries-2/",
             "https://www.newasiacurrents.com/introducing-the-inaugural-edition-of-the-new-asia-currents-newsletter-2/",
-            "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4350441&fbclid=IwY2xjawJedKJleHRuA2FlbQIxMAABHqLCtmrsXczbNAXT-2S-L47rhjQh1N2Up-ro7N4O9EXwx8U2GfRJKrmOII-O_aem_rtGnJHA5dBNPc0rC4cIwJg"
+            "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4350441&fbclid=IwY2xjawJedKJleHRuA2FlbQIxMAABHqLCtmrsXczbNAXT-2S-L47rhjQh1N2Up-ro7N4O9EXwx8U2GfRJKrmOII-O_aem_rtGnJHA5dBNPc0rC4cIwJg",
         ]
 
         structure["05_archive_section"] = [
@@ -474,13 +417,13 @@ class FoundationScraper:
             "https://docs.google.com/forms/d/e/1FAIpQLSccI3Y5IBmoIIW636KOYy5CuAnbRg77UNcu8IDYVEq3uv41Mw/viewform?ref=newasiacurrents.com",
             "https://min.news/en/collect/3a0bcab1c15dcad92c2cb50cf044fa1a.html",
             "http://www.science.org/doi/10.1126/sciadv.adv5507?adobe_mc=MCMID%3D45922413595041870143259020525062249704%7CMCORGID%3D242B6472541199F70A4C98A6%2540AdobeOrg%7CTS%3D1750768914",
-            "https://commonwealthofworldchinatowns.com/"
+            "https://commonwealthofworldchinatowns.com/",
         ]
 
         return structure
 
-    def scrape_playwright(self, url):
-        """Fallback scraping with Playwright"""
+    # Helper functions
+    def _scrape_playwright(self, url):
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             page = browser.new_page()
@@ -490,30 +433,25 @@ class FoundationScraper:
             browser.close()
             return BeautifulSoup(content, 'html.parser')
 
-    def extract_title(self, soup, url):
-        """Extract page title"""
+    def _extract_title(self, soup, url):
         t = soup.find('title')
         if t:
             return t.get_text().strip()
-        h1 = soup.find('h1')
-        if h1:
-            return h1.get_text().strip()
-        for tag in ['h2', 'h3', 'h4']:
-            heading = soup.find(tag)
-            if heading:
-                return heading.get_text().strip()
+        for tag in ['h1', 'h2', 'h3', 'h4']:
+            h = soup.find(tag)
+            if h:
+                return h.get_text().strip()
         path = urlparse(url).path.strip('/').split('/')[-1]
         if not path:
             return "1421 Foundation Homepage"
         return path.replace('.html', '').replace('.php', '').replace('-', ' ').replace('_', ' ').title()
 
-    def extract_author(self, soup):
-        """Extract author"""
-        author_selectors = [
+    def _extract_author(self, soup):
+        selectors = [
             '.author', '.byline', '.post-author', '.entry-author',
-            'meta[name="author"]', 'meta[property="article:author"]', 'meta[property="og:author"]'
+            'meta[name="author"]', 'meta[property="article:author"]', 'meta[property="og:author"]',
         ]
-        for sel in author_selectors:
+        for sel in selectors:
             elem = soup.select_one(sel)
             if elem:
                 if elem.name == 'meta':
@@ -521,136 +459,80 @@ class FoundationScraper:
                 return elem.get_text().strip()
         return ""
 
-    def extract_content(self, soup):
-        """Extract main content"""
-        for s in soup(["script", "style", "nav", "header", "footer", "iframe", "form", "button"]):
-            s.decompose()
+    def _extract_content(self, soup):
+        for tag in ["script", "style", "nav", "header", "footer", "iframe", "form", "button"]:
+            for el in soup(tag):
+                el.decompose()
 
-        content_selectors = [
+        selectors = [
             'main', 'article', '.content', '#content', '.entry-content',
             'section', '.post-content', '.article-content', '.page-content',
-            'div.content', 'div.article', 'body'
+            'div.content', 'div.article', 'body',
         ]
-
-        for sel in content_selectors:
+        for sel in selectors:
             elem = soup.select_one(sel)
             if elem:
                 text = elem.get_text(separator='\n', strip=True)
                 if len(text) > 100:
-                    return self.clean_content(text)
+                    return self._clean_content(text)
         return "Content not found"
 
-    def clean_content(self, text):
-        """Clean content"""
+    def _clean_content(self, text):
         text = re.sub(r'\n\s*\n', '\n\n', text)
         text = re.sub(r'[ \t]+', ' ', text)
         return text.strip()
 
     def clean_text(self, text):
-        """Clean text for CSV"""
         if not text:
             return ""
         replacements = {
-            '\u2022': '•', '\u2013': '-', '\u2014': '-', '\u2018': "'", '\u2019': "'",
-            '\u201c': '"', '\u201d': '"', '\u00a0': ' ', '\u200b': '', '\ufffd': '',
+            '\u2022': '*', '\u2013': '-', '\u2014': '-',
+            '\u2018': "'", '\u2019': "'", '\u201c': '"', '\u201d': '"',
+            '\u00a0': ' ', '\u200b': '', '\ufffd': '',
             '\u2026': '...', '\u00a9': '(c)', '\u00ae': '(R)', '\u2122': '(TM)',
             '\n': ' ', '\r': ' ', '\t': ' ', '"': '""',
         }
-        cleaned = text
-        for char, replacement in replacements.items():
-            cleaned = cleaned.replace(char, replacement)
-        cleaned = re.sub(r'\s+', ' ', cleaned)
-        return cleaned.strip()
-
-    def save_page_to_csv(self, page_data, csv_path):
-        """Save page data to CSV"""
-        try:
-            fieldnames = ['page_number', 'folder_name', 'url', 'title', 'content', 'author', 'word_count', 'date']
-            with open(csv_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                writer.writeheader()
-                for field in fieldnames:
-                    if field not in page_data:
-                        page_data[field] = ''
-                writer.writerow(page_data)
-            return True
-        except Exception as e:
-            print(f"    ⚠️ Error saving CSV: {e}")
-            return False
-
-    def create_zip_file(self):
-        """Create a zip file"""
-        try:
-            zip_path = "1421_foundation_scraped.zip"
-            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                for root, dirs, files in os.walk("1421_foundation_scraped"):
-                    for file in files:
-                        file_path = os.path.join(root, file)
-                        arcname = os.path.relpath(file_path, ".")
-                        zipf.write(file_path, arcname)
-            print(f"✅ Zip file created: {zip_path}")
-            return zip_path
-        except Exception as e:
-            print(f"⚠️ Could not create zip file: {e}")
-            return None
+        for char, rep in replacements.items():
+            text = text.replace(char, rep)
+        return re.sub(r'\s+', ' ', text).strip()
 
 
 def main():
-    """Run the scraper"""
-    print("=" * 70)
-    print("📚 1421 FOUNDATION WEBSITE SCRAPER - IMPROVED VERSION")
-    print("   ✓ Archive folders with date prefixes (e.g., Aug_2025_Archive)")
-    print("   ✓ Parallel processing for 3-5x faster scraping")
-    print("   ✓ Thread-safe operations")
-    print("=" * 70)
+    print("1421 Foundation Website Scraper")
+    print("Output directory: " + OUTPUT_DIR)
+    print("=" * 60)
 
-    os.makedirs("1421_foundation_scraped", exist_ok=True)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    print("\n⚡ PERFORMANCE OPTIONS:")
-    print("   1 - Conservative (3 workers) - Safest")
-    print("   2 - Balanced (5 workers) - Recommended")
-    print("   3 - Aggressive (8 workers) - Fastest")
+    print("\nWorker options:")
+    print("  1 - Conservative (3 workers)")
+    print("  2 - Balanced (5 workers)  [default]")
+    print("  3 - Aggressive (8 workers)")
 
-    choice = input("\nSelect option (1-3) [default: 2]: ").strip() or "2"
-
+    choice = input("\nSelect option (1-3): ").strip() or "2"
     workers_map = {"1": 3, "2": 5, "3": 8}
     max_workers = workers_map.get(choice, 5)
 
-    print(f"\n✓ Using {max_workers} concurrent workers")
-    print(f"⚠️  This will scrape 50+ pages from www.1421foundation.org")
+    print(f"\nUsing {max_workers} concurrent workers.")
+    print(f"This will scrape all pages from www.1421foundation.org")
+    print(f"and linked external news sources.")
 
     proceed = input("\nProceed? (y/n): ").strip().lower()
     if proceed != 'y':
-        print("Scraping cancelled.")
+        print("Cancelled.")
         return
 
-    print("\n" + "=" * 70)
-    print("🚀 Starting scraping with parallel processing...")
-    print("=" * 70)
-
+    print("\n" + "=" * 60)
     scraper = FoundationScraper(max_workers=max_workers)
     success_count, zip_file = scraper.scrape_all_pages()
 
-    print("\n📊 FINAL SUMMARY")
-    print(f"✅ Successfully scraped: {success_count} pages")
-    print(f"📂 Output folder: 1421_foundation_scraped/")
-
+    print("\nSummary")
+    print(f"  Pages scraped: {success_count}")
+    print(f"  Output folder: {OUTPUT_DIR}")
     if zip_file:
-        print(f"📦 Zip file: {zip_file}")
-
-    print("\n📄 Output CSV files:")
-    print("   - all_pages_summary.csv (main index)")
-    print("   - url_mapping.csv (folder to URL mapping)")
-    print("   - scraping_summary.csv (statistics)")
-    print("   - section_summary.csv (per-section stats)")
-
+        print(f"  Zip file:      {zip_file}")
     if scraper.errors:
-        print("   - scraping_errors.csv (error details)")
-        print(f"\n⚠️  {len(scraper.errors)} pages failed")
-        print("💡 Check scraping_errors.csv for details")
-
-    print("\n✨ Scraping complete!")
-
+        print(f"  Failed pages:  {len(scraper.errors)} (see scraping_errors.csv)")
 
 if __name__ == "__main__":
     main()

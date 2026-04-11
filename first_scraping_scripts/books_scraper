@@ -1,3 +1,6 @@
+"""
+PDF/DOCX Evidence Scraper - SIMPLIFIED VERSION
+"""
 import os
 import time
 import re
@@ -10,34 +13,27 @@ from pathlib import Path
 
 
 class ImprovedPDFEvidenceScraper:
-    """
-    Enhanced PDF scraper that:
-    - Properly extracts and cleans text (words and relevant numbers only)
-    - Uses book title as folder name
-    - Uses book author as author field
-    - Handles multiple books from local file paths
-    """
-
     def __init__(self):
         self.errors = []
         self.scrape_log = []
         self.url_mapping = {}
         self.section_counter = {}
         self.page_counter = 1
+        self.base_dir = "scraped_csvs/BooksAndMore"
 
-        # Define book metadata explicitly with all download paths
+        # Define book metadata explicitly with all download paths, and the URLs are also necessary
         self.book_metadata = {
             "book_1": {
                 "title": "1421: The Year China Discovered America",
                 "author": "Gavin Menzies",
                 "path": "C:\\Users\\ibrah\\Downloads\\1421 - book pdf.pdf",
-                "source_url": "https://www.britannica.com/topic/Ming-dynasty-Chinese-history"  # Zheng He overview
+                "source_url": "https://www.britannica.com/topic/Ming-dynasty-Chinese-history"
             },
             "book_2": {
                 "title": "1421 - The Year the Middle Ages Ended",
                 "author": "Gavin Menzies",
                 "path": "C:\\Users\\ibrah\\Downloads\\1421 - THe Year the Middle Ages Ended - full text - final, 18th Sep 2012.docx",
-                "source_url": "https://www.gavinmenzies.net/books/"  # Gavin Menzies Book page
+                "source_url": "https://www.gavinmenzies.net/books/"
             },
             "book_3": {
                 "title": "1434: The Year a Magnificent Chinese Fleet Sailed to Italy",
@@ -95,57 +91,49 @@ class ImprovedPDFEvidenceScraper:
         """
         if not text:
             return ""
-
         # Step 1: Replace common Unicode characters with ASCII equivalents
         unicode_replacements = {
-            '\u2022': '•',  # Bullet
-            '\u2013': '-',  # En dash
-            '\u2014': '--',  # Em dash
-            '\u2018': "'",  # Left single quote
-            '\u2019': "'",  # Right single quote
-            '\u201c': '"',  # Left double quote
-            '\u201d': '"',  # Right double quote
-            '\u00a0': ' ',  # Non-breaking space
-            '\u200b': '',  # Zero-width space
-            '\ufffd': '',  # Replacement character
-            '\u2026': '...',  # Ellipsis
-            '\u00a9': '(c)',  # Copyright
-            '\u00ae': '(R)',  # Registered
-            '\u2122': '(TM)',  # Trademark
+            '\u2022': '•',
+            '\u2013': '-',
+            '\u2014': '--',
+            '\u2018': "'",
+            '\u2019': "'",
+            '\u201c': '"',
+            '\u201d': '"',
+            '\u00a0': ' ',
+            '\u200b': '',
+            '\ufffd': '',
+            '\u2026': '...',
+            '\u00a9': '(c)',
+            '\u00ae': '(R)',
+            '\u2122': '(TM)',
         }
 
         for char, replacement in unicode_replacements.items():
             text = text.replace(char, replacement)
 
         # Step 2: Remove common PDF artifacts
-        # Remove page numbers like "Page 123" or just "123" at line boundaries
         text = re.sub(r'\bPage\s+\d+\b', '', text, flags=re.IGNORECASE)
         text = re.sub(r'^\s*\d+\s*$', '', text, flags=re.MULTILINE)
-
-        # Remove chapter markers
         text = re.sub(r'\bChapter\s+\d+\b', 'Chapter', text, flags=re.IGNORECASE)
-
-        # Remove header/footer patterns (repeated text at top/bottom)
         text = re.sub(r'^\s*[A-Z\s]{3,30}\s*$', '', text, flags=re.MULTILINE)
 
         # Step 3: Normalize whitespace
-        text = re.sub(r'\s+', ' ', text)  # Multiple spaces to single space
-        text = re.sub(r'\n+', ' ', text)  # Newlines to spaces
-        text = re.sub(r'\t+', ' ', text)  # Tabs to spaces
+        text = re.sub(r'\s+', ' ', text)
+        text = re.sub(r'\n+', ' ', text)
+        text = re.sub(r'\t+', ' ', text)
 
         # Step 4: Remove non-content characters but keep punctuation
-        # Keep: letters, numbers, common punctuation, spaces
         text = re.sub(r'[^\w\s.,;:!?\'"()\-–—\[\]{}]', '', text)
 
         # Step 5: Clean up punctuation spacing
-        text = re.sub(r'\s+([.,;:!?])', r'\1', text)  # Remove space before punctuation
-        text = re.sub(r'([.,;:!?])([^\s])', r'\1 \2', text)  # Add space after punctuation
-
+        text = re.sub(r'\s+([.,;:!?])', r'\1', text)
+        text = re.sub(r'([.,;:!?])([^\s])', r'\1 \2', text)
         # Step 6: Remove repeated punctuation
         text = re.sub(r'([.,;:!?]){2,}', r'\1', text)
 
         # Step 7: Final whitespace cleanup
-        text = ' '.join(text.split())  # Remove extra whitespace
+        text = ' '.join(text.split())
 
         return text.strip()
 
@@ -169,20 +157,15 @@ class ImprovedPDFEvidenceScraper:
                 if paragraph.text.strip():
                     full_text.append(paragraph.text)
 
-            # Also extract from tables if present
             for table in doc.tables:
                 for row in table.rows:
                     for cell in row.cells:
                         if cell.text.strip():
                             full_text.append(cell.text)
-
             combined_text = '\n\n'.join(full_text)
-
-            # Clean the text thoroughly
             cleaned_text = self.clean_text_content(combined_text)
             word_count = len(cleaned_text.split())
 
-            # Verify we have actual content
             if word_count < 100:
                 return {
                     'success': False,
@@ -194,9 +177,10 @@ class ImprovedPDFEvidenceScraper:
                 'title': book_title,
                 'author': book_author,
                 'content': cleaned_text,
-                'page_count': 1,  # DOCX files don't have page count easily accessible
+                'page_count': 1,
                 'word_count': word_count
             }
+
 
         except ImportError:
             return {
@@ -223,12 +207,10 @@ class ImprovedPDFEvidenceScraper:
 
             with open(pdf_path, 'rb') as file:
                 pdf_reader = PyPDF2.PdfReader(file)
-
-                # Extract text from all pages
                 full_text = ""
                 page_count = len(pdf_reader.pages)
 
-                print(f"      📄 Extracting {page_count} pages...")
+                print(f"      Extracting {page_count} pages...")
 
                 for page_num in range(page_count):
                     try:
@@ -237,14 +219,12 @@ class ImprovedPDFEvidenceScraper:
                         if text:
                             full_text += text + "\n\n"
                     except Exception as e:
-                        print(f"      ⚠️  Error on page {page_num + 1}: {str(e)[:50]}")
+                        print(f"      Error on page {page_num + 1}: {str(e)[:50]}")
                         continue
 
-                # Clean the text thoroughly
                 cleaned_text = self.clean_text_content(full_text)
                 word_count = len(cleaned_text.split())
 
-                # Verify we have actual content
                 if word_count < 100:
                     return {
                         'success': False,
@@ -265,6 +245,8 @@ class ImprovedPDFEvidenceScraper:
                 'success': False,
                 'error': f'PDF extraction error: {str(e)}'
             }
+
+
 
     def extract_content(self, file_path, book_title, book_author):
         """
@@ -287,23 +269,16 @@ class ImprovedPDFEvidenceScraper:
         Create clean folder name from book title.
         Format: 01_Book_Title
         """
-        # Clean the title for use in folder name
         clean_title = book_title.replace(':', '')
         clean_title = clean_title.replace(',', '')
         clean_title = re.sub(r'\s+', '_', clean_title)
-
-        # Remove special characters
         clean_title = re.sub(r'[<>:"/\\|?*]', '', clean_title)
-
-        # Remove excessive underscores
         clean_title = re.sub(r'_+', '_', clean_title)
         clean_title = clean_title.strip('_')
 
-        # Truncate if too long
         if len(clean_title) > 80:
             clean_title = clean_title[:80]
 
-        # Add book number prefix
         folder_name = f"{book_num:02d}_{clean_title}"
 
         return folder_name
@@ -318,29 +293,23 @@ class ImprovedPDFEvidenceScraper:
             book_author = book_info['author']
             source_url = book_info.get('source_url', '')
 
-            # Check if file exists
             if not os.path.exists(file_path):
                 return {
                     'success': False,
                     'error': f'File not found: {file_path}'
                 }
 
-            print(f"\n  📚 Book {book_num}: {book_title}")
+            print(f"\n  Book {book_num}: {book_title}")
             print(f"     Author: {book_author}")
             print(f"     Path: {os.path.basename(file_path)}")
             if source_url:
                 print(f"     Source URL: {source_url}")
 
-            # Create folder name from book title
             folder_name = self.create_folder_name(book_title, book_num)
-
-            # Create directory structure
-            base_dir = "pdf_evidence_scraped"
-            pdf_dir = os.path.join(base_dir, folder_name)
+            pdf_dir = os.path.join(self.base_dir, folder_name)
             data_dir = os.path.join(pdf_dir, "data")
             os.makedirs(data_dir, exist_ok=True)
 
-            # Extract content
             result = self.extract_content(file_path, book_title, book_author)
 
             if not result['success']:
@@ -349,7 +318,6 @@ class ImprovedPDFEvidenceScraper:
                     'error': result.get('error', 'Extraction failed')
                 }
 
-            # Create CSV data with source_url
             csv_data = {
                 'page_number': book_num,
                 'folder_name': folder_name,
@@ -363,12 +331,11 @@ class ImprovedPDFEvidenceScraper:
                 'file_type': os.path.splitext(file_path)[1].upper()
             }
 
-            # Save individual CSV
             csv_path = os.path.join(data_dir, f"{folder_name}.csv")
             success = self.save_page_to_csv(csv_data, csv_path)
 
             if success:
-                print(f"     ✅ Success: {result['word_count']:,} words extracted")
+                print(f"     SUCCESS: {result['word_count']:,} words extracted")
                 return {
                     'success': True,
                     'title': book_title,
@@ -382,7 +349,7 @@ class ImprovedPDFEvidenceScraper:
                 return {'success': False, 'error': 'Failed to save CSV'}
 
         except Exception as e:
-            print(f"     ❌ Error: {str(e)[:100]}")
+            print(f"     Error: {str(e)[:100]}")
             return {'success': False, 'error': str(e)}
 
     def save_page_to_csv(self, page_data, csv_path):
@@ -409,30 +376,28 @@ class ImprovedPDFEvidenceScraper:
             return True
 
         except Exception as e:
-            print(f"     ⚠️  Error saving CSV: {e}")
+            print(f"     Error saving CSV: {e}")
             return False
 
     def scrape_all_books(self):
         """Main function to scrape all files."""
-        print("\n🚀 Starting File Extraction...")
+        print("\nStarting File Extraction...")
         print("=" * 70)
 
         total_books = len(self.book_metadata)
-        print(f"📊 Total Files: {total_books}")
+        print(f"Total Files: {total_books}")
         print("=" * 70)
 
         successful = 0
         start_time = time.time()
         main_summary_data = []
 
-        # Process each book
         for idx, (book_key, book_info) in enumerate(self.book_metadata.items(), 1):
             result = self.scrape_single_file(book_key, book_info, idx)
 
             if result['success']:
                 successful += 1
 
-                # Add to main summary
                 main_summary_data.append({
                     'page_number': idx,
                     'folder_name': result['folder_name'],
@@ -451,7 +416,7 @@ class ImprovedPDFEvidenceScraper:
                     'words': result['word_count']
                 })
             else:
-                print(f"     ❌ Failed: {result.get('error', 'Unknown error')}")
+                print(f"     FAILED: {result.get('error', 'Unknown error')}")
 
                 self.errors.append({
                     'book': book_info['title'],
@@ -465,34 +430,31 @@ class ImprovedPDFEvidenceScraper:
                     'error': result.get('error')
                 })
 
-            # Small delay between files
             if idx < total_books:
                 time.sleep(1)
 
         elapsed = time.time() - start_time
 
         print("\n" + "=" * 70)
-        print(f"🎉 EXTRACTION COMPLETED!")
-        print(f"   ✅ Successful: {successful}/{total_books}")
-        print(f"   ❌ Failed: {len(self.errors)}/{total_books}")
-        print(f"   ⏱️  Time: {int(elapsed / 60)}m {int(elapsed % 60)}s")
+        print(f"EXTRACTION COMPLETED")
+        print(f"   Successful: {successful}/{total_books}")
+        print(f"   Failed: {len(self.errors)}/{total_books}")
+        print(f"   Time: {int(elapsed / 60)}m {int(elapsed % 60)}s")
         print("=" * 70)
 
-        # Save summary CSVs
         self.save_summary_csv(main_summary_data)
         self.save_scraping_summary_csv(successful, total_books, elapsed)
 
         if self.errors:
             self.save_errors_csv()
 
-        # Create zip file
         zip_path = self.create_zip_file()
 
         return successful, zip_path
 
     def save_summary_csv(self, data):
         """Save main summary CSV."""
-        csv_path = "pdf_evidence_scraped/all_books_summary.csv"
+        csv_path = os.path.join(self.base_dir, "all_books_summary.csv")
         try:
             os.makedirs(os.path.dirname(csv_path), exist_ok=True)
 
@@ -511,17 +473,19 @@ class ImprovedPDFEvidenceScraper:
                 writer.writeheader()
                 writer.writerows(data)
 
-            print(f"\n✅ Summary CSV saved: {csv_path}")
+            print(f"\nSummary CSV saved: {csv_path}")
             return True
 
         except Exception as e:
-            print(f"❌ Error saving summary CSV: {e}")
+            print(f"Error saving summary CSV: {e}")
             return False
 
     def save_scraping_summary_csv(self, successful, total, elapsed):
         """Save scraping statistics CSV."""
-        csv_path = "pdf_evidence_scraped/scraping_summary.csv"
+        csv_path = os.path.join(self.base_dir, "scraping_summary.csv")
         try:
+            os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+
             with open(csv_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
                 fieldnames = [
                     'total_files',
@@ -542,28 +506,30 @@ class ImprovedPDFEvidenceScraper:
                     'date_completed': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 })
 
-            print(f"✅ Statistics CSV saved: {csv_path}")
+            print(f"Statistics CSV saved: {csv_path}")
             return True
 
         except Exception as e:
-            print(f"❌ Error saving statistics CSV: {e}")
+            print(f"Error saving statistics CSV: {e}")
             return False
 
     def save_errors_csv(self):
         """Save errors CSV if any errors occurred."""
-        csv_path = "pdf_evidence_scraped/scraping_errors.csv"
+        csv_path = os.path.join(self.base_dir, "scraping_errors.csv")
         try:
+            os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+
             with open(csv_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
                 fieldnames = ['book', 'path', 'error']
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 writer.writeheader()
                 writer.writerows(self.errors)
 
-            print(f"⚠️  Errors CSV saved: {csv_path}")
+            print(f"Errors CSV saved: {csv_path}")
             return True
 
         except Exception as e:
-            print(f"❌ Error saving errors CSV: {e}")
+            print(f"Error saving errors CSV: {e}")
             return False
 
     def create_zip_file(self):
@@ -571,33 +537,33 @@ class ImprovedPDFEvidenceScraper:
         try:
             zip_path = "pdf_evidence_scraped.zip"
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                for root, dirs, files in os.walk("pdf_evidence_scraped"):
+                for root, dirs, files in os.walk(self.base_dir):
                     for file in files:
                         file_path = os.path.join(root, file)
                         arcname = os.path.relpath(file_path, ".")
                         zipf.write(file_path, arcname)
 
-            print(f"📦 Zip file created: {zip_path}")
+            print(f"Zip file created: {zip_path}")
             return zip_path
 
         except Exception as e:
-            print(f"⚠️  Could not create zip file: {e}")
+            print(f"Could not create zip file: {e}")
             return None
 
 
 def main():
     """Run the improved file scraper."""
     print("=" * 70)
-    print("📚 IMPROVED PDF/DOCX FILE SCRAPER")
-    print("   ✓ Extracts clean text (words and relevant numbers only)")
-    print("   ✓ Uses titles as folder names")
-    print("   ✓ Proper author attribution")
-    print("   ✓ Enhanced text cleaning and validation")
-    print("   ✓ Supports PDF and DOCX formats")
-    print("   ✓ Includes source URLs from authoritative sources")
+    print("PDF/DOCX FILE SCRAPER")
+    print("  - Extracts clean text (words and relevant numbers only)")
+    print("  - Uses titles as folder names")
+    print("  - Proper author attribution")
+    print("  - Enhanced text cleaning and validation")
+    print("  - Supports PDF and DOCX formats")
+    print("  - Includes source URLs from authoritative sources")
     print("=" * 70)
 
-    print("\n📖 Files to Process (9 files):")
+    print("\nFiles to Process (9 files):")
     print("   1. 1421: The Year China Discovered America (PDF)")
     print("   2. 1421 - The Year the Middle Ages Ended (DOCX)")
     print("   3. 1434: The Year a Magnificent Chinese Fleet Sailed to Italy (PDF)")
@@ -609,80 +575,68 @@ def main():
     print("   9. FINAL Evidence from 2009 Archive (DOCX)")
     print("   All by Gavin Menzies")
 
-    print("\n📁 Output Structure:")
-    print("   pdf_evidence_scraped/")
-    print("   ├── 01_1421_The_Year_China_Discovered_America/")
-    print("   │   └── data/01_1421_The_Year_China_Discovered_America.csv")
-    print("   ├── ... (similar for each file)")
-    print("   ├── all_books_summary.csv")
-    print("   ├── scraping_summary.csv")
-    print("   └── scraping_errors.csv (if any)")
-
-    print("\n📊 CSV Columns:")
-    print("   • page_number - File number (1-9)")
-    print("   • folder_name - Clean folder name based on title")
-    print("   • file_path - Full path to file")
-    print("   • title - Document title")
-    print("   • author - Author (Gavin Menzies)")
-    print("   • source_url - Authoritative source URL for the content")
-    print("   • content - Cleaned text content")
-    print("   • page_count - Number of pages (if applicable)")
-    print("   • word_count - Total word count")
-    print("   • file_type - File extension (PDF/DOCX)")
+    print("\nCSV Columns:")
+    print("  - page_number - File number (1-9)")
+    print("  - folder_name - Clean folder name based on title")
+    print("  - file_path - Full path to file")
+    print("  - title - Document title")
+    print("  - author - Author (Gavin Menzies)")
+    print("  - source_url - Authoritative source URL for the content")
+    print("  - content - Cleaned text content")
+    print("  - page_count - Number of pages (if applicable)")
+    print("  - word_count - Total word count")
+    print("  - file_type - File extension (PDF/DOCX)")
 
     # Check for required libraries
     try:
         import PyPDF2
     except ImportError:
-        print("\n⚠️  Installing required library: PyPDF2")
+        print("\nInstalling required library: PyPDF2")
         import subprocess
         subprocess.check_call(['pip', 'install', 'PyPDF2', '--break-system-packages'])
-        print("✅ PyPDF2 installed!")
+        print("PyPDF2 installed")
 
     try:
         import docx
     except ImportError:
-        print("\n⚠️  Installing required library: python-docx")
+        print("\nInstalling required library: python-docx")
         import subprocess
         subprocess.check_call(['pip', 'install', 'python-docx', '--break-system-packages'])
-        print("✅ python-docx installed!")
+        print("python-docx installed")
 
-    proceed = input("\n▶️  Proceed with file extraction? (y/n): ").strip().lower()
+    proceed = input("\nProceed with file extraction? (y/n): ").strip().lower()
     if proceed != 'y':
-        print("❌ Extraction cancelled.")
+        print("Extraction cancelled.")
         return
 
     print("\n" + "=" * 70)
-    print("🚀 Starting extraction...")
+    print("Starting extraction...")
     print("=" * 70)
 
-    # Create output directory
-    os.makedirs("pdf_evidence_scraped", exist_ok=True)
+    os.makedirs("scraped_csvs/BooksAndMore", exist_ok=True)
 
-    # Run scraper
     scraper = ImprovedPDFEvidenceScraper()
     success_count, zip_file = scraper.scrape_all_books()
 
     print("\n" + "=" * 70)
-    print("📊 FINAL SUMMARY")
+    print("FINAL SUMMARY")
     print("=" * 70)
-    print(f"✅ Successfully processed: {success_count}/9 files")
-    print(f"📂 Output folder: pdf_evidence_scraped/")
+    print(f"Successfully processed: {success_count}/9 files")
+    print(f"Output folder: scraped_csvs/BooksAndMore/")
 
     if zip_file:
-        print(f"📦 Zip file: {zip_file}")
+        print(f"Zip file: {zip_file}")
 
-    print("\n📄 Output Files:")
-    print("   • all_books_summary.csv - Main summary with all metadata")
-    print("   • scraping_summary.csv - Processing statistics")
+    print("\nOutput Files:")
+    print("  - all_books_summary.csv - Main summary with all metadata")
+    print("  - scraping_summary.csv - Processing statistics")
 
     if scraper.errors:
-        print("   • scraping_errors.csv - Error details")
-        print(f"\n⚠️  {len(scraper.errors)} file(s) failed to process")
+        print("  - scraping_errors.csv - Error details")
+        print(f"\nWarning: {len(scraper.errors)} file(s) failed to process")
 
-    print("\n✨ Extraction complete! All data saved in clean CSV format.")
-    print("   Each file has its own folder with cleaned text content.")
-
+    print("\nExtraction complete. All data saved in clean CSV format.")
+    print("Each file has its own folder with cleaned text content.")
 
 if __name__ == "__main__":
     main()
