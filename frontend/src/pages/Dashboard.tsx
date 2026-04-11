@@ -11,10 +11,7 @@ import {
   PlusCircle,
 } from "lucide-react";
 
-// main URL used to open the page
-const API_URL =
-  import.meta.env.VITE_API_URL || "http://localhost:8000";
-
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const STORAGE_KEY = "1421_chat_messages";
 
 interface Stats {
@@ -27,39 +24,27 @@ function getConversationCount(): number {
   try {
     const raw = sessionStorage.getItem(STORAGE_KEY);
     if (!raw) return 0;
-
     const messages = JSON.parse(raw);
-
-    return messages.filter(
-      (m: { role: string }) => m.role === "user"
-    ).length;
-  } catch (err) {
-    // something went wrong parsing, just ignore
+    return messages.filter((m: { role: string }) => m.role === "user").length;
+  } catch {
     return 0;
   }
 }
 
-// this can be changed
 export default function Dashboard() {
   const [stats, setStats] = useState<Stats>({
     feedback_count: 0,
     locations_count: 52,
     documents_count: 870,
   });
-
   const [loading, setLoading] = useState(true);
-  const [conversationCount, setConversationCount] =
-    useState(getConversationCount);
+  const [conversationCount, setConversationCount] = useState(getConversationCount);
 
   useEffect(() => {
     fetch(`${API_URL}/api/stats`)
-      .then((res) => res.json())
-      .then((data) => {
-        setStats(data);
-      })
-      .catch((err) => {
-        console.error("Failed to fetch stats", err);
-      })
+      .then((r) => r.json())
+      .then((data) => setStats(data))
+      .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
 
@@ -67,61 +52,57 @@ export default function Dashboard() {
     const interval = setInterval(() => {
       setConversationCount(getConversationCount());
     }, 1000);
-
     return () => clearInterval(interval);
   }, []);
 
   const steps = [
     {
-
       icon: MessageSquare,
       title: "Chat with AI Historian",
       description:
-        "Ask questions about Zheng He's voyages or Ming dynasty history. The AI only uses the 1421 Foundation data (not the internet), so answers come from real indexed documents. You’ll see citations you can click.",
-      example:
-        "Example: What was the significance of Zheng He's voyages?",
+        "Ask questions about Zheng He's voyages, Ming dynasty history, or the 1421 Foundation research. The AI searches only the 1421 Foundation knowledge base — not the web. Every answer is grounded in the indexed documents, with inline citations you can click.",
+      example: "Try: 'What was the significance of Zheng He's voyages?'",
     },
     {
       icon: Map,
       title: "Explore the Data Map",
       description:
-        "There’s an interactive map showing key locations from the voyages. Clicking a marker shows related documents from the dataset.",
-      example: "Click any marker to see related research",
+        "View key locations from Zheng He's treasure fleet expeditions on an interactive map. Click any marker to see related research documents from the knowledge base.",
+      example: "Click a location marker to explore related documents",
     },
     {
       icon: FileText,
-      title: "Browse Documents",
-      description: `You can go through about ${stats.documents_count} documents from the 1421 Foundation and related sources. Each one links back to where it came from.`,
-      example: "Try searching by title or author",
+      title: "Browse Research Documents",
+      description: `Access the full knowledge base of ${stats.documents_count} documents from the 1421 Foundation, Gavin Menzies' research site, and related sources. Each document links directly to its original source. Filter by document type or author to narrow your search.`,
+      example: "Search by title, author, or document number",
     },
     {
       icon: Database,
-      title: "Document Search",
+      title: "Document-Only Search",
       description:
-        "Search is powered by FAISS, so it finds documents based on meaning, not just keywords. It doesn’t pull anything from outside sources.",
-      example: `${stats.documents_count} documents indexed`,
+        "The system uses FAISS vector search to find semantically relevant documents from the knowledge base. It does not use web search or external data sources — all answers come exclusively from indexed documents.",
+      example: `${stats.documents_count} documents indexed and searchable`,
     },
     {
-
       icon: Globe,
-      title: "Citations in Answers",
+      title: "Inline Document Citations",
       description:
-        "Responses include references like [Document X]. You can click them to jump straight to the source. If nothing relevant is found, it won’t guess.",
-      example: "Click citation badges in responses",
+        "Every AI response cites its sources inline using [Document X] badges. Click any badge to jump directly to that document. If no relevant documents are found, the system will say so rather than guessing.",
+      example: "Click [Document 1] badges in chat responses to view sources",
     },
     {
       icon: PlusCircle,
-      title: "Request New Data",
+      title: "Request Additional Data",
       description:
-        "If you know a useful source that isn’t included, you can submit it. URLs help, but even just a book or article name works.",
-      example: "Go to Feedback and submit a Data Request",
+        "Know of a webpage, article, or online resource related to Chinese maritime history or the 1421 hypothesis that isn't in the knowledge base? Submit a Data Request via the Feedback page with the URL of the source. The research team reviews all submissions and approved sources are added to the knowledge base in future updates.",
+      example: "Go to Feedback → select 'Data Request' → paste the URL of the source",
     },
     {
       icon: Send,
-      title: "Send Feedback",
+      title: "Submit Feedback",
       description:
-        "You can report bugs or suggest features. Feedback goes to the team directly.",
-      example: "Suggest a topic you'd like added",
+        "Share your thoughts, report issues, or suggest new features to improve the platform. Feedback is sent directly to the development and research team.",
+      example: "Let us know what historical topics you'd like to learn more about",
     },
   ];
 
@@ -129,25 +110,19 @@ export default function Dashboard() {
     {
       label: "AI Conversations",
       value: String(conversationCount),
-      sub:
-        conversationCount === 0
-          ? "No chats yet"
-          : `${conversationCount} question${
-              conversationCount !== 1 ? "s" : ""
-            }`,
+      sub: conversationCount === 0 ? "Start a new chat" : `${conversationCount} question${conversationCount !== 1 ? "s" : ""} asked`,
       icon: MessageSquare,
     },
-
     {
       label: "Map Locations",
       value: String(stats.locations_count),
-      sub: "Different regions",
+      sub: "Across several continents",
       icon: Map,
     },
     {
       label: "Documents",
-      value: loading ? "..." : String(stats.documents_count),
-      sub: "Indexed",
+      value: loading ? "…" : String(stats.documents_count),
+      sub: "In knowledge base",
       icon: FileText,
     },
     {
@@ -160,97 +135,73 @@ export default function Dashboard() {
 
   return (
     <div className="flex flex-col h-full bg-gray-100">
+
       {/* Header */}
-      <div className="border-b border-gray-200 px-6 py-4 bg-white shadow-sm">
-        <h1 className="text-xl font-bold text-gray-900">
-          Dashboard
-        </h1>
-        <p className="text-xs text-gray-400">
-          1421 Foundation Research System
+      <div className="border-b border-gray-200 px-6 py-4 bg-white shadow-sm flex-shrink-0">
+        <h1 className="text-xl font-display font-bold text-gray-900">Dashboard</h1>
+        <p className="text-xs text-gray-400 mt-0.5">
+          Welcome to the 1421 Foundation Research System
         </p>
       </div>
 
-
       <div className="flex-1 overflow-y-auto">
-        {/* Stats */}
+        {/* Stat cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 px-6 py-5">
           {statCards.map(({ label, value, sub, icon: Icon }) => (
             <div
               key={label}
-              className="bg-white rounded-xl border p-4 shadow-sm"
+              className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm hover:shadow-md transition-shadow"
             >
-              <div className="flex justify-between mb-2">
-                <span className="text-xs text-gray-400">
-                  {label}
-                </span>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs text-gray-400">{label}</span>
                 <Icon className="h-4 w-4 text-gold" />
               </div>
-
-              <p className="text-2xl font-bold text-gold">
-                {value}
-              </p>
-
-              <p className="text-xs text-gray-400 mt-1">
-                {sub}
-              </p>
+              <p className="text-2xl font-display font-bold text-gold">{value}</p>
+              <p className="text-xs text-gray-400 mt-1">{sub}</p>
             </div>
           ))}
         </div>
 
-        {/* Intro */}
+        {/* Welcome card */}
         <div className="px-6 pb-4">
-          <div className="bg-white rounded-xl border p-6 shadow-sm">
-            <div className="flex gap-4">
-              <div className="w-12 h-12 flex items-center justify-center">
+          <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-xl bg-red-50 border border-gold/20 flex items-center justify-center flex-shrink-0">
                 <BookOpen className="h-6 w-6 text-gold" />
               </div>
-
               <div>
-                <h2 className="text-lg font-bold mb-2">
-                  Welcome
+                <h2 className="text-lg font-display font-bold text-gray-900 mb-2">
+                  Welcome to the 1421 Foundation Research System
                 </h2>
-                <p className="text-gray-600 text-sm">
-                  This tool gives access to the 1421 Foundation
-                  dataset, including research on Zheng He and
-                  Chinese exploration. Everything shown comes from
-                  stored documents, not the web.
+                <p className="text-gray-600 text-sm leading-relaxed">
+                  This platform provides AI-assisted access to the 1421 Foundation's knowledge base, covering Chinese maritime exploration during the Ming dynasty (1368–1644), the voyages of Admiral Zheng He, and the research of Gavin Menzies. All AI responses and Data Map locations are sourced exclusively from indexed documents. If you know of a relevant online source that is not yet in the knowledge base, you can request it be added via the Feedback page.
                 </p>
               </div>
             </div>
           </div>
         </div>
 
-
-        {/* Guide */}
+        {/* How to use */}
         <div className="px-6 pb-6">
-          <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
+          <h2 className="text-lg font-display font-bold text-gray-900 mb-4 flex items-center gap-2">
             <Compass className="h-5 w-5 text-gold" />
-            How it works
+            How to Use Guide
           </h2>
-
           <div className="space-y-3">
             {steps.map((step, index) => {
               const Icon = step.icon;
-
               return (
                 <div
                   key={index}
-                  className="flex gap-4 bg-white rounded-xl p-4 border"
+                  className="flex gap-4 bg-white rounded-xl p-4 border border-gray-200 shadow-sm hover:border-gold/30 hover:shadow-md transition-all"
                 >
-                  <div className="w-10 h-10 flex items-center justify-center">
+                  <div className="w-10 h-10 rounded-full bg-red-50 border border-gold/20 flex items-center justify-center flex-shrink-0">
                     <Icon className="h-5 w-5 text-gold" />
                   </div>
-
-                  <div>
-                    <h3 className="text-sm font-semibold">
-                      {step.title}
-                    </h3>
-                    <p className="text-sm text-gray-500">
-                      {step.description}
-                    </p>
-                    <p className="text-xs text-gold italic">
-                      {step.example}
-                    </p>
+                  <div className="flex-1">
+                    <h3 className="text-sm font-semibold text-gray-900 mb-1">{step.title}</h3>
+                    <p className="text-sm text-gray-500 mb-1.5">{step.description}</p>
+                    <p className="text-xs text-gold italic">{step.example}</p>
                   </div>
                 </div>
               );
