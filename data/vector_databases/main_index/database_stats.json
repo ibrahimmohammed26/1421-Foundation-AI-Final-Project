@@ -2,7 +2,7 @@
   "document_count": 457,
   "embedding_dimension": 384,
   "embedding_model": "all-MiniLM-L6-v2",
-  "created_at": "2026-04-11T16:16:46.775784",
+  "created_at": "2026-04-11T17:54:23.280538",
   "source_breakdown": {
     "facebook_posts.zip": 434,
     "1421_foundation_scraped.zip": 23

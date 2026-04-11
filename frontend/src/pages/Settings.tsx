@@ -9,6 +9,7 @@ import { fetchStats } from "@/lib/api";
 
 const STORAGE_KEY = "1421_chat_messages";
 
+// main function for settings
 export default function Settings() {
   const [showConfirmClear, setShowConfirmClear] = useState(false);
   const [clearSuccess,     setClearSuccess]     = useState(false);
@@ -16,7 +17,6 @@ export default function Settings() {
   const [docCount,         setDocCount]         = useState<number | null>(null);
   const [exportingDocs,    setExportingDocs]    = useState(false);
   const [exportingChat,    setExportingChat]    = useState(false);
-
   // Feedback form
   const [feedbackName,    setFeedbackName]    = useState("");
   const [feedbackEmail,   setFeedbackEmail]   = useState("");
@@ -191,36 +191,6 @@ export default function Settings() {
             </div>
           </div>
 
-          {/* ── Data Sources ──────────────────────────────────────────── */}
-          <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-            <h3 className="text-base font-display font-bold text-gray-900 mb-4 flex items-center gap-2">
-              <BookOpen className="h-4 w-4 text-gold" /> Knowledge Base Sources
-            </h3>
-            <p className="text-xs text-gray-500 mb-3">
-              All documents in the knowledge base are sourced from three distinct sources, each attributed accordingly.
-            </p>
-            <div className="space-y-3">
-              <DataSourceRow
-                icon={Globe}
-                label="1421 Foundation (Website)"
-                sub="Research articles, historical evidence pages, and site content from 1421foundation.org"
-                color="bg-red-700"
-              />
-              <DataSourceRow
-                icon={Facebook}
-                label="1421 Foundation (Facebook)"
-                sub="Posts, updates, and discussions from the official 1421 Foundation Facebook page"
-                color="bg-blue-600"
-              />
-              <DataSourceRow
-                icon={BookOpen}
-                label="Gavin Menzies"
-                sub="Evidence pages, research articles from gavinmenzies.net, and content from the books 1421, 1434, and Who Discovered America?"
-                color="bg-amber-700"
-              />
-            </div>
-          </div>
-
           {/* ── Data Management ───────────────────────────────────────── */}
           <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
             <h3 className="text-base font-display font-bold text-gray-900 mb-4 flex items-center gap-2">
@@ -284,8 +254,6 @@ export default function Settings() {
               {[
                 { keys: ["Enter"],           action: "Send chat message" },
                 { keys: ["Shift", "Enter"],  action: "New line in chat" },
-                { keys: ["Escape"],          action: "Close modals / panels" },
-                { keys: ["Ctrl", "K"],       action: "Focus search (Documents page)" },
               ].map(({ keys, action }) => (
                 <div key={action} className="flex items-center justify-between py-1.5">
                   <span className="text-sm text-gray-600">{action}</span>
