@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { submitFeedback } from "@/lib/api";
-import { Send, CheckCircle, AlertCircle, Link, Info } from "lucide-react";
+import { Send, CheckCircle, AlertCircle, Info } from "lucide-react";
 
 const FEEDBACK_TYPES = [
   "Suggestion",
@@ -58,12 +58,12 @@ export default function Feedback() {
               About this form
             </h2>
             <p className="text-sm text-gray-600 leading-relaxed mb-3">
-              Use this form to share feedback, report bugs, suggest improvements, or request that additional data sources be added to the knowledge base. All submissions are reviewed by the 1421 Foundation research and development team.
+              Use this form to share feedback, report bugs, suggest improvements, or request that additional sources be added to the knowledge base. All submissions are reviewed by the 1421 Foundation research and development team.
             </p>
             <div className="bg-red-50 border border-gold/20 rounded-lg px-4 py-3">
               <p className="text-xs text-gray-700 leading-relaxed">
                 <span className="font-semibold text-gold">Requesting new data?</span>{" "}
-                Select <span className="font-semibold">Data Request</span> as the feedback type and include the full URL of the webpage, article, or online resource you would like added. Requests without a URL cannot be processed — please ensure the source is publicly accessible online.
+                Select <span className="font-semibold">Data Request</span> as the feedback type and describe the source you would like added. It is recommended to include a URL where possible, but if the source does not have one, please describe where it is from — for example, the book title, publication, or archive it comes from.
               </p>
             </div>
           </div>
@@ -114,15 +114,12 @@ export default function Feedback() {
 
             {/* Data Request guidance — shown only when that type is selected */}
             {isDataRequest && (
-              <div className="flex items-start gap-2.5 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
-                <Link className="h-4 w-4 text-blue-600 flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-xs font-semibold text-blue-800 mb-0.5">URL required for data requests</p>
-                  <p className="text-xs text-blue-700 leading-relaxed">
-                    Please paste the full URL of the source in your message below (e.g.{" "}
-                    <span className="font-mono">https://www.example.com/article</span>). Include one URL per request. The source must be publicly accessible online — paywalled or login-required pages cannot be indexed.
-                  </p>
-                </div>
+              <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
+                <p className="text-xs font-semibold text-amber-800 mb-1">Source information</p>
+                <p className="text-xs text-amber-700 leading-relaxed">
+                  Please describe the source in your message below. A URL is recommended where one is available — paste the full link (e.g.{" "}
+                  <span className="font-mono">https://www.example.com/article</span>). If there is no URL, describe where the source is from, such as a book title, author, publication name, or archive. The more detail you provide, the easier it is for the team to locate and review the source.
+                </p>
               </div>
             )}
 
@@ -130,7 +127,7 @@ export default function Feedback() {
               <label className="block text-xs font-medium text-gray-500 mb-1">
                 Message <span className="text-gold">*</span>
                 {isDataRequest && (
-                  <span className="ml-1 text-gray-400">— include the full URL of the source</span>
+                  <span className="ml-1 text-gray-400">— include a URL or describe where the source is from</span>
                 )}
               </label>
               <textarea
@@ -138,7 +135,7 @@ export default function Feedback() {
                 onChange={(e) => setMessage(e.target.value)}
                 placeholder={
                   isDataRequest
-                    ? "Please add this source to the knowledge base:\n\nURL: https://...\n\nReason: This page covers [topic] which is relevant to the 1421 Foundation research because..."
+                    ? "Please add this source to the knowledge base:\n\nSource: [URL or book title / publication / archive]\n\nReason: This source covers [topic] which is relevant to the 1421 Foundation research because..."
                     : "Tell us what's on your mind…"
                 }
                 rows={6}

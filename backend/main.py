@@ -1,16 +1,10 @@
-"""
-1421 Foundation Research System - FastAPI Backend
-"""
-
 import os
 import re
 import pickle
-import resend
 import json
 from datetime import datetime
-from typing import Optional, List
 from pathlib import Path
-
+from typing import Optional, List
 from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -20,19 +14,19 @@ from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 import faiss
 import numpy as np
+import resend
 
 from dotenv import load_dotenv
 load_dotenv()
 
+# Check if OpenAI api key is there
 api_key = os.getenv("OPENAI_API_KEY")
 print(f"OPENAI_API_KEY loaded: {'Yes' if api_key else 'No'}")
 
 app = FastAPI(title="1421 Foundation API", version="1.0.0")
-
 VERCEL_ORIGIN = "https://1421-foundation-ai-final-project.vercel.app"
 
-# ── CORS ──────────────────────────────────────────────────────────────
-
+# CORS stuff, links frontend to backend
 class CORSEverythingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if request.method == "OPTIONS":
@@ -55,17 +49,16 @@ class CORSEverythingMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(CORSEverythingMiddleware)
 
+# Path setup - works both locally and on Koyeb
 BASE_DIR = Path(__file__).resolve().parent
 if str(BASE_DIR) == "/":
     BASE_DIR = Path("/workspace/backend")
 DATA_DIR = Path(os.getenv("DATA_DIR", str(BASE_DIR.parent / "data")))
 FAISS_DIR = DATA_DIR / "vector_databases" / "main_index"
 
-# ── Email ─────────────────────────────────────────────────────────────
-
+# Email stuff for feedback page
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
-NOTIFY_EMAIL   = os.getenv("NOTIFY_EMAIL", "")
-
+NOTIFY_EMAIL = os.getenv("NOTIFY_EMAIL", "")
 def send_feedback_email(name, email, feedback_type, message):
     if not RESEND_API_KEY:
         return
@@ -78,7 +71,8 @@ def send_feedback_email(name, email, feedback_type, message):
             "subject": f"[1421 Foundation] New Feedback: {feedback_type}",
             "html": f"""
                 <h2 style="color:#8B0000;">New Feedback</h2>
-                <p><b>Name:</b> {name}</p><p><b>Email:</b> {email}</p>
+                <p><b>Name:</b> {name}</p>
+                <p><b>Email:</b> {email}</p>
                 <p><b>Type:</b> {feedback_type}</p>
                 <p><b>Message:</b> {message}</p>
             """
@@ -86,8 +80,9 @@ def send_feedback_email(name, email, feedback_type, message):
     except Exception as e:
         print(f"Email error: {e}")
 
-# ── System prompts ────────────────────────────────────────────────────
 
+
+# System prompts for the LLM
 SYSTEM_PROMPT_WITH_DOCS = """You are a research assistant for the 1421 Foundation, specialising in Chinese maritime exploration during the Ming dynasty (1368–1644), particularly the voyages of Admiral Zheng He and the 1421 hypothesis by Gavin Menzies.
 
 RULES:
@@ -105,8 +100,7 @@ RULES:
 2. Do NOT fabricate [Document X] citations — there are no documents to cite.
 3. Be clear, factual, and academic. Write in clear UK English."""
 
-# ── LLM / Embeddings ─────────────────────────────────────────────────
-
+# Helper functions
 def get_llm():
     return ChatOpenAI(
         model="gpt-4o-mini",
@@ -121,8 +115,7 @@ def get_embeddings_fn():
         api_key=os.getenv("OPENAI_API_KEY"),
     )
 
-# ── Pydantic models ───────────────────────────────────────────────────
-
+# Request/response models
 class ChatRequest(BaseModel):
     messages: list[dict]
     session_id: Optional[str] = None
@@ -141,6 +134,7 @@ class FeedbackRequest(BaseModel):
     message: str
 
 class Document(BaseModel):
+
     id: str
     title: str
     author: str = "Unknown"
@@ -154,8 +148,7 @@ class Document(BaseModel):
     page_number: Optional[int] = None
     similarity_score: Optional[float] = None
 
-# ── Voyage locations ──────────────────────────────────────────────────
-
+# Voyage locations for the map, but no evidence/data locations included, those are included in other files
 VOYAGE_LOCATIONS = [
     {"name": "Nanjing",   "lat": 32.06,  "lon": 118.80, "year": 1403, "event": "Yongle Emperor commissions the treasure fleet from Nanjing"},
     {"name": "Nanjing",   "lat": 32.06,  "lon": 118.80, "year": 1405, "event": "First voyage departs — 317 ships and 28,000 men set sail"},
@@ -176,13 +169,13 @@ VOYAGE_LOCATIONS = [
     {"name": "Calicut",   "lat": 11.26,  "lon":  75.78, "year": 1433, "event": "Voyage 7 — Zheng He dies here on the return journey, ending the voyages"},
 ]
 
-# ── Document store ────────────────────────────────────────────────────
-
+# Global variables neededfor the knowledge base
 _docs_store: List[dict] = []
 _vector_index = None
 _embeddings_model = None
 
-def _clean_text(text: str) -> str:
+# clean text function from the csv files
+def clean_text(text: str) -> str:
     lines = text.split("\n")
     cleaned = []
     for line in lines:
@@ -206,8 +199,9 @@ def _clean_text(text: str) -> str:
             cleaned.append(stripped)
     return re.sub(r"  +", " ", " ".join(cleaned)).strip()
 
-def _meta_to_doc(idx: int, text: str, meta: dict, doc_id) -> dict:
-    clean = _clean_text(text)
+def meta_to_document(idx: int, text: str, meta: dict, doc_id) -> dict:
+    """Convert metadata and text into a document object"""
+    clean = clean_text(text)
     title = (meta.get("title", "") or "").strip()
     for line in text.split("\n"):
         s = line.strip()
@@ -220,81 +214,82 @@ def _meta_to_doc(idx: int, text: str, meta: dict, doc_id) -> dict:
         first = clean.split(".")[0].strip()
         title = first[:200] if first else f"Document {idx + 1}"
     return {
-        "id":               str(doc_id),
-        "title":            title,
-        "author":           meta.get("author", "Unknown") or "Unknown",
-        "year":             int(meta.get("year", 0) or 0),
-        "type":             meta.get("source_type", meta.get("type", "document")) or "document",
-        "description":      clean,
-        "tags":             meta.get("tags", []) or [],
-        "content_preview":  clean,
-        "content_full":     clean,
-        "source_file":      meta.get("source_file", meta.get("source", "")) or "",
-        "url":              meta.get("url", "") or "",
-        "page_number":      meta.get("page", None),
+        "id": str(doc_id),
+        "title": title,
+        "author": meta.get("author", "Unknown") or "Unknown",
+        "year": int(meta.get("year", 0) or 0),
+        "type": meta.get("source_type", meta.get("type", "document")) or "document",
+        "description": clean,
+        "tags": meta.get("tags", []) or [],
+        "content_preview": clean,
+        "content_full": clean,
+        "source_file": meta.get("source_file", meta.get("source", "")) or "",
+        "url": meta.get("url", "") or "",
+        "page_number": meta.get("page", None),
         "similarity_score": None,
         "_relevance_score": 0.0,
     }
 
+# load the knowledge base
 def load_knowledge_base():
+    """Load the FAISS index and metadata into memory"""
     global _docs_store, _vector_index, _embeddings_model
-
-    meta_path  = FAISS_DIR / "faiss_metadata.pkl"
+    
+    meta_path = FAISS_DIR / "faiss_metadata.pkl"
     index_path = FAISS_DIR / "faiss_index.bin"
-
+    
     if not meta_path.exists():
         print(f"ERROR: {meta_path} not found")
         return
-
+    
     try:
         with open(meta_path, "rb") as f:
             data = pickle.load(f)
-
-        # Support both the new dict format and the old flat-list format
+        
+        # Handles both old and new format
         if isinstance(data, dict):
             documents = data.get("documents", [])
             metadatas = data.get("metadatas", [])
-            print(f"Dict format: {len(documents)} docs, {len(metadatas)} metadatas")
+            print(f"Loaded dict format: {len(documents)} docs")
         elif isinstance(data, list):
-            print("Legacy list format — converting")
+            print("Old list format - converting")
             metadatas = data
             documents = [f"Document {i + 1}" for i in range(len(metadatas))]
         else:
-            print(f"Unexpected pickle format: {type(data)}")
+            print(f"Unknown format: {type(data)}")
             return
-
-        # Guard against mismatched lengths
+        
+        # Make sure the lengths match
         n = min(len(documents), len(metadatas))
         documents = documents[:n]
         metadatas = metadatas[:n]
-
+        
         _docs_store = [
-            _meta_to_doc(i, documents[i], metadatas[i], i + 1)
+            meta_to_document(i, documents[i], metadatas[i], i + 1)
             for i in range(n)
         ]
-        print(f"OK: Loaded {len(_docs_store)} documents")
-
+        print(f"Loaded {len(_docs_store)} documents")
+        
     except Exception as e:
         print(f"Error loading metadata: {e}")
-        import traceback; traceback.print_exc()
         return
-
+    
     if index_path.exists():
         try:
             _vector_index = faiss.read_index(str(index_path))
-            print(f"OK: FAISS index loaded — {_vector_index.ntotal} vectors")
+            print(f"Loaded FAISS index with {_vector_index.ntotal} vectors")
         except Exception as e:
-            print(f"Error loading FAISS index: {e}")
+            print(f"Error loading FAISS: {e}")
             _vector_index = None
     else:
-        print(f"WARNING: FAISS index not found at {index_path}")
+        print(f"FAISS index not found at {index_path}")
         _vector_index = None
-
+    
     print("Knowledge base ready")
 
-# ── Search ────────────────────────────────────────────────────────────
-
+# Search functions
 def search_semantic(query: str, top_k: int = 5) -> List[dict]:
+    """Search using FAISS vector similarity"""
     global _embeddings_model
     if _vector_index is None or not _docs_store:
         return []
@@ -308,7 +303,6 @@ def search_semantic(query: str, top_k: int = 5) -> List[dict]:
             if 0 <= idx < len(_docs_store):
                 doc = dict(_docs_store[idx])
                 doc["similarity_score"] = float(distances[0][i])
-                # Lower L2 distance = more similar → higher relevance
                 doc["_relevance_score"] = max(0.0, 10.0 - float(distances[0][i]))
                 results.append(doc)
         return results
@@ -317,6 +311,7 @@ def search_semantic(query: str, top_k: int = 5) -> List[dict]:
         return []
 
 def search_keyword(query: str, limit: int = 50) -> List[dict]:
+    """Simple keyword search across titles and content"""
     if not _docs_store:
         return []
     q = query.lower()
@@ -324,16 +319,16 @@ def search_keyword(query: str, limit: int = 50) -> List[dict]:
     results = []
     for doc in _docs_store:
         score = 0
-        title   = doc.get("title",           "").lower()
+        title = doc.get("title", "").lower()
         preview = doc.get("content_preview", "").lower()
-        full    = doc.get("content_full",    "").lower()
-        if q in title:   score += 10
+        full = doc.get("content_full", "").lower()
+        if q in title: score += 10
         if q in preview: score += 4
-        if q in full:    score += 2
+        if q in full: score += 2
         for w in words:
-            if w in title:   score += 4
+            if w in title: score += 4
             if w in preview: score += 2
-            if w in full:    score += 1
+            if w in full: score += 1
         if score > 0:
             d = dict(doc)
             d["similarity_score"] = min(score / 20.0, 1.0)
@@ -343,6 +338,7 @@ def search_keyword(query: str, limit: int = 50) -> List[dict]:
     return results[:limit]
 
 def search_by_title(q: str, limit: int = 5) -> List[dict]:
+    """Search for exact title matches"""
     q = q.lower().strip()
     results = []
     for doc in _docs_store:
@@ -355,8 +351,9 @@ def search_by_title(q: str, limit: int = 5) -> List[dict]:
     results.sort(key=lambda x: len(x["title"]))
     return results[:limit]
 
-def _deduplicate_and_rank(docs: List[dict]) -> List[dict]:
-    seen: set = set()
+def deduplicate_and_rank(docs: List[dict]) -> List[dict]:
+    """Remove duplicate documents and sort by relevance"""
+    seen = set()
     unique = []
     for d in docs:
         key = re.sub(r"^\d+\s+", "", d.get("title", "").strip().lower())
@@ -366,7 +363,8 @@ def _deduplicate_and_rank(docs: List[dict]) -> List[dict]:
     unique.sort(key=lambda x: x.get("_relevance_score", 0.0), reverse=True)
     return unique
 
-def _expand_query(query: str) -> List[str]:
+def expand_query(query: str) -> List[str]:
+    """Generate search variations for better matching"""
     expansions = [query]
     q = query.lower()
     core = re.sub(
@@ -376,66 +374,47 @@ def _expand_query(query: str) -> List[str]:
     ).strip()
     if core != q:
         expansions.append(core)
-
+    
+    # Common topic synonyms
     topic_map = {
-        "naval technology":  ["shipbuilding", "ship construction", "treasure ship", "bao chuan", "junk ship", "ming fleet"],
-        "ming dynasty":      ["ming", "ming china", "yongle", "ming period"],
-        "naval":             ["navy", "maritime", "fleet", "sea power"],
-        "technology":        ["technique", "engineering", "design", "method"],
-        "ship":              ["vessel", "junk", "treasure ship", "bao chuan"],
-        "navigation":        ["compass", "star chart", "celestial navigation", "dead reckoning"],
-        "construction":      ["shipyard", "timber", "dry dock"],
-        "zheng he":          ["zheng he", "cheng ho", "admiral", "treasure fleet"],
-        "calicut":           ["calicut", "kozhikode", "malabar"],
-        "malacca":           ["malacca", "melaka", "strait of malacca"],
-        "africa":            ["east africa", "mombasa", "malindi", "zanzibar", "mogadishu"],
-        "americas":          ["america", "new world", "pre-columbian", "chinese in america"],
-        "australia":         ["australia", "aboriginal", "broome", "darwin"],
-        "new zealand":       ["new zealand", "maori", "waitaha"],
-        "1421":              ["1421 hypothesis", "gavin menzies", "1421 foundation"],
-        "1418 map":          ["1418 map", "zheng he map", "liu gang map"],
-        "evidence":          ["evidence", "proof", "artefact", "ceramic", "archaeology"],
-        "genetics":          ["dna", "genetic", "ancestry", "haplogroup"],
-        "europe":            ["europe", "european", "portugal", "venice", "mediterranean"],
-        "south america":     ["south america", "peru", "brazil", "chile", "ecuador"],
+        "naval technology": ["shipbuilding", "ship construction", "treasure ship", "bao chuan", "junk ship", "ming fleet"],
+        "ming dynasty": ["ming", "ming china", "yongle", "ming period"],
+        "zheng he": ["zheng he", "cheng ho", "admiral", "treasure fleet"],
+        "1421": ["1421 hypothesis", "gavin menzies", "1421 foundation"],
+        "1418 map": ["1418 map", "zheng he map", "liu gang map"],
+        "evidence": ["evidence", "proof", "artefact", "ceramic", "archaeology"],
     }
     for topic, syns in topic_map.items():
         if topic in q or any(w in q for w in topic.split()):
             expansions.extend(syns)
-
-    stop = {"describe", "explain", "what", "how", "did", "the", "and", "for",
-            "tell", "about", "give", "me", "does", "say"}
-    expansions.extend([w for w in core.split() if len(w) > 4 and w not in stop][:5])
+    
     return list(dict.fromkeys(expansions))
 
-def _filter_relevant(docs: List[dict], max_docs: int = 5, threshold: float = 0.3) -> List[dict]:
-    """
-    Keep only docs whose normalised relevance score meets the threshold.
-    Always returns at least 1 doc if any exist.
-    Caps at max_docs.
-    """
+# filters documents by relevance
+def filter_relevant(docs: List[dict], max_docs: int = 5, threshold: float = 0.3) -> List[dict]:
     if not docs:
         return []
-
-    def normalise(score: float) -> float:
-        if score >= 20:  return 1.0   # exact title match
-        if score >= 10:  return 0.9
-        if score >= 5:   return 0.7
-        if score >= 2:   return 0.5
-        if score >= 1:   return 0.3
+    
+    def normalize(score: float) -> float:
+        if score >= 20: return 1.0
+        if score >= 10: return 0.9
+        if score >= 5: return 0.7
+        if score >= 2: return 0.5
+        if score >= 1: return 0.3
         return score / 10.0
-
-    filtered = [d for d in docs if normalise(d.get("_relevance_score", 0)) >= threshold]
+    
+    filtered = [d for d in docs if normalize(d.get("_relevance_score", 0)) >= threshold]
     if not filtered:
-        filtered = [docs[0]]  # always return at least one
+        filtered = [docs[0]]
     return filtered[:max_docs]
 
 def get_relevant_context(query: str, top_k: int = 10) -> tuple:
-    docs_by_id: dict = {}
-    expanded = _expand_query(query)
+    """Find relevant documents for a query"""
+    docs_by_id = {}
+    expanded = expand_query(query)
     print(f"Query: '{query}' → {len(expanded)} variants")
-
-    # Semantic search across all expansions
+    
+    # Try semantic search first
     for sq in expanded[:12]:
         for d in search_semantic(sq, top_k):
             did = d["id"]
@@ -444,15 +423,16 @@ def get_relevant_context(query: str, top_k: int = 10) -> tuple:
             else:
                 if d["_relevance_score"] > docs_by_id[did]["_relevance_score"]:
                     docs_by_id[did]["_relevance_score"] = d["_relevance_score"]
-
-    # Keyword search
+    
+    # Then keyword search
     for d in search_keyword(query, top_k * 2):
         did = d["id"]
         if did not in docs_by_id:
             docs_by_id[did] = d
         else:
-            docs_by_id[did]["_relevance_score"] += d["_relevance_score"] * 0.5
 
+            docs_by_id[did]["_relevance_score"] += d["_relevance_score"] * 0.5
+    
     for sq in expanded[1:8]:
         for d in search_keyword(sq, top_k):
             did = d["id"]
@@ -460,8 +440,8 @@ def get_relevant_context(query: str, top_k: int = 10) -> tuple:
                 docs_by_id[did] = d
             else:
                 docs_by_id[did]["_relevance_score"] += d["_relevance_score"] * 0.3
-
-    # Title search for quoted terms
+    
+    # Title search for quoted phrases
     m = re.search(r'["\'](.+?)["\']', query)
     if m:
         for d in search_by_title(m.group(1)):
@@ -470,16 +450,16 @@ def get_relevant_context(query: str, top_k: int = 10) -> tuple:
                 docs_by_id[did] = d
             else:
                 docs_by_id[did]["_relevance_score"] += 20.0
-
-    all_docs = _deduplicate_and_rank(list(docs_by_id.values()))
-    selected = _filter_relevant(all_docs, max_docs=5, threshold=0.3)
-
-    print(f"Found {len(all_docs)} → kept {len(selected)} relevant. "
-          f"Top: {[d['title'][:50] for d in selected[:3]]}")
-
+    
+    all_docs = deduplicate_and_rank(list(docs_by_id.values()))
+    selected = filter_relevant(all_docs, max_docs=5, threshold=0.3)
+    
+    print(f"Found {len(all_docs)} → kept {len(selected)} relevant")
+    
     if not selected:
         return "", []
-
+    
+    # Build context string for the LLM
     context = "Relevant documents from the 1421 Foundation knowledge base:\n\n"
     for i, doc in enumerate(selected, 1):
         context += f"[Document {i}] {doc['title']}"
@@ -492,17 +472,19 @@ def get_relevant_context(query: str, top_k: int = 10) -> tuple:
         if full:
             context += f"{full[:4000]}\n"
         context += "\n"
-
+    
     return context, selected
 
 def get_comparative_context(query: str, top_k: int = 12) -> tuple:
-    docs_by_id: dict = {}
+    """Special handling for comparison questions"""
+    docs_by_id = {}
     q = query.lower()
+    
+    # Try to split into two parts for comparison
     for sep in [" to ", " with ", " and ", " versus ", " vs "]:
         parts = q.replace("compare", "").split(sep)
         if len(parts) >= 2:
-            for d in (search_semantic(parts[0].strip(), top_k // 2) +
-                      search_semantic(parts[1].strip(), top_k // 2)):
+            for d in search_semantic(parts[0].strip(), top_k // 2) + search_semantic(parts[1].strip(), top_k // 2):
                 did = d["id"]
                 if did not in docs_by_id:
                     docs_by_id[did] = d
@@ -511,20 +493,21 @@ def get_comparative_context(query: str, top_k: int = 12) -> tuple:
                         docs_by_id[did]["_relevance_score"], d["_relevance_score"]
                     )
             break
-
+    
+    # Regular search as fallback, but still uses the documents
     for d in search_semantic(query, top_k) + search_keyword(query, top_k):
         did = d["id"]
         if did not in docs_by_id:
             docs_by_id[did] = d
         else:
             docs_by_id[did]["_relevance_score"] += d["_relevance_score"] * 0.3
-
-    all_docs = _deduplicate_and_rank(list(docs_by_id.values()))
-    selected = _filter_relevant(all_docs, max_docs=6, threshold=0.25)
-
+    
+    all_docs = deduplicate_and_rank(list(docs_by_id.values()))
+    selected = filter_relevant(all_docs, max_docs=6, threshold=0.25)
+    
     if not selected:
         return "", []
-
+    
     context = "Relevant documents from the 1421 Foundation knowledge base:\n\n"
     for i, doc in enumerate(selected, 1):
         context += f"[Document {i}] {doc['title']}"
@@ -539,11 +522,7 @@ def get_comparative_context(query: str, top_k: int = 12) -> tuple:
         context += "\n"
     return context, selected
 
-# ── Routes ────────────────────────────────────────────────────────────
-# IMPORTANT: All /api/documents/... literal sub-paths MUST be declared
-# BEFORE /api/documents/{doc_id}, otherwise FastAPI matches {doc_id}
-# first and the literal routes are never reached.
-
+# Different API routes/methods
 @app.get("/")
 def root():
     return {"status": "ok", "docs_loaded": len(_docs_store)}
@@ -557,16 +536,13 @@ async def get_documents(limit: int = Query(default=10000, le=10000), offset: int
     if not _docs_store:
         return {"documents": [], "total": 0, "limit": limit, "offset": offset}
     paged = _docs_store[offset: offset + limit]
-    safe  = [{k: v for k, v in d.items() if k not in ("content_full", "_relevance_score")}
-             for d in paged]
+    safe = [{k: v for k, v in d.items() if k not in ("content_full", "_relevance_score")} for d in paged]
     return {"documents": safe, "total": len(_docs_store), "limit": limit, "offset": offset}
-
-# ── These three MUST come before /api/documents/{doc_id} ─────────────
 
 @app.get("/api/documents/search")
 async def search_documents_endpoint(q: str, limit: int = 50):
     results = []
-    seen: set = set()
+    seen = set()
     if q.strip().isdigit():
         for d in _docs_store:
             if d["id"] == q.strip():
@@ -577,39 +553,33 @@ async def search_documents_endpoint(q: str, limit: int = 50):
                 break
     for d in search_by_title(q, 5):
         if d["id"] not in seen:
-            results.append(d); seen.add(d["id"])
+            results.append(d)
+            seen.add(d["id"])
     for d in search_semantic(q, min(limit, 10)):
         if d["id"] not in seen:
-            results.append(d); seen.add(d["id"])
+            results.append(d)
+            seen.add(d["id"])
     for d in search_keyword(q, limit):
         if d["id"] not in seen:
-            results.append(d); seen.add(d["id"])
-    final = [
-        {k: v for k, v in d.items() if k not in ("content_full", "_relevance_score")}
-        for d in results[:limit]
-    ]
+            results.append(d)
+            seen.add(d["id"])
+    final = [{k: v for k, v in d.items() if k not in ("content_full", "_relevance_score")} for d in results[:limit]]
     return {"results": final, "total": len(final), "query": q}
 
 @app.get("/api/documents/types")
 async def get_document_types():
-    return {"types": sorted({
-        d["type"] for d in _docs_store if d["type"] and d["type"] != "unknown"
-    })}
+    types = {d["type"] for d in _docs_store if d["type"] and d["type"] != "unknown"}
+    return {"types": sorted(types)}
 
 @app.get("/api/documents/years")
 async def get_document_years():
-    return {"years": sorted(
-        {d["year"] for d in _docs_store if d["year"] and d["year"] > 0},
-        reverse=True
-    )}
+    years = {d["year"] for d in _docs_store if d["year"] and d["year"] > 0}
+    return {"years": sorted(years, reverse=True)}
 
 @app.get("/api/documents/authors")
 async def get_document_authors():
-    return {"authors": sorted(
-        {d["author"] for d in _docs_store if d["author"] and d["author"] != "Unknown"}
-    )}
-
-# ── This MUST come AFTER all /api/documents/... literal routes ────────
+    authors = {d["author"] for d in _docs_store if d["author"] and d["author"] != "Unknown"}
+    return {"authors": sorted(authors)}
 
 @app.get("/api/documents/{doc_id}")
 async def get_document_by_id(doc_id: str):
@@ -618,9 +588,7 @@ async def get_document_by_id(doc_id: str):
             return {k: v for k, v in d.items() if k not in ("content_full", "_relevance_score")}
     raise HTTPException(status_code=404, detail="Document not found")
 
-# ── Chat routes ───────────────────────────────────────────────────────
-
-def _build_system(context: str, use_web_fallback: bool) -> str:
+def build_system_prompt(context: str, use_web_fallback: bool) -> str:
     if use_web_fallback:
         return SYSTEM_PROMPT_WEB_FALLBACK
     s = SYSTEM_PROMPT_WITH_DOCS + "\n\nDOCUMENTS PROVIDED (most relevant first):\n\n" + context
@@ -633,7 +601,7 @@ def _build_system(context: str, use_web_fallback: bool) -> str:
     )
     return s
 
-def _to_lc(system: str, messages: list) -> list:
+def messages_to_langchain(system: str, messages: list) -> list:
     lc = [SystemMessage(content=system)]
     for m in messages:
         if m["role"] == "user":
@@ -644,29 +612,29 @@ def _to_lc(system: str, messages: list) -> list:
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
-    llm  = get_llm()
+    llm = get_llm()
     last = next((m["content"] for m in reversed(req.messages) if m["role"] == "user"), "")
     context, sources = "", []
     used_web_fallback = False
-
+    
     if req.use_documents and last:
         comparative = ["compare", "versus", "vs", "difference between", "contrast"]
         if any(kw in last.lower() for kw in comparative):
             context, sources = get_comparative_context(last, top_k=12)
         else:
             context, sources = get_relevant_context(last, top_k=10)
-
+    
     if not sources:
         used_web_fallback = True
-
+    
     try:
-        response = llm.invoke(_to_lc(_build_system(context, used_web_fallback), req.messages))
+        response = llm.invoke(messages_to_langchain(build_system_prompt(context, used_web_fallback), req.messages))
         clean_sources = [
             {
-                "title":           d["title"],
-                "author":          d["author"],
-                "year":            d["year"],
-                "type":            d["type"],
+                "title": d["title"],
+                "author": d["author"],
+                "year": d["year"],
+                "type": d["type"],
                 "relevance_score": round(d.get("_relevance_score", 0.0), 2),
             }
             for d in sources
@@ -682,13 +650,13 @@ async def chat(req: ChatRequest):
 
 @app.post("/api/chat/stream")
 async def chat_stream(req: ChatRequest):
-    llm  = get_llm()
+    llm = get_llm()
     last = next((m["content"] for m in reversed(req.messages) if m["role"] == "user"), "")
     context = ""
     if req.use_documents and last:
         context, _ = get_relevant_context(last, top_k=10)
-    lc_messages = _to_lc(_build_system(context, not bool(context)), req.messages)
-
+    lc_messages = messages_to_langchain(build_system_prompt(context, not bool(context)), req.messages)
+    
     async def generate():
         try:
             async for chunk in llm.astream(lc_messages):
@@ -698,31 +666,27 @@ async def chat_stream(req: ChatRequest):
             yield "data: [DONE]\n\n"
         except Exception as e:
             yield f"data: ERROR: {str(e)}\n\n"
-
+    
     return StreamingResponse(
         generate(),
         media_type="text/event-stream",
         headers={
-            "Access-Control-Allow-Origin":      VERCEL_ORIGIN,
+            "Access-Control-Allow-Origin": VERCEL_ORIGIN,
             "Access-Control-Allow-Credentials": "true",
-            "Cache-Control":                    "no-cache",
-            "X-Accel-Buffering":                "no",
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
         }
     )
-
-# ── Misc routes ───────────────────────────────────────────────────────
 
 @app.get("/api/debug/rag")
 async def debug_rag(q: str = "Ming dynasty naval technology"):
     context, docs = get_relevant_context(q, top_k=10)
     return {
-        "query":        q,
-        "docs_found":   len(docs),
-        "ranked_docs":  [{"rank": i + 1, "title": d["title"],
-                          "score": round(d.get("_relevance_score", 0), 2)}
-                         for i, d in enumerate(docs)],
+        "query": q,
+        "docs_found": len(docs),
+        "ranked_docs": [{"rank": i + 1, "title": d["title"], "score": round(d.get("_relevance_score", 0), 2)} for i, d in enumerate(docs)],
         "faiss_loaded": _vector_index is not None,
-        "store_size":   len(_docs_store),
+        "store_size": len(_docs_store),
     }
 
 @app.post("/api/feedback")
@@ -732,11 +696,11 @@ async def submit_feedback(req: FeedbackRequest):
     try:
         existing = json.load(open(feedback_path)) if feedback_path.exists() else []
         existing.append({
-            "name":          req.name or "Anonymous",
-            "email":         req.email,
+            "name": req.name or "Anonymous",
+            "email": req.email,
             "feedback_type": req.feedback_type,
-            "message":       req.message,
-            "created_at":    datetime.now().isoformat(),
+            "message": req.message,
+            "created_at": datetime.now().isoformat(),
         })
         json.dump(existing, open(feedback_path, "w"), indent=2)
     except Exception as e:
@@ -759,7 +723,7 @@ def get_stats():
     except Exception:
         pass
     return {
-        "feedback_count":  feedback_count,
+        "feedback_count": feedback_count,
         "locations_count": len(VOYAGE_LOCATIONS),
         "documents_count": len(_docs_store) or 347,
     }
@@ -767,12 +731,12 @@ def get_stats():
 @app.get("/api/test-db")
 async def test_db():
     return {
-        "store_size":    len(_docs_store),
-        "faiss_loaded":  _vector_index is not None,
+        "store_size": len(_docs_store),
+        "faiss_loaded": _vector_index is not None,
         "faiss_vectors": _vector_index.ntotal if _vector_index else 0,
-        "sample":        [{"id": d["id"], "title": d["title"]} for d in _docs_store[:5]],
+        "sample": [{"id": d["id"], "title": d["title"]} for d in _docs_store[:5]],
     }
-
+# on startup
 @app.on_event("startup")
 def init_app():
     print(f"DATA_DIR: {DATA_DIR} (exists={DATA_DIR.exists()})")

@@ -1,5 +1,16 @@
 {
-  "document_count": 347,
+  "document_count": 870,
   "embedding_dimension": 384,
-  "creation_date": "2026-02-08T13:44:46.029686"
+  "embedding_model": "all-MiniLM-L6-v2",
+  "created_at": "2026-04-10T06:33:50.723773",
+  "source_breakdown": {
+    "facebook_posts.zip": 434,
+    "1421_foundation_scraped.zip": 23,
+    "1421_evidence_scraped.zip": 276,
+    "1434_evidence_scraped.zip": 23,
+    "america_evidence_scraped.zip": 18,
+    "atlantis_evidence_scraped.zip": 42,
+    "gavin_menzies_scraped.zip": 45,
+    "pdf_evidence_scraped.zip": 9
+  }
 }
