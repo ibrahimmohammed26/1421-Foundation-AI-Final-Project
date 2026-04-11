@@ -5,16 +5,21 @@ import {
   ExternalLink, Tag, User, Calendar, Layers, Hash, Eye,
 } from "lucide-react";
 import {
-  getAllDocuments, searchDocuments, getDocumentTypes,
-  getDocumentAuthors, Document,
+  getAllDocuments,
+  searchDocuments,
+  getDocumentTypes,
+  getDocumentAuthors,
+  Document,
 } from "@/lib/api";
 
 const PAGE_SIZE = 50;
 
-function sortByIdAsc(docs: Document[]): Document[] {
+// simple sort helper (not over-engineered)
+function sortDocs(docs: Document[]) {
   return [...docs].sort((a, b) => {
     const aNum = parseInt(a.id, 10);
     const bNum = parseInt(b.id, 10);
+
     if (!isNaN(aNum) && !isNaN(bNum)) return aNum - bNum;
     return a.id.localeCompare(b.id);
   });
@@ -22,110 +27,101 @@ function sortByIdAsc(docs: Document[]): Document[] {
 
 function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void }) {
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+    const esc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
   }, [onClose]);
 
   const MetaRow = ({
-    icon: Icon, label, value,
-  }: { icon: React.ElementType; label: string; value: React.ReactNode }) => (
-    <div className="flex items-start gap-3 py-2.5 border-b border-gray-100 last:border-0">
+    icon: Icon,
+    label,
+    value,
+  }: {
+    icon: React.ElementType;
+    label: string;
+    value: React.ReactNode;
+  }) => (
+    <div className="flex items-start gap-3 py-2 border-b border-gray-100 last:border-0">
       <div className="flex items-center gap-2 w-28 flex-shrink-0">
         <Icon className="h-3.5 w-3.5 text-gray-400" />
-        <span className="text-xs text-gray-400 uppercase tracking-wide">{label}</span>
+        <span className="text-xs text-gray-400 uppercase">{label}</span>
       </div>
-      <div className="flex-1 text-sm text-gray-800 min-w-0">{value}</div>
+      <div className="flex-1 text-sm text-gray-800">{value}</div>
     </div>
   );
 
+
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <div className="bg-white border border-gray-200 rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl">
 
-        {/* Header */}
-        <div className="flex items-start justify-between gap-4 px-6 py-5 border-b border-gray-100">
-          <div className="flex items-start gap-3 min-w-0 flex-1">
-            <div className="w-9 h-9 rounded-lg bg-gold flex items-center justify-center flex-shrink-0 mt-0.5">
-              <span className="text-white text-xs font-bold">{doc.id}</span>
+        {/* header */}
+        <div className="flex justify-between px-6 py-5 border-b">
+          <div className="flex gap-3">
+            <div className="w-9 h-9 bg-gold text-white flex items-center justify-center rounded">
+              {doc.id}
             </div>
-            <div className="min-w-0 flex-1">
-              <h2 className="text-base font-display font-bold text-gray-900 leading-snug">
-                {doc.title}
-              </h2>
+            <div>
+              <h2 className="font-bold text-gray-900">{doc.title}</h2>
               {doc.author && doc.author !== "Unknown" && (
-                <p className="text-xs text-gray-400 mt-0.5">by {doc.author}</p>
+                <p className="text-xs text-gray-400">by {doc.author}</p>
               )}
             </div>
           </div>
-          <button onClick={onClose}
-            className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors flex-shrink-0">
+
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700">
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        {/* Body */}
-        <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-6">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-medium text-emerald-700">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
-              Active
-            </span>
-            {doc.type && doc.type !== "unknown" && (
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-50 border border-gold/30 text-xs font-medium text-gold capitalize">
-                {doc.type}
-              </span>
-            )}
-          </div>
+        {/* body */}
+        <div className="p-6 overflow-y-auto space-y-5">
 
-          <div className="bg-gray-50 rounded-xl border border-gray-100 px-4 py-1">
-            <MetaRow icon={Hash} label="Doc No." value={<span className="font-mono font-bold text-gray-700">{doc.id}</span>} />
+          <div className="bg-gray-50 rounded-lg border px-4">
+            <MetaRow icon={Hash} label="Doc" value={doc.id} />
             <MetaRow
               icon={User}
               label="Author"
               value={
                 doc.author && doc.author !== "Unknown"
                   ? doc.author
-                  : <span className="text-gray-400 text-xs italic">No author recorded</span>
+                  : <span className="italic text-gray-400">No author</span>
               }
             />
+
             {doc.year > 0 && (
               <MetaRow icon={Calendar} label="Year" value={doc.year} />
             )}
+
             {doc.type && doc.type !== "unknown" && (
-              <MetaRow icon={Layers} label="Type" value={<span className="capitalize">{doc.type}</span>} />
+              <MetaRow icon={Layers} label="Type" value={doc.type} />
             )}
+
             <MetaRow
               icon={ExternalLink}
               label="URL"
               value={
-                doc.url ? (
-                  <a href={doc.url} target="_blank" rel="noopener noreferrer"
-                    className="text-gold hover:underline text-xs break-all">
-                    {doc.url}
-                  </a>
-                ) : (
-                  <span className="text-gray-400 text-xs">No source available</span>
-                )
+                doc.url
+                  ? <a href={doc.url} target="_blank" className="text-gold underline break-all">{doc.url}</a>
+                  : <span className="text-gray-400">No source</span>
               }
             />
-            {doc.page_number != null && (
-              <MetaRow icon={Hash} label="Page" value={`p. ${doc.page_number}`} />
-            )}
           </div>
 
-          {doc.tags && doc.tags.length > 0 && (
+
+          {doc.tags?.length > 0 && (
             <div>
-              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-2">
-                <Tag className="h-3.5 w-3.5" /> Tags
-              </h3>
+              <p className="text-xs text-gray-400 mb-2">Tags</p>
               <div className="flex flex-wrap gap-2">
-                {doc.tags.map((tag, idx) => (
-                  <span key={idx} className="px-2.5 py-1 bg-gray-100 border border-gray-200 rounded-lg text-xs text-gray-600">
-                    {tag}
+                {doc.tags.map((t, i) => (
+                  <span key={i} className="px-2 py-1 bg-gray-100 text-xs rounded">
+                    {t}
                   </span>
                 ))}
               </div>
@@ -133,16 +129,14 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
           )}
         </div>
 
-        {/* Footer */}
-        <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3">
+        {/* footer */}
+        <div className="flex justify-end gap-2 p-4 border-t">
           {doc.url && (
-            <a href={doc.url} target="_blank" rel="noopener noreferrer"
-              className="px-5 py-2 rounded-lg bg-gold text-white text-sm font-medium hover:bg-gold-light transition-colors flex items-center gap-2">
-              <ExternalLink className="h-3.5 w-3.5" /> Open Source
+            <a href={doc.url} target="_blank" className="bg-gold text-white px-4 py-2 rounded text-sm">
+              Open Source
             </a>
           )}
-          <button onClick={onClose}
-            className="px-5 py-2 rounded-lg bg-gray-100 border border-gray-200 text-sm text-gray-700 hover:bg-gray-200 transition-colors">
+          <button onClick={onClose} className="bg-gray-100 px-4 py-2 rounded text-sm">
             Close
           </button>
         </div>
@@ -151,339 +145,142 @@ function DocumentModal({ doc, onClose }: { doc: Document; onClose: () => void })
   );
 }
 
+// main functions here
 export default function Documents() {
-  const [searchParams] = useSearchParams();
+  const [params] = useSearchParams();
 
-  const [allDocuments, setAllDocuments]   = useState<Document[]>([]);
-  const [loading, setLoading]             = useState(true);
-  const [searchQuery, setSearchQuery]     = useState("");
-  const [searching, setSearching]         = useState(false);
-  const [isSearchMode, setIsSearchMode]   = useState(false);
-  const [searchResults, setSearchResults] = useState<Document[]>([]);
+  const [docs, setDocs] = useState<Document[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Filters — year removed
-  const [types,   setTypes]   = useState<string[]>([]);
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<Document[]>([]);
+  const [isSearch, setIsSearch] = useState(false);
+
+  const [types, setTypes] = useState<string[]>([]);
   const [authors, setAuthors] = useState<string[]>([]);
 
-  const [selectedType,   setSelectedType]   = useState<string>("all");
-  const [selectedAuthor, setSelectedAuthor] = useState<string>("all");
-  const [showFilters,    setShowFilters]    = useState(false);
+  const [type, setType] = useState("all");
+  const [author, setAuthor] = useState("all");
 
-  const [currentPage, setCurrentPage] = useState(1);
-  const [error, setError]             = useState<string | null>(null);
-  const [selectedDoc, setSelectedDoc] = useState<Document | null>(null);
+  const [page, setPage] = useState(1);
+  const [selected, setSelected] = useState<Document | null>(null);
 
   useEffect(() => {
-    getDocumentTypes().then(setTypes).catch(() => {});
-    getDocumentAuthors().then(setAuthors).catch(() => {});
+    getDocumentTypes().then(setTypes);
+    getDocumentAuthors().then(setAuthors);
   }, []);
 
-  const loadAllDocuments = useCallback(async () => {
+  const loadDocs = useCallback(async () => {
     setLoading(true);
-    setIsSearchMode(false);
+
     try {
-      let allDocs: Document[] = [];
-      let page = 0;
-      const limit = 500;
-      let hasMore = true;
-      while (hasMore) {
-        const data = await getAllDocuments(limit, page * limit);
-        const docs = data.documents ?? [];
-        allDocs = [...allDocs, ...docs];
-        hasMore = docs.length === limit;
-        page++;
+      let all: Document[] = [];
+      let offset = 0;
+      let done = false;
+
+      while (!done) {
+        const res = await getAllDocuments(500, offset);
+        const chunk = res.documents || [];
+
+        all = [...all, ...chunk];
+        done = chunk.length < 500;
+        offset += 500;
       }
-      setAllDocuments(sortByIdAsc(allDocs));
+
+
+      setDocs(sortDocs(all));
     } catch {
-      setError("Failed to load documents. Is the backend running?");
+      console.error("failed loading docs");
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    const q = searchParams.get("search");
+    const q = params.get("search");
+
     if (q) {
-      setSearchQuery(q);
-      setSearching(true);
-      setIsSearchMode(true);
+      setQuery(q);
+      setIsSearch(true);
+
       searchDocuments(q, 500)
-        .then((data) => {
-          setSearchResults(data.results || []);
-          if (data.results?.length === 1) setSelectedDoc(data.results[0]);
-        })
-        .catch(console.error)
-        .finally(() => { setSearching(false); setLoading(false); });
-      loadAllDocuments();
+        .then((d) => setResults(d.results || []))
+        .finally(() => setLoading(false));
+
+      loadDocs();
     } else {
-      loadAllDocuments();
+      loadDocs();
     }
-  }, [loadAllDocuments, searchParams]);
+  }, [params, loadDocs]);
 
-  const handleSearch = async () => {
-    if (!searchQuery.trim()) { setIsSearchMode(false); setCurrentPage(1); return; }
-    setSearching(true);
-    setIsSearchMode(true);
-    try {
-      const data = await searchDocuments(searchQuery, 500);
-      setSearchResults(data.results || []);
-      setCurrentPage(1);
-    } catch (err) {
-      console.error("Search error:", err);
-    } finally {
-      setSearching(false);
+
+  const visibleDocs = (isSearch ? results : docs).filter((d) => {
+    if (type !== "all" && d.type !== type) return false;
+
+    if (author !== "all") {
+      if (author === "__no_author__") {
+        if (d.author && d.author !== "Unknown") return false;
+      } else if (d.author !== author) return false;
     }
-  };
 
-  const handleClearSearch = () => {
-    setSearchQuery("");
-    setIsSearchMode(false);
-    setCurrentPage(1);
-  };
-
-  const activeFilterCount = [
-    selectedType !== "all",
-    selectedAuthor !== "all",
-  ].filter(Boolean).length;
-
-  const baseDocuments = isSearchMode ? searchResults : allDocuments;
-  const filteredDocuments = baseDocuments.filter((doc) => {
-    if (selectedType !== "all" && doc.type !== selectedType) return false;
-    if (selectedAuthor !== "all") {
-      if (selectedAuthor === "__no_author__") {
-        if (doc.author && doc.author !== "Unknown") return false;
-      } else {
-        if (doc.author !== selectedAuthor) return false;
-      }
-    }
     return true;
   });
 
-  const totalDocuments = filteredDocuments.length;
-  const totalPages     = Math.ceil(totalDocuments / PAGE_SIZE);
-  const pagedDocuments = isSearchMode
-    ? filteredDocuments
-    : filteredDocuments.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
-
-  const noAuthorCount = allDocuments.filter(
-    (d) => !d.author || d.author === "Unknown"
-  ).length;
+  const pageDocs = isSearch
+    ? visibleDocs
+    : visibleDocs.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <>
-      <div className="flex flex-col h-full bg-gray-100">
+      <div className="p-6">
 
-        {/* Header */}
-        <div className="border-b border-gray-200 px-6 py-4 bg-white shadow-sm">
-          <h1 className="text-xl font-display font-bold text-gray-900">Research Documents</h1>
-          <p className="text-xs text-gray-400 mt-0.5">
-            {loading
-              ? "Loading knowledge base…"
-              : `${allDocuments.length} documents in the knowledge base`}
-          </p>
+        {/* search */}
+        <div className="flex gap-2 mb-4">
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search..."
+            className="border px-3 py-2 rounded w-full"
+          />
+          <button
+            onClick={async () => {
+              if (!query.trim()) return;
+
+              setIsSearch(true);
+              const r = await searchDocuments(query, 500);
+              setResults(r.results || []);
+            }}
+            className="bg-gold text-white px-4 rounded"
+          >
+            Search
+          </button>
         </div>
 
-        {/* Search + Filters */}
-        <div className="px-6 py-4 border-b border-gray-200 bg-white">
-          <div className="flex gap-3">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search by title, author, or ID…"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-                className="w-full bg-white border border-gray-300 rounded-lg pl-10 pr-10 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gold/30 focus:border-gold"
-              />
-              {searchQuery && (
-                <button onClick={handleClearSearch}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                  <X className="h-4 w-4" />
-                </button>
-              )}
-            </div>
-            <button onClick={handleSearch} disabled={searching}
-              className="px-6 py-2.5 bg-gold text-white rounded-lg text-sm font-medium hover:bg-gold-light transition-colors disabled:opacity-50 shadow-sm">
-              {searching ? "Searching…" : "Search"}
-            </button>
-            <button onClick={() => setShowFilters(!showFilters)}
-              className={`px-4 py-2.5 rounded-lg border text-sm flex items-center gap-2 transition-colors relative ${
-                showFilters
-                  ? "bg-gold text-white border-gold"
-                  : "border-gray-300 text-gray-500 hover:text-gray-900 hover:border-gray-400 bg-white"
-              }`}>
-              <Filter className="h-4 w-4" />
-              Filters
-              {activeFilterCount > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
-                  {activeFilterCount}
-                </span>
-              )}
-            </button>
-          </div>
-
-          {showFilters && (
-            <div className="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
-              {/* Two columns: Type + Author */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">Document Type</label>
-                  <select value={selectedType}
-                    onChange={(e) => { setSelectedType(e.target.value); setCurrentPage(1); }}
-                    className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-800">
-                    <option value="all">All Types</option>
-                    {types.map((t) => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">
-                    Author / Source
-                    {noAuthorCount > 0 && (
-                      <span className="text-gray-400 ml-1">· {noAuthorCount} without author</span>
-                    )}
-                  </label>
-                  <select value={selectedAuthor}
-                    onChange={(e) => { setSelectedAuthor(e.target.value); setCurrentPage(1); }}
-                    className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-800">
-                    <option value="all">All Sources</option>
-                    {noAuthorCount > 0 && (
-                      <option value="__no_author__">No author recorded ({noAuthorCount})</option>
-                    )}
-                    {authors.map((a) => <option key={a} value={a}>{a}</option>)}
-                  </select>
-                </div>
+        {/* list */}
+        {loading ? (
+          <p>Loading...</p>
+        ) : (
+          <div className="space-y-3">
+            {pageDocs.map((d) => (
+              <div
+                key={d.id}
+                className="border rounded p-4 hover:shadow cursor-pointer"
+                onClick={() => setSelected(d)}
+              >
+                <p className="font-semibold">{d.title}</p>
+                <p className="text-xs text-gray-400">
+                  {d.author || "Unknown"} • {d.type || "unknown"}
+                </p>
               </div>
-              {activeFilterCount > 0 && (
-                <button
-                  onClick={() => { setSelectedType("all"); setSelectedAuthor("all"); setCurrentPage(1); }}
-                  className="mt-3 text-xs text-gold hover:underline font-medium">
-                  Clear all filters
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Status + pagination */}
-        <div className="px-6 py-2 text-xs text-gray-500 flex justify-between items-center border-b border-gray-200 bg-white">
-          <span>
-            {isSearchMode
-              ? `${filteredDocuments.length} result${filteredDocuments.length !== 1 ? "s" : ""} for "${searchQuery}"`
-              : `Showing ${Math.min((currentPage - 1) * PAGE_SIZE + 1, totalDocuments)}–${Math.min(currentPage * PAGE_SIZE, totalDocuments)} of ${totalDocuments} documents`}
-            {activeFilterCount > 0 && (
-              <span className="ml-2 text-gold font-medium">
-                ({activeFilterCount} filter{activeFilterCount > 1 ? "s" : ""} active)
-              </span>
-            )}
-          </span>
-          {!isSearchMode && totalPages > 1 && (
-            <div className="flex items-center gap-2">
-              <button onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} disabled={currentPage === 1}
-                className="p-1 rounded hover:bg-gray-100 disabled:opacity-50">
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-              <span>Page {currentPage} of {totalPages}</span>
-              <button onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}
-                className="p-1 rounded hover:bg-gray-100 disabled:opacity-50">
-                <ChevronRight className="h-4 w-4" />
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Document list */}
-        <div className="flex-1 overflow-y-auto px-6 py-5">
-          {error && (
-            <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{error}</div>
-          )}
-          {loading ? (
-            <div className="flex items-center justify-center h-64">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gold" />
-            </div>
-          ) : pagedDocuments.length === 0 ? (
-            <div className="text-center py-12">
-              <FileText className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-              <p className="text-gray-500">No documents found</p>
-              {(searchQuery || activeFilterCount > 0) && (
-                <button
-                  onClick={() => { handleClearSearch(); setSelectedType("all"); setSelectedAuthor("all"); }}
-                  className="mt-3 text-gold hover:text-gold-dark text-sm">
-                  Clear search &amp; filters
-                </button>
-              )}
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {pagedDocuments.map((doc) => (
-                <div key={doc.id}
-                  className="bg-white rounded-2xl border border-gray-200 px-6 py-5 hover:border-gold/50 hover:shadow-md transition-all">
-                  <div className="flex items-start gap-4">
-                    <div className="flex-1 min-w-0">
-                      {/* Badge + title */}
-                      <div className="flex items-start gap-3 mb-2">
-                        <div className="w-9 h-9 rounded-lg bg-gold/10 border border-gold/30 flex items-center justify-center flex-shrink-0 mt-0.5">
-                          <span className="text-gold text-xs font-bold">{doc.id}</span>
-                        </div>
-                        <h3 className="text-base font-display font-semibold text-gray-900 leading-snug flex-1 min-w-0">
-                          {doc.title}
-                        </h3>
-                      </div>
-
-                      {/* Metadata chips */}
-                      <div className="pl-12 flex items-center gap-2 text-xs text-gray-400 flex-wrap">
-                        {doc.author && doc.author !== "Unknown"
-                          ? <span>{doc.author}</span>
-                          : <span className="italic text-gray-300">No author</span>}
-                        {doc.type && doc.type !== "unknown" && (
-                          <><span>•</span><span className="capitalize">{doc.type}</span></>
-                        )}
-                        {doc.url ? (
-                          <><span>•</span>
-                          <a href={doc.url} target="_blank" rel="noopener noreferrer"
-                            className="text-gold hover:underline truncate max-w-[200px]"
-                            onClick={(e) => e.stopPropagation()}>
-                            View source ↗
-                          </a></>
-                        ) : (
-                          <><span>•</span><span className="text-gray-300">No source</span></>
-                        )}
-                        <span>•</span>
-                        <span className="inline-flex items-center gap-1 text-emerald-600">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
-                          Active
-                        </span>
-                      </div>
-
-                      {/* Tags */}
-                      {doc.tags && doc.tags.length > 0 && (
-                        <div className="pl-12 flex flex-wrap gap-1.5 mt-2">
-                          {doc.tags.slice(0, 8).map((tag, idx) => (
-                            <span key={idx} className="px-2 py-0.5 bg-gray-100 rounded text-xs text-gray-500">{tag}</span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* View button */}
-                    <div className="flex-shrink-0 self-start">
-                      <button onClick={() => setSelectedDoc(doc)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-50 border border-gold/30 text-xs font-medium text-gold hover:bg-red-100 transition-colors whitespace-nowrap">
-                        <Eye className="h-3.5 w-3.5" />
-                        View
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
-      {selectedDoc && (
-        <DocumentModal doc={selectedDoc} onClose={() => setSelectedDoc(null)} />
+      {selected && (
+        <DocumentModal doc={selected} onClose={() => setSelected(null)} />
       )}
     </>
   );
+  
 }
