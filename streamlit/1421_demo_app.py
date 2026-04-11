@@ -24,20 +24,19 @@ import warnings
 #
 warnings.filterwarnings('ignore')
 
-# Page config
+# Page configuration
 st.set_page_config(
     page_title="1421 Geographical Research AI",
     page_icon="🗺️",
     layout="wide"
 )
 
-
 @st.cache_resource
 def load_vector_databases():
     """Load vector databases for semantic search"""
 
     databases = {}
-    vector_dir = Path("scripts/vector_databases")
+    vector_dir = Path("vector_databases\\main_index")
 
     if vector_dir.exists():
         for db_folder in vector_dir.iterdir():
@@ -969,7 +968,6 @@ def main():
             - "Map the treasure fleet's journey to India and Arabia"
             - "What ports did Ming dynasty ships visit in Southeast Asia?"
             """)
-
         with col2:
             st.markdown("""
             **🗺️ American Discoveries:**
@@ -978,12 +976,11 @@ def main():
             - "Where are Ming dynasty artifacts supposedly found in South America?"
             - "Map the possible Chinese route across the Pacific"
             """)
-
         # Quick database stats
+        
         if databases:
             total_docs = sum(len(db['documents']) for db in databases.values())
             st.success(f"✅ Ready to search {total_docs:,} documents across {len(databases)} databases")
-
 
 # Run the app
 if __name__ == "__main__":
