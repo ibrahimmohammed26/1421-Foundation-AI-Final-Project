@@ -278,7 +278,7 @@ class VectorDatabaseCreator:
 # =========================================================
 
 def process_zip(zip_path, db, extractor):
-    zip_path = Path(zip_path)
+    zip_path = Path("data") / zip_path  # will be saved in the data folder
 
     if not zip_path.exists():
         print(f"Missing: {zip_path}")

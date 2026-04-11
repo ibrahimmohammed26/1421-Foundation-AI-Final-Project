@@ -2,34 +2,40 @@ import os
 from openai import OpenAI
 from dotenv import load_dotenv
 
-# Load environment variables
+"""Check if our OpenAI API key is working properly and can make a basic request"""
+
 load_dotenv()
-
-# Get API key
+# Get API key from environment
 api_key = os.getenv("OPENAI_API_KEY")
-print(f"API Key loaded: {api_key[:15]}...{api_key[-10:] if api_key else 'NOT FOUND'}")
 
-if not api_key:
-    print("❌ No API key found!")
+if api_key:
+    print(f"API key loaded: {api_key[:15]}...{api_key[-10:]}")
+else:
+    print("No API key found")
     exit(1)
 
-# Try direct OpenAI call
+# Try a basic OpenAI request to confirm everything works
 try:
     client = OpenAI(api_key=api_key)
-    
+
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",
-        messages=[{"role": "user", "content": "Say 'Hello, world!'"}],
+        messages=[
+            {"role": "user", "content": "Say 'Hello, world!'"}
+        ],
         max_tokens=10
     )
-    
-    print(f"✅ OpenAI direct call successful!")
-    print(f"Response: {response.choices[0].message.content}")
-    
+    print("OpenAI call successful")
+    print("Response:", response.choices[0].message.content)
+
 except Exception as e:
-    print(f"❌ OpenAI direct call failed: {e}")
-    
-    # Check if it's an authentication error
-    if "authentication" in str(e).lower() or "api key" in str(e).lower():
-        print("\nThis is an AUTHENTICATION error. Your API key is likely invalid or expired.")
-        print("Try generating a new API key at: https://platform.openai.com/api-keys")
+    print(f"OpenAI call failed: {e}")
+
+    # Basic check for common auth issues
+    error_text = str(e).lower()
+
+
+    if "authentication" in error_text or "api key" in error_text:
+        print("\nThis looks like an authentication issue.")
+        print("Your API key may be invalid, missing, or expired.")
+        print("You can generate a new one here: https://platform.openai.com/api-keys")
