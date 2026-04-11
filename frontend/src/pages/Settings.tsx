@@ -269,69 +269,6 @@ export default function Settings() {
             </div>
           </div>
 
-          {/* ── Submit Feedback ───────────────────────────────────────── */}
-          <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-            <h3 className="text-base font-display font-bold text-gray-900 mb-1 flex items-center gap-2">
-              <Mail className="h-4 w-4 text-gold" /> Submit Feedback
-            </h3>
-            <p className="text-xs text-gray-400 mb-4">
-              Share your thoughts, report issues, or suggest improvements. Feedback is sent directly to the development team.
-            </p>
-            <div className="space-y-3">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">Name (optional)</label>
-                  <input type="text" value={feedbackName}
-                    onChange={(e) => setFeedbackName(e.target.value)}
-                    placeholder="Your name"
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gold/30 focus:border-gold" />
-                </div>
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">Email <span className="text-red-500">*</span></label>
-                  <input type="email" value={feedbackEmail}
-                    onChange={(e) => setFeedbackEmail(e.target.value)}
-                    placeholder="your@email.com"
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gold/30 focus:border-gold" />
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Feedback Type</label>
-                <select value={feedbackType} onChange={(e) => setFeedbackType(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-gold/30 focus:border-gold">
-                  <option>General</option>
-                  <option>Bug Report</option>
-                  <option>Feature Request</option>
-                  <option>Document Issue</option>
-                  <option>AI Response Quality</option>
-                  <option>Data Map Issue</option>
-                  <option>Other</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Message <span className="text-red-500">*</span></label>
-                <textarea value={feedbackMessage}
-                  onChange={(e) => setFeedbackMessage(e.target.value)}
-                  placeholder="Describe your feedback…"
-                  rows={4}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gold/30 focus:border-gold resize-none" />
-              </div>
-              {feedbackError && (
-                <p className="text-xs text-red-600">{feedbackError}</p>
-              )}
-              {feedbackSent && (
-                <div className="flex items-center gap-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
-                  <Check className="h-3.5 w-3.5" /> Feedback sent — thank you!
-                </div>
-              )}
-              <button onClick={handleSendFeedback} disabled={feedbackSending}
-                className="w-full py-2.5 bg-gold text-white rounded-lg text-sm font-medium hover:bg-gold-light transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
-                {feedbackSending
-                  ? <><RefreshCw className="h-4 w-4 animate-spin" /> Sending…</>
-                  : <><Send className="h-4 w-4" /> Send Feedback</>}
-              </button>
-            </div>
-          </div>
-
           {/* ── About ─────────────────────────────────────────────────── */}
           <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
             <h3 className="text-base font-display font-bold text-gray-900 mb-3 flex items-center gap-2">
