@@ -94,8 +94,8 @@ export default function Dashboard() {
       icon: PlusCircle,
       title: "Request Additional Data",
       description:
-        "Know of a webpage, article, or online resource related to Chinese maritime history or the 1421 hypothesis that isn't in the knowledge base? Submit a Data Request via the Feedback page with the URL of the source. The research team reviews all submissions and approved sources are added to the knowledge base in future updates.",
-      example: "Go to Feedback → select 'Data Request' → paste the URL of the source",
+        "Know of a webpage, article, or online resource related to Chinese maritime history or the 1421 hypothesis that isn't in the knowledge base? Submit a Data Request via the Feedback page. A URL is recommended where possible, but if the source has no URL, simply describe where it is from — such as a book title, author, or publication name. The research team reviews all submissions and approved sources are added to the knowledge base in future updates.",
+      example: "Go to Feedback → select 'Data Request' → include a URL or describe where the source is from",
     },
     {
       icon: Send,
